@@ -1,0 +1,68 @@
+[project]
+name = "murmurflow"
+version = "0.1.0"
+description = "Press-to-talk dictation for macOS that never leaves your machine. A free, local alternative to cloud dictation apps."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Hannes Reinsch" }]
+requires-python = ">=3.11"
+keywords = ["dictation", "speech-to-text", "whisper", "macos", "voice", "local", "privacy"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: MacOS X",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+# No runtime dependencies, and that is a feature rather than an accident: everything here is the
+# Python standard library talking to two Homebrew binaries (ffmpeg, whisper-cpp) and to macOS
+# itself through ctypes. Nothing to break on a Python upgrade, nothing to audit, no wheel to trust.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/hannesreinsch/murmurflow"
+Issues = "https://github.com/hannesreinsch/murmurflow/issues"
+
+[project.scripts]
+murmurflow = "murmurflow.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["murmurflow"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "BLE", "S"]
+ignore = [
+    "E501",  # long lines are checked by the formatter, which knows about strings
+    # This whole tool is a thin wrapper around external binaries and a loopback HTTP call, so these
+    # three fire on every legitimate line and would be blanket-suppressed at each one. Every argv
+    # here is fixed and built in code; the ONE place a user-supplied string is executed is
+    # `dictate.polish`, which is S602 (shell=True) and stays enforced.
+    "S603",  # subprocess call with a list argv we constructed ourselves
+    "S607",  # partial executable path — resolved through `resolve_bin`, which searches explicitly
+    "S310",  # urlopen: the only URLs are 127.0.0.1 and a pinned https host
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "E402"]  # asserts are the point of a test; sys.path comes before the import
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

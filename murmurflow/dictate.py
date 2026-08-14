@@ -79,7 +79,7 @@ DEFAULT_INPUT_NAME = ""
 # whisper-server's loopback port. High and odd, to miss the usual 8080/5000 collisions — and NOT
 # 8477, which is whisper-server's own commonly-copied example port. `start_server` treats any server
 # already answering here as ours and reuses it, so landing on a port someone else's whisper-server
-# occupies means silently transcribing against THEIR model and ignoring `whisperModel` entirely.
+# occupies means silently transcribing against THEIR model and ignoring `model` entirely.
 # Found exactly that way: a second tool on 8477 answered every request and the configured model
 # never loaded. Change it with `murmurflow config set port <n>` if something else wants this one.
 DEFAULT_PORT = 8479

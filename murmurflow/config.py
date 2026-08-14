@@ -20,16 +20,16 @@ HOME_ENV = "MURMURFLOW_HOME"
 # Recognized keys, and what they do. Kept here rather than in a schema because the only consumer
 # that needs the list is `murmurflow config` printing it.
 KEYS: dict[str, str] = {
-    "trigger": "hold-to-talk key: right_option (default), right_command, fn, right_shift, right_control",
+    "trigger": "hold-to-talk key: left_control (default), right_command, right_option, right_shift, fn",
     "doubleTap": "true = tap the trigger twice to start, twice to stop (instead of holding)",
-    "whisperModel": "path to a ggml model file, overriding the best one found in ~/.murmurflow/models",
-    "whisperLanguage": "the spoken language, e.g. en / de. Default auto (~1s slower per clip)",
+    "model": "path to a ggml model file, overriding the best one found in ~/.murmurflow/models/",
+    "language": "the spoken language, e.g. en / de. Default auto, which costs ~0.7s per clip",
     "inputName": "substring of the microphone name to record from. Default: system default",
     "vocabulary": "list of proper nouns to bias the transcriber toward (names, jargon, acronyms)",
     "cue": "tone preset: glass (default), soft, pure, wood, bell, or off for silence",
     "polishCommand": "shell command receiving the transcript on stdin and printing the cleaned text",
     "keepAudio": "true = keep the last clip at ~/.murmurflow/audio/last.wav for debugging",
-    "port": "loopback port for the warm whisper-server. Default 8477",
+    "port": "loopback port for the warm whisper-server. Default 8479",
 }
 
 

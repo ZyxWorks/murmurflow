@@ -185,12 +185,12 @@ def test_an_explicit_model_path_wins_over_the_preference_order():
     (models / "ggml-large-v3-turbo.bin").write_bytes(b"x")
     chosen = models / "ggml-small.bin"
     chosen.write_bytes(b"x")
-    config.set_value("whisperModel", str(chosen))
+    config.set_value("model", str(chosen))
     assert whisper.model() == str(chosen)
 
 
 def test_a_configured_model_that_does_not_exist_falls_back_instead_of_breaking():
-    config.set_value("whisperModel", "/nope/ggml-large-v3.bin")
+    config.set_value("model", "/nope/ggml-large-v3.bin")
     assert whisper.model() == "" or Path(whisper.model()).is_file()
 
 
@@ -198,7 +198,7 @@ def test_language_defaults_to_auto_rather_than_forcing_english():
     # Forcing `en` onto German speech makes whisper TRANSLATE instead of transcribe, which is why
     # this must never quietly default to a language.
     assert whisper.language() == "auto"
-    config.set_value("whisperLanguage", "de")
+    config.set_value("language", "de")
     assert whisper.language() == "de"
 
 

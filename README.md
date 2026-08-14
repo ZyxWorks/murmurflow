@@ -29,24 +29,40 @@ So this is roughly 2,000 lines of standard library gluing those together.
 
 ### Speed, honestly
 
-Measured on an M4 Pro, macOS 26, `large-v3-turbo`, an 11 second clip, 8 threads:
+Measured on an M4 Pro, macOS 26, `large-v3-turbo`, an 11 second clip, 8 threads, nothing else
+resident:
 
 | step | seconds |
 |---|---|
+| transcribe, warm server, `language` **pinned** | **1.2** |
+| transcribe, warm server, `language` on `auto` | 1.9 |
+| transcribe, cold `whisper-cli`, model page-cached | 1.7-2.2 |
 | first transcription after boot (1.6 GB model off disk) | 13.3 |
-| cold `whisper-cli`, model file in the page cache | 2.2 |
-| warm `whisper-server`, model resident | 2.3 |
 | microphone open, first ever | 9.9 |
 | microphone open, thereafter | 0.3 |
 
-Once the model file is in the OS page cache, **warm and cold are the same within noise**. The warm
-`whisper-server` earns its place on the *first* transcription — 13.3s against 2.3s — which is
-exactly the one you form your opinion on, and exactly the one a freshly booted laptop serves. So the
-daemon starts the server at launch and pays that cost while nobody is waiting.
+Two things in that table are worth more than the headline number:
 
-These numbers move a lot with your machine, your model and what else is resident: two
-whisper-servers on one Mac roughly doubled them here. Measure your own before believing any of them,
-including ours. `murmurflow transcribe some.wav` is enough to get a figure.
+**The warm server is not what makes this fast in steady state.** Once the model file is in the OS
+page cache, cold and warm are within noise of each other. What a resident `whisper-server` actually
+buys is the *first* transcription of the day — 13.3s down to 1.2s — which is exactly the one you
+form your opinion on, and exactly the one a freshly booted laptop serves. So the daemon starts it at
+launch and pays that cost while nobody is waiting.
+
+**Pinning the language is the real lever, worth ~0.7s per sentence.** It is the one setting most
+worth changing:
+
+```sh
+murmurflow config set language en
+```
+
+Only do it if you really do speak one language into it. Pinning the *wrong* language is worse than
+leaving it on `auto`: forcing `en` onto German speech makes whisper translate rather than
+transcribe, and a fluent English paraphrase of what you said is far more confusing than a slow
+transcript. That is why the default stays `auto`.
+
+These numbers move a lot with your machine and what else is resident — two whisper-servers on one
+Mac roughly doubled every row. Measure your own before believing any of them, including ours.
 
 ## What it does not do
 
@@ -103,7 +119,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 |---|---|
 | `trigger` | the hold key. Default `left_control` — where macOS puts dictation, so your hand knows it |
 | `doubleTap` | `true` = tap twice to start, twice to stop, instead of holding |
-| `whisperLanguage` | `en`, `de`, … Default `auto`. Pin it only if you always speak one language |
+| `language` | `en`, `de`, … Default `auto`. Pinning saves ~0.7s per sentence, so pin it if you can |
 | `inputName` | part of a microphone name. Default: system default. `murmurflow devices` lists them |
 | `vocabulary` | proper nouns to bias the transcriber toward |
 | `cue` | tone preset: `glass`, `soft`, `pure`, `wood`, `bell`, `system`, or `off` |

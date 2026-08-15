@@ -180,7 +180,9 @@ indistinguishable. One run of each separates them.
   microphone hot. (This is not hypothetical: it was found in development as three orphaned
   recorders, 4.5 hours each, 1.4 GB of audio, microphone open the whole time.)
 - The transcript is never inspected, logged or filtered. It goes to your clipboard, then your
-  cursor, and your previous clipboard contents are put back.
+  cursor, and your previous clipboard contents are put back — all of them, not just text. Copy a
+  screenshot while a dictation is in flight and the screenshot is still on your clipboard
+  afterwards.
 - Nothing in this repo makes a network request except `murmurflow setup`, which downloads the model
   from Hugging Face.
 

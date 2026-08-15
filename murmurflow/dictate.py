@@ -876,12 +876,49 @@ def polish(text: str, *, timeout: float = 20.0) -> str:
 
 # --- injection --------------------------------------------------------------------------------
 
-# AppleScript that pastes whatever is on the clipboard into the frontmost app. Chosen over
-# typing the string character-by-character (`keystroke "<text>"`) because paste is O(1) instead of
-# O(chars) — a 300-character dictation types visibly, one letter at a time, over several seconds —
-# and because it is immune to the AppleScript quoting traps and the keyboard-layout mangling that
-# synthetic per-character events hit with German umlauts.
-_PASTE_SCRIPT = 'tell application "System Events" to keystroke "v" using command down'
+# How long to let the target app read the pasteboard before we put your own clipboard back.
+# Measured generously: apps read the pasteboard synchronously on Cmd-V, but the event itself is
+# delivered asynchronously, so this covers event delivery, not the read.
+_PASTE_SETTLE = 0.35
+
+# The whole injection, in ONE AppleScript. Paste is chosen over typing the string
+# character-by-character (`keystroke "<text>"`) because it is O(1) instead of O(chars) — a
+# 300-character dictation types visibly, one letter at a time, over several seconds — and because
+# it is immune to the keyboard-layout mangling that synthetic per-character events hit with German
+# umlauts. The text arrives through `argv`, so the AppleScript quoting traps of an inlined string
+# never apply either.
+#
+# Save and restore live INSIDE the script because `the clipboard as record` is the only thing that
+# can hold what was there. It carries EVERY flavour the pasteboard offers — a copied image, a
+# styled snippet, a file — where `pbpaste` sees text and nothing else. That gap was a real loss,
+# not a theoretical one: copy a screenshot while a dictation is in flight and the transcript ate
+# it, because a `pbpaste` that returned "" read as "nothing to put back".
+#
+# Order is the design: save, overwrite, paste, settle, restore. If the paste raises — Secure Input,
+# no Accessibility grant — the script aborts BEFORE the restore, leaving your words on the
+# clipboard for a manual Cmd-V, which is exactly what the error text promises. Both clipboard
+# steps are wrapped: an empty pasteboard cannot be read as a record, and neither failure is worth
+# losing an injected sentence over.
+#
+# Cost: restoring a 12 MB screenshot re-materializes ~9 derived flavours and takes ~2s. It runs
+# AFTER the paste is already on screen, so it delays nothing you are looking at. Saving is cheap
+# (the flavours are already resolved).
+_INJECT_SCRIPT = f"""
+on run argv
+	set saved to missing value
+	try
+		set saved to (the clipboard as record)
+	end try
+	set the clipboard to (item 1 of argv)
+	tell application "System Events" to keystroke "v" using command down
+	delay {_PASTE_SETTLE}
+	if saved is not missing value then
+		try
+			set the clipboard to saved
+		end try
+	end if
+end run
+"""
 
 
 def secure_input_active() -> bool:
@@ -905,20 +942,12 @@ def secure_input_active() -> bool:
         return False
 
 
-def clipboard_get() -> str:
-    """Current clipboard text (``''`` if empty/unreadable)."""
-    binary = resolve_bin("pbpaste")
-    if not binary:
-        return ""
-    try:
-        proc = subprocess.run(binary, capture_output=True, text=True, timeout=5, check=False)
-        return proc.stdout or ""
-    except (OSError, subprocess.SubprocessError):
-        return ""
-
-
 def clipboard_set(text: str) -> bool:
-    """Put ``text`` on the clipboard. ``True`` on success."""
+    """Put ``text`` on the clipboard. ``True`` on success.
+
+    Only used when injection is refused before it starts. Everything on the happy path goes
+    through :data:`_INJECT_SCRIPT`, which has to hold the old clipboard anyway.
+    """
     binary = resolve_bin("pbcopy")
     if not binary:
         return False
@@ -931,13 +960,13 @@ def clipboard_set(text: str) -> bool:
         return False
 
 
-def inject(text: str, *, restore_clipboard: bool = True) -> tuple[bool, str]:
+def inject(text: str) -> tuple[bool, str]:
     """Type ``text`` into whatever app has focus. ``(ok, problem)``; never raises.
 
-    Clipboard-swap + synthetic Cmd-V, then the previous clipboard is put back. The restore is the
-    fiddly part: paste is asynchronous, so restoring immediately races the target app and pastes the
-    OLD clipboard instead. We wait :data:`_PASTE_SETTLE` before restoring — long enough for any app
-    to have read the pasteboard, short enough that nobody can beat it by hand.
+    Clipboard-swap + synthetic Cmd-V, then whatever was on the clipboard — text, an image, a file
+    — is put back. The restore is the fiddly part: paste is asynchronous, so restoring immediately
+    races the target app and pastes the OLD clipboard instead. :data:`_PASTE_SETTLE` is the wait —
+    long enough for any app to have read the pasteboard, short enough that nobody beats it by hand.
 
     Requires the **Accessibility** TCC grant for whichever process runs this (Terminal, or the
     launchd-run python). That is the one permission dictation genuinely cannot avoid: it is what
@@ -946,22 +975,27 @@ def inject(text: str, *, restore_clipboard: bool = True) -> tuple[bool, str]:
     text = (text or "").strip()
     if not text:
         return False, "nothing to type"
-    if not resolve_bin("pbcopy") or not resolve_bin("osascript"):
-        return False, "pbcopy/osascript missing — is this macOS?"
+    if not resolve_bin("osascript"):
+        return False, "osascript missing — is this macOS?"
     if secure_input_active():
+        # The copy has to happen HERE, not be assumed. This branch returns before the inject
+        # script runs, and it used to promise "the text is on your clipboard" over a clipboard
+        # nothing had ever been written to — so the recovery Cmd-V pasted whatever was there
+        # before, and the dictation was simply gone.
+        copied = clipboard_set(text)
         return False, (
             "Secure Input is active (a password field or terminal has keyboard entry locked), so "
-            "macOS is blocking synthetic paste. The text is on your clipboard — press Cmd-V."
+            "macOS is blocking synthetic paste. "
+            + ("The text is on your clipboard — press Cmd-V." if copied else "The text is lost.")
         )
-    previous = clipboard_get() if restore_clipboard else ""
-    if not clipboard_set(text):
-        return False, "could not write to the clipboard"
     try:
         proc = subprocess.run(
-            [resolve_bin("osascript"), "-e", _PASTE_SCRIPT],
+            [resolve_bin("osascript"), "-e", _INJECT_SCRIPT, text],
             capture_output=True,
             text=True,
-            timeout=10,
+            # The restore re-materializes every pasteboard flavour, which on a large copied image
+            # is seconds of work — generous enough that a big screenshot is never dropped.
+            timeout=30,
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -982,16 +1016,7 @@ def inject(text: str, *, restore_clipboard: bool = True) -> tuple[bool, str]:
                 "Accessibility (the apps you dictate INTO never need permission)."
             )
         return False, f"paste failed: {hint}. The text is on your clipboard — press Cmd-V."
-    if restore_clipboard and previous:
-        time.sleep(_PASTE_SETTLE)
-        clipboard_set(previous)
     return True, ""
-
-
-# How long to let the target app read the pasteboard before we put your own clipboard
-# back. Measured generously: apps read the pasteboard synchronously on Cmd-V, but the event itself
-# is delivered asynchronously, so this covers event delivery, not the read.
-_PASTE_SETTLE = 0.35
 
 
 # --- the flow ---------------------------------------------------------------------------------

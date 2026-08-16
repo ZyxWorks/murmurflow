@@ -114,10 +114,19 @@ def available() -> tuple[bool, str]:
     as an exception. Three things are genuinely required and there is no fourth: something to record
     with, something to transcribe with, and a model to transcribe against.
     """
-    if not resolve_bin("ffmpeg"):
-        return False, "Dictation needs ffmpeg to record. Install it: `brew install ffmpeg`"
+    ok, why = platforms.capture_available()
+    if not ok:
+        return False, f"Dictation needs a recorder. {why}"
     if not (resolve_bin("whisper-server") or whisper.available()):
-        return False, "Dictation needs a local transcriber. Install it: `brew install whisper-cpp`"
+        # The one-command fix is not the same command on both platforms, and a hint naming the
+        # wrong package manager is worse than no hint — it sends somebody off to install Homebrew
+        # on a machine that has never had it.
+        fix = (
+            "`brew install whisper-cpp`"
+            if sys.platform == "darwin"
+            else "re-run the installer — it fetches whisper.cpp's own Windows build"
+        )
+        return False, f"Dictation needs a local transcriber. Install it: {fix}"
     if not whisper.model():
         return False, ("No whisper model found. Download one: `murmurflow setup`")
     return True, ""

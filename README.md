@@ -60,6 +60,15 @@ reason — a word deleted is invisible, while an "um" left in costs one keystrok
 murmurflow config set stripFillers true   # deletes um / you know / a leading hey, so, well
 ```
 
+**And what you did NOT say never appears.** Handed a recording of a room, whisper does not answer
+"nothing" — it answers fluently, in a language picked at random, and that sentence gets typed
+into whatever window is in front. Level and confidence catch most of it. Naming the languages you
+speak catches the rest, and costs nothing (it does not pin the decoder):
+
+```sh
+murmurflow config set languages '["de", "en"]'
+```
+
 **Hold, or double-tap.** Holding is the default and it is faster for one short sentence. Double-tap
 is easier on the hand for long ones, and it is what macOS's own dictation does:
 
@@ -223,6 +232,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `trigger` | the key. Default follows the gesture: `control_option` for hold, `left_control` for double-tap |
 | `doubleTap` | `true` = tap twice to start, twice to stop, instead of holding |
 | `language` | `en`, `de`, … Default `auto`. Pinning saves ~0.7s per sentence, so pin it if you can |
+| `languages` | the languages you actually speak, e.g. `["de","en"]`. A clip whisper reads as any other one is dropped. Empty = accept all |
 | `inputName` | part of a microphone name. Default: system default. `murmurflow devices` lists them |
 | `vocabulary` | proper nouns to bias the transcriber toward |
 | `cue` | tone preset: `pebble` (default, near-subliminal), `glass`, `marimba`, `soft`, `system`, `off`. `murmurflow cues` plays them |

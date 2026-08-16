@@ -500,3 +500,50 @@ def test_an_explicit_preset_still_wins_over_the_system_default():
     config.set_value("cue", "glass")
     assert dictate.cue_preset_name() == "glass"
     assert "glass" in dictate._cue_path(dictate.CUE_READY)
+
+
+def test_a_long_paste_waits_longer_before_the_clipboard_comes_back():
+    # The report this exists for: "when I talk longer, the whole text doesn't paste, only a few
+    # words". A fixed 0.35s was measured against one short sentence; a minute of dictation is
+    # ~1000 characters and the target is still inserting them when the restore lands.
+    assert dictate.paste_settle("hi") == pytest.approx(0.35, abs=0.01)
+    assert dictate.paste_settle("x" * 1000) > dictate.paste_settle("x" * 100)
+    assert dictate.paste_settle("x" * 100_000) == dictate._PASTE_SETTLE_MAX
+
+
+def test_the_wait_is_inlined_into_the_script_and_stays_a_number():
+    # The delay is formatted into AppleScript source. A locale-formatted or exponent-formatted
+    # float there is a syntax error, and the whole paste is lost with it.
+    script = dictate._INJECT_SCRIPT.format(settle=f"{dictate.paste_settle('x' * 500):.2f}")
+    assert "delay 0.85" in script
+    assert "{settle}" not in script
+
+
+def test_a_clip_reports_how_much_audio_actually_landed(tmp_path):
+    import wave
+
+    path = tmp_path / "clip.wav"
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16000)
+        handle.writeframes(b"\x00\x00" * 32000)  # exactly 2 seconds
+    assert dictate.audio_seconds(path) == pytest.approx(2.0)
+    assert dictate.audio_seconds(tmp_path / "nope.wav") == 0.0
+
+
+def test_a_language_you_do_not_speak_is_a_hallucination():
+    # Two clips on 2026-08-17 came back as fluent invented Icelandic and were typed into the
+    # operator's window: above the quiet floor, above the confidence bar, on no blocklist.
+    assert dictate.spoken_languages() == frozenset()  # nothing is refused until you say
+    config.set_value("languages", ["de", "en"])
+    assert dictate.spoken_languages() == frozenset({"de", "en"})
+    config.set_value("languages", "de, EN ")
+    assert dictate.spoken_languages() == frozenset({"de", "en"})
+
+
+def test_the_server_language_is_read_off_the_body_beside_the_score():
+    body = json.dumps({"text": "hallo", "detected_language_probability": 0.99, "language": "de"})
+    assert dictate._confidence(body) == ("hallo", 0.99, "de")
+    # An older server, or the cold path: no opinion, and no opinion is never a refusal.
+    assert dictate._confidence("just text") == ("just text", 1.0, "")

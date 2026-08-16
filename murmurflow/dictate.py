@@ -1065,6 +1065,39 @@ SILENT_DBFS = -70.0
 # whisper how sure it was covers all of it at once.
 SPEECH_CONFIDENCE = 0.75
 
+# Peak amplitude below which the microphone WAS working and nobody spoke into it — the trigger got
+# pressed and then the room was recorded. `SILENT_DBFS` cannot catch this: room tone is a real
+# signal, ~35 dB above digital silence, and `SPEECH_CONFIDENCE` does not catch all of it either.
+# Whisper is not asked "was that speech"; `detected_language_probability` answers "WHICH language",
+# and on room tone it is sometimes very sure indeed — which is how two sentences of confident
+# Icelandic got pasted into whatever window happened to be in front.
+#
+# Measured, not guessed, from a day of real dictation: eleven clips of 4 to 60 seconds peaked
+# between -15 and -5 dBFS, and the quietest was -15. A silent room on the same machine and the same
+# microphone measured -47. -35 sits in that gap with 20 dB of margin under the quietest real
+# sentence and 12 dB over the room. Raise it if a whisper at arm's length gets dropped; the level
+# of every clip is printed in the daemon log, so this is tunable from evidence rather than feel.
+#
+# -30 and not -35: a second measurement of the same "silent" room came back at -38, because a room
+# is not a constant. 8 dB over the loudest room seen, 15 dB under the quietest sentence seen. A
+# far-field microphone in a big room is a different machine from this one, so `quietFloor`
+# overrides it rather than leaving somebody with a tool that never hears them and no way to say so.
+QUIET_DBFS = -30.0
+
+
+def quiet_floor() -> float:
+    """The level below which a clip is a room, not a sentence. ``quietFloor`` overrides."""
+    raw = _cfg().get("quietFloor")
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    return QUIET_DBFS
+
+
+#: What a clip with no voice in it is called. Like `TOO_SHORT` this is a NON-EVENT, not a failure:
+#: nothing was asked for, so nothing gets a failure tone. A noise reporting that nothing worked,
+#: when nothing was attempted, is the "beeping out of nowhere" that makes a daemon feel broken.
+NOTHING_SAID = "nothing was said"
+
 
 def peak_dbfs(wav: Path) -> float:
     """Peak amplitude of a 16-bit PCM wav in dBFS; ``-inf`` for silence or an unreadable file.
@@ -1132,12 +1165,9 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     # which is the whole point: the tone marks the microphone closing, not the text arriving.
     cue(CUE_DONE)
     level = peak_dbfs(wav)
-    started = time.monotonic()
-    try:
-        heard = transcribe(wav)
-        raw = heard.text
-    finally:
-        # `voiceKeepAudio` keeps the LAST clip (one file, overwritten) so a bad transcription can be
+
+    def retire() -> None:
+        # `keepAudio` keeps the LAST clip (one file, overwritten) so a bad transcription can be
         # listened to instead of guessed about — the difference between "the model is wrong" and
         # "we recorded half a sentence" is audible in two seconds and invisible in a log. Off by
         # default: your voice does not outlive its transcription unless you ask.
@@ -1145,22 +1175,39 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
             with contextlib.suppress(OSError):
                 shutil.copyfile(wav, _scratch_dir() / "last.wav")
         wav.unlink(missing_ok=True)
-    elapsed_ms = int((time.monotonic() - started) * 1000)
-    # A silent stream is NOT a transcription problem, and saying "could not make out any speech"
-    # sends you off to tune the model when the microphone never delivered anything. macOS does
-    # not fail a denied mic — it returns digital silence — so this is the only place that
-    # distinction can be made.
+
+    # BOTH LEVEL CHECKS RUN BEFORE THE TRANSCRIBE, and that ordering is the fix rather than a
+    # tidy-up: whisper cannot be trusted to answer "was anyone speaking" — it answers "which
+    # language is this", confidently, about a recording of a room. Deciding from the waveform
+    # first means the invented sentence is never generated, so it can never be pasted. It also
+    # returns a silent press in milliseconds instead of after a four-second transcription of noise.
+    #
+    # A silent STREAM is a different thing from a silent room and keeps its own message: macOS does
+    # not fail a denied microphone, it hands back digital silence, so "could not make out any
+    # speech" would send somebody off to tune a model when there is no audio at all.
     if level < SILENT_DBFS:
+        retire()
         return Result(
             "",
             seconds,
-            elapsed_ms,
+            0,
             False,
             f"the microphone returned silence ({level:.0f} dBFS) — this process has no working "
             f"microphone input. Check System Settings > Privacy & Security > Microphone for "
             f"{Path(sys.executable).name}.",
             level,
         )
+    if level < quiet_floor():
+        retire()
+        return Result("", seconds, 0, False, f"{NOTHING_SAID} ({level:.0f} dBFS)", level)
+
+    started = time.monotonic()
+    try:
+        heard = transcribe(wav)
+        raw = heard.text
+    finally:
+        retire()
+    elapsed_ms = int((time.monotonic() - started) * 1000)
     # Whisper's own verdict, and the only one that catches an invented sentence in an invented
     # language. Checked before the word-list because it subsumes it.
     if heard.confidence < SPEECH_CONFIDENCE:
@@ -1793,7 +1840,7 @@ def listen_loop(
             # nothing was asked for, so a noise reporting that it did not work is pure confusion.
             # It is still logged. Every OTHER problem (a silent microphone, a failed transcription)
             # followed a real attempt and still gets its tone.
-            if not result.problem.startswith(TOO_SHORT):
+            if not result.problem.startswith((TOO_SHORT, NOTHING_SAID)):
                 cue(CUE_FAIL)
             emit(f"[!] {result.problem}")
             return

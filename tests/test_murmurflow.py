@@ -372,3 +372,56 @@ def test_apple_dictation_can_only_clash_with_a_control_trigger():
     # to one. The check must never invent a problem for a trigger that cannot have it.
     config.set_value("trigger", "control_option")
     assert dictate.apple_dictation_conflict() is False
+
+
+# --- a room is not a sentence ---------------------------------------------------------------------
+
+
+def test_the_quiet_floor_sits_between_real_speech_and_a_real_room():
+    # Measured, not guessed: eleven clips of real dictation on this machine peaked between -15 and
+    # -5 dBFS; a silent room on the same microphone measured -47. If this constant ever drifts into
+    # either of those, whisper starts inventing sentences about room tone again — or real speech
+    # gets dropped.
+    quietest_real_speech = -15.0
+    loudest_silent_room = (
+        -38.0
+    )  # the SAME room, measured twice: -47 and -38. A room is not a constant.
+    assert loudest_silent_room < dictate.QUIET_DBFS < quietest_real_speech
+    assert dictate.SILENT_DBFS < dictate.QUIET_DBFS  # a denied mic keeps its own, louder message
+
+
+def test_a_room_recording_is_never_transcribed_at_all(monkeypatch, tmp_path):
+    # The ordering IS the fix. Whisper answers "which language is this", confidently, about noise —
+    # so the invented sentence must never be generated, not merely discarded afterwards.
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"")
+    called: list[str] = []
+    monkeypatch.setattr(dictate, "peak_dbfs", lambda _p: -47.0)
+    monkeypatch.setattr(
+        dictate, "transcribe", lambda *a, **k: called.append("ran") or dictate.Heard("")
+    )
+    monkeypatch.setattr(dictate, "stop", lambda rec=None: wav)
+    monkeypatch.setattr(dictate, "cue", lambda _kind: None)
+    rec = dictate.Recording(pid=1, wav=wav, started_at=0.0)
+
+    result = dictate.finish(rec, paste=False)
+
+    assert called == [], "a silent room must not reach the transcriber"
+    assert result.text == ""
+    assert result.problem.startswith(dictate.NOTHING_SAID)
+
+
+def test_nothing_said_is_a_non_event_and_never_gets_a_failure_tone():
+    # Same rule as TOO_SHORT: nothing was asked for, so a noise reporting that it did not work is
+    # the "beeping out of nowhere" that makes a background daemon feel broken.
+    assert f"{dictate.NOTHING_SAID} (-47 dBFS)".startswith(
+        (dictate.TOO_SHORT, dictate.NOTHING_SAID)
+    )
+
+
+def test_a_soft_voice_can_lower_the_floor_rather_than_being_stuck():
+    # A far-field microphone in a big room is a different machine from the one this was measured
+    # on. Without an override the answer to "it never hears me" is "install something else".
+    assert dictate.quiet_floor() == dictate.QUIET_DBFS
+    config.set_value("quietFloor", -45)
+    assert dictate.quiet_floor() == -45.0

@@ -35,6 +35,26 @@ update-shell` fixes that for the next terminal you open.
 
 </details>
 
+### The first two things people change
+
+**The sound.** Two tones per sentence, a few hundred times a day, is the setting that decides
+whether the tool feels invisible or naggy. The default is `pebble` — one short low blip, close to
+subliminal. Audition the rest and pick:
+
+```sh
+murmurflow cues                  # plays every preset so you can hear them
+murmurflow config set cue glass  # glass · marimba · pebble · soft · system · off
+```
+
+`off` is a real answer: the text landing at your cursor already tells you it worked.
+
+**Hold, or double-tap.** Holding is the default and it is faster for one short sentence. Double-tap
+is easier on the hand for long ones, and it is what macOS's own dictation does:
+
+```sh
+murmurflow config set doubleTap true   # tap twice to start, once to stop
+```
+
 ---
 
 ## Why it exists
@@ -104,13 +124,19 @@ macOS will ask for two the first time, and neither can be granted from a script:
 2. **Accessibility** — to type into the app you're using.
    *System Settings → Privacy & Security → Accessibility*
 
+**Both rows are called `MurmurFlow`.** `murmurflow install` builds a small app bundle at
+`~/Applications/MurmurFlow.app` purely so that is true. Without it macOS names the row after the
+*interpreter* — `python3.13` — which nobody scrolling for "murmurflow" finds, and switching that on
+would hand the microphone and your keyboard to every other Python tool sharing it.
+
 If the key is never detected at all, **Input Monitoring** is the third — but test with
 `murmurflow keytest` before granting it, because most Macs don't need it.
 
-> **The apps you dictate into need nothing.** Every permission goes to this one process; Slack, your
+> **The apps you dictate into need nothing.** Every permission goes to this one program; Slack, your
 > browser and your editor just receive a paste. You are not opening up your machine app by app.
 
-If dictation transcribes but nothing appears, Accessibility is the reason nine times out of ten.
+`murmurflow doctor` answers both questions for real — it asks the bundle, not itself. If dictation
+transcribes but nothing appears, Accessibility is the reason nine times out of ten.
 
 ## The model is the accuracy
 
@@ -142,7 +168,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `language` | `en`, `de`, … Default `auto`. Pinning saves ~0.7s per sentence, so pin it if you can |
 | `inputName` | part of a microphone name. Default: system default. `murmurflow devices` lists them |
 | `vocabulary` | proper nouns to bias the transcriber toward |
-| `cue` | tone preset: `glass`, `soft`, `pure`, `wood`, `bell`, `system`, or `off` |
+| `cue` | tone preset: `pebble` (default, near-subliminal), `glass`, `marimba`, `soft`, `system`, `off`. `murmurflow cues` plays them |
 | `polishCommand` | see below |
 | `keepAudio` | keep the last clip for debugging a bad transcription |
 

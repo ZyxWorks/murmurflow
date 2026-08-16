@@ -108,8 +108,8 @@ def _install() -> int:
     _out("  1. Microphone      — to hear you")
     _out("  2. Accessibility   — to type into the app you are using")
     _out("")
-    _out("The apps you dictate INTO need nothing. Every permission goes to this one process,")
-    _out("which System Settings lists under the name of its interpreter, NOT 'murmurflow':")
+    _out("The apps you dictate INTO need nothing. Every permission goes to this one program,")
+    _out("which System Settings lists as:")
     _out(f"  {_tcc_entry()}")
     # Opening the exact pane, rather than naming a path through System Settings, is the difference
     # between "one switch is highlighted for you" and a person who has never opened Privacy &
@@ -145,13 +145,13 @@ def _uninstall() -> int:
 def _tcc_entry() -> str:
     """What System Settings CALLS this program in its permission lists, and where that file is.
 
-    macOS names a permission row after the EXECUTABLE that asked, and for a Python tool that is the
-    interpreter rather than the console script — so the row reads ``python3.13`` and somebody
-    scrolling for ``murmurflow`` never finds it, or worse, switches on a neighbouring row belonging
-    to some other tool sharing an interpreter. Naming it exactly is the difference between a switch
-    found and a switch hunted for. A signed .app bundle is what would make the row say MurmurFlow,
-    and that is a bigger change than this one.
+    macOS names a permission row after the EXECUTABLE that asked. ``service.build_app`` exists so
+    that executable is the bundle and the row reads MurmurFlow — but an install that could not
+    write the bundle still has to tell the truth, and the truth there is the interpreter's own
+    name, ``python3.13``, which nobody scrolling for ``murmurflow`` would ever find.
     """
+    if service.app_path().is_dir():
+        return f"{service.APP_NAME}  ({service.app_path()})"
     real = Path(sys.executable).resolve()
     return f"{real.name}  ({real})"
 
@@ -183,15 +183,15 @@ def _doctor() -> int:
             "grant Input Monitoring, then run: murmurflow keytest",
         )
     )
+    # The daemon is the bundle, so the bundle is who this has to be asked about — this CLI having
+    # the grant says nothing about whether the thing that types your words does.
+    trusted = service.app_accessibility_trusted()
+    if trusted is None:
+        trusted = hotkey.accessibility_trusted()
     rows.append(
         (
-            hotkey.accessibility_trusted(),
-            "accessibility: "
-            + (
-                "granted"
-                if hotkey.accessibility_trusted()
-                else "NOT granted — nothing can be typed"
-            ),
+            trusted,
+            "accessibility: " + ("granted" if trusted else "NOT granted — nothing can be typed"),
             f"switch on '{_tcc_entry()}' in System Settings > Privacy & Security > Accessibility",
         )
     )

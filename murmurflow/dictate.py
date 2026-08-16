@@ -1250,7 +1250,9 @@ class _Timbre:
 # falling = the mic closed, low and slow = something went wrong — that grammar holds across all of
 # them, so switching preset never changes what a sound MEANS.
 _CUE_PRESETS: dict[str, tuple[_Timbre, dict[str, tuple[tuple[float, float, float], ...]]]] = {
-    # Tubular-bell partials, bright and clean. The most "premium" of the set and the default.
+    # Tubular-bell partials, bright and clean. The most "premium" of the set, and it was the default
+    # until somebody dictated all day with it: a bright chime twice a sentence, hundreds of times,
+    # is the one setting that stops being a nice detail and becomes a reason to turn the tool off.
     "glass": (
         _Timbre(((1.0, 1.0), (2.76, 0.40), (5.40, 0.14)), decay=0.40),
         {
@@ -1268,7 +1270,8 @@ _CUE_PRESETS: dict[str, tuple[_Timbre, dict[str, tuple[tuple[float, float, float
             CUE_FAIL: ((392.00, 0.000, 0.26), (293.66, 0.090, 0.38)),  # G4 -> D4
         },
     ),
-    # One short low blip. The least you can play and still be understood — nearly subliminal.
+    # One short low blip. The least you can play and still be understood — nearly subliminal, which
+    # is exactly what a sound you will hear a few hundred times a day has to be. The DEFAULT.
     "pebble": (
         _Timbre(((1.0, 1.0), (2.0, 0.10)), decay=0.30, peak=0.14),
         {
@@ -1287,7 +1290,7 @@ _CUE_PRESETS: dict[str, tuple[_Timbre, dict[str, tuple[tuple[float, float, float
         },
     ),
 }
-DEFAULT_CUE = "glass"
+DEFAULT_CUE = "pebble"
 
 
 def cue_presets() -> tuple[str, ...]:

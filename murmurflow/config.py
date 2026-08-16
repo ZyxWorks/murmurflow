@@ -28,6 +28,8 @@ KEYS: dict[str, str] = {
     "vocabulary": "list of proper nouns to bias the transcriber toward (names, jargon, acronyms)",
     "cue": "tone preset: glass (default), soft, pure, wood, bell, or off for silence",
     "polishCommand": "shell command receiving the transcript on stdin and printing the cleaned text",
+    "quietFloor": "peak dBFS below which a clip is a room, not a sentence. Default -30. Lower it "
+    "(e.g. -40) if a soft voice gets dropped — every clip's level is printed in the daemon log",
     "keepAudio": "true = keep the last clip at ~/.murmurflow/audio/last.wav for debugging",
     "port": "loopback port for the warm whisper-server. Default 8479",
 }

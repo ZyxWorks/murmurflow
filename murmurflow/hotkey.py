@@ -129,10 +129,48 @@ TRIGGERS: dict[str, int] = {
 # need no system setting turned off before they are safe. ⌃⌥ specifically because on a Mac
 # keyboard they are adjacent, so one hand reaches both without moving.
 #
-# Still true and still worth knowing: if you rebind to `left_control` AND macOS's "press Control
-# twice for dictation" is on, both fire. Turn Apple's off in
+# THE GESTURE DECIDES THE KEY, which is why there are two defaults and not one.
+#
+# A HOLD needs a combo, for the reason above: a hold starts the moment the key goes down, and on a
+# bare modifier that moment is indistinguishable from the start of ⌃C.
+#
+# A DOUBLE-TAP does not, and this is the whole point — two deliberate taps of one key inside half a
+# second is not a gesture anybody performs by accident, and a shortcut that could imitate it (⌃C
+# then ⌃C) is thrown out by the chord guard in `listen_double_tap`. It is exactly why macOS itself
+# puts dictation on double-tap Control. So double-tapping TWO keys at once, which is what a combo
+# default forced, is awkward for no safety it was not already getting for free.
+#
+# Portability is the second reason to keep the tap default a single ordinary modifier: Control
+# exists, is named the same, and is reachable on every keyboard there is. `control_option` is a
+# macOS-shaped answer; `left_control` is not.
+#
+# The one conflict, and it is detected in `murmurflow doctor` rather than left as folklore: if
+# macOS's own "press Control twice for dictation" is enabled, both fire.
 # System Settings > Keyboard > Dictation > Shortcut.
 DEFAULT_TRIGGER = "control_option"
+DEFAULT_TAP_TRIGGER = "left_control"
+
+#: Names for the same physical keys on a keyboard that is not Apple's. The config vocabulary should
+#: not have to be relearned to move this to another OS, and `alt` is what the key is called
+#: everywhere else. Aliases only — the canonical names above are what gets stored and printed.
+TRIGGER_ALIASES: dict[str, str] = {
+    "ctrl": "control",
+    "alt": "option",
+    "left_alt": "left_option",
+    "right_alt": "right_option",
+    "control_alt": "control_option",
+    "ctrl_alt": "control_option",
+    "ctrl_option": "control_option",
+    "win": "command",
+    "super": "command",
+    "meta": "command",
+}
+
+
+def canonical_trigger(name: str) -> str:
+    """One spelling per key, so `ctrl_alt` and `control_option` cannot behave differently."""
+    key = str(name).strip().lower().replace("-", "_").replace("+", "_")
+    return TRIGGER_ALIASES.get(key, key)
 
 
 # DEAD TIME IS LOST WORDS. The recorder now starts on key-DOWN, immediately, and the chord guard
@@ -265,7 +303,7 @@ def is_trigger_down(name: str, lib: ctypes.CDLL | None = None) -> bool:
     reports them apart at all.
     """
     lib = lib or _load()
-    key = str(name).strip().lower()
+    key = canonical_trigger(name)
     combo = COMBO_TRIGGERS.get(key)
     if combo is not None:
         state = flags(lib)
@@ -292,7 +330,7 @@ def keycode(name: str) -> int:
     and a combo has no single keycode. Nothing reaches here with a combo name — `is_trigger_down`
     handles those first — so this is only the answer for a name nobody recognises.
     """
-    return TRIGGERS.get(str(name).strip().lower(), LEFT_CONTROL)
+    return TRIGGERS.get(canonical_trigger(name), LEFT_CONTROL)
 
 
 def is_held(code: int, lib: ctypes.CDLL | None = None) -> bool:

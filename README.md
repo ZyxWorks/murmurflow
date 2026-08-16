@@ -16,6 +16,8 @@ dictation on for every login, and opens the one permission switch macOS will not
 flip for you.
 
 Then hold **Control+Option** together, say something, let go. That's the whole product.
+(Prefer hands-free? `murmurflow config set doubleTap true` — then it is a double-tap of **Control**,
+the way macOS does it.)
 
 <details>
 <summary>Rather do it by hand?</summary>
@@ -57,30 +59,39 @@ murmurflow config set doubleTap true   # tap twice to start, once to stop
 
 Both take effect immediately — `config set` restarts the listener for you.
 
-### The trigger, and why it is two keys
+### The trigger: the gesture picks the key
 
-The default is **hold Control+Option (⌃⌥) together**.
+| gesture | default | why |
+|---|---|---|
+| **hold** (default) | **⌃⌥ together** | a hold starts on the same key-down a shortcut does |
+| **double-tap** | **left Control** | two deliberate taps is a shape no shortcut has |
 
-A single bare modifier would be nicer to press, and it is what this shipped with. It was wrong. The
-listener *polls* key state rather than intercepting it — that is what keeps this dependency-free and
-out of Input Monitoring — and the price of polling is that it cannot take a keypress away from
-anything else. So on bare Control, every `⌃C`, every `⌃←` to switch desktops, opens the microphone
-and plays a tone. The chord guard throws the audio away correctly; it cannot un-play the sound, and
-a tool that chimes while you work gets uninstalled.
+That is one rule, and it is worth understanding before you rebind.
 
-Two modifiers held together are typed by nobody in the course of ordinary work, are bound to nothing
-in macOS, and need no system setting turned off before they are safe.
+The listener **polls** key state rather than intercepting it — that is what keeps this
+dependency-free and out of Input Monitoring — so it can never take a keypress away from anything
+else. A **hold** on a bare modifier therefore fires on every `⌃C` and every `⌃←`: the microphone
+opens and a tone plays before the chord guard can tell it was a shortcut. It discards the audio
+correctly. It cannot un-play the sound, and a tool that chimes while you work gets uninstalled.
+
+A **double-tap** has no such problem. Two taps of one key inside half a second is not a shape any
+shortcut has, and the one that could imitate it (`⌃C` then `⌃C`) is thrown out by the chord guard.
+So double-tap gets one ordinary key — easier to perform than two at once, and the same key on every
+keyboard there is.
 
 ```sh
+murmurflow config set trigger left_control      # one key
 murmurflow config set trigger command_option    # ⌘⌥
-murmurflow config set trigger control_command   # ⌃⌘
-murmurflow config set trigger left_control      # a single key, if you want it
+murmurflow config set trigger ctrl_alt          # the same as control_option, spelled the other way
 ```
 
-> **If you rebind to a single key, turn Apple's off first.** macOS has its own "press Control twice
-> for dictation" and it is on by default on many Macs. Both will fire, and you get Apple's
-> microphone panel on top of this one. *System Settings → Keyboard → Dictation → Shortcut → Off.*
-> Nothing to turn off if you stay on the default `⌃⌥`.
+`ctrl`/`alt`/`win` are accepted everywhere `control`/`option`/`command` are, so a config written on
+one keyboard reads on another.
+
+> **macOS has its own "press Control twice for dictation", and it is on by default on many Macs.**
+> On a Control trigger both fire, and Apple's microphone panel lands on top of this one.
+> `murmurflow doctor` checks for it and prints the fix; you do not have to remember this.
+> *System Settings → Keyboard → Dictation → Shortcut → Off.*
 
 `murmurflow keytest` shows what this Mac actually reports for every bindable key. Use it before
 believing any of the above about your hardware — some MacBooks report the right-side Command and
@@ -194,7 +205,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 
 | key | what it does |
 |---|---|
-| `trigger` | the hold key. Default `control_option` — two modifiers, so no shortcut you already type can fire it |
+| `trigger` | the key. Default follows the gesture: `control_option` for hold, `left_control` for double-tap |
 | `doubleTap` | `true` = tap twice to start, twice to stop, instead of holding |
 | `language` | `en`, `de`, … Default `auto`. Pinning saves ~0.7s per sentence, so pin it if you can |
 | `inputName` | part of a microphone name. Default: system default. `murmurflow devices` lists them |

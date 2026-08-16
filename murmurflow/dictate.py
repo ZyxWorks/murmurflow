@@ -1510,6 +1510,33 @@ def cue(sound: str) -> None:
     _note_cue(kind, sound)
 
 
+def apple_dictation_conflict(trigger: str = "") -> bool:
+    """True if macOS's OWN dictation shortcut would fire on the same gesture as ours.
+
+    Apple puts dictation on a double-tap of Control by default. If that is still enabled and the
+    user's trigger is a bare Control, both fire: Apple's microphone panel appears on top of this
+    one and neither transcript is what was wanted. It is the single most confusing collision this
+    tool has, and it was documented in prose nobody reads — so it is a checked row instead.
+
+    Only a Control trigger can collide; a combo cannot, which is most of why the hold default is
+    one. Any failure to read the setting answers False: a diagnostic must not invent a problem.
+    """
+    key = trigger_key(trigger)
+    if key not in {"left_control", "right_control", "control"}:
+        return False
+    try:
+        proc = subprocess.run(
+            ["defaults", "read", "com.apple.assistant.support", "Dictation Enabled"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.stdout.strip() == "1"
+
+
 def trigger_key(trigger: str = "") -> str:
     """The key this machine talks on: an explicit ``--trigger``, then ``trigger``, then the default.
 
@@ -1518,7 +1545,17 @@ def trigger_key(trigger: str = "") -> str:
     """
     from . import hotkey
 
-    return trigger or str(_cfg().get("trigger", "") or hotkey.DEFAULT_TRIGGER)
+    chosen = trigger or str(_cfg().get("trigger", "") or "")
+    if chosen:
+        return hotkey.canonical_trigger(chosen)
+    # No explicit choice: THE GESTURE PICKS THE KEY, because the two gestures do not have the same
+    # problem. A hold starts on the same key-down a shortcut does, so on a bare modifier it fires
+    # for ⌃C — it needs a combo. A double-tap does not: two deliberate taps inside half a second is
+    # not a shape any shortcut has, and the one that could imitate it is thrown out by the chord
+    # guard. So a tap gets ONE ordinary key — easier to perform, and the same key on every OS.
+    # Double-tapping two modifiers at once was the price of having only one default, and it is not
+    # a price worth paying for safety the gesture already had.
+    return hotkey.DEFAULT_TAP_TRIGGER if double_tap_mode() else hotkey.DEFAULT_TRIGGER
 
 
 def double_tap_mode() -> bool:

@@ -333,3 +333,42 @@ def test_the_double_tap_window_is_measured_press_to_press():
     assert gap + press > 0.35  # what the old window was, and why it missed
     assert gap <= hotkey.DOUBLE_TAP_WINDOW
     assert press <= hotkey.TAP_MAX
+
+
+# --- the gesture picks the key -------------------------------------------------------------------
+
+
+def test_hold_defaults_to_a_combo_and_double_tap_to_one_ordinary_key():
+    # Two gestures, two problems. A hold starts on the same key-down a shortcut does, so it needs a
+    # combo. A double-tap does not, so forcing it onto two keys at once bought nothing and cost the
+    # gesture its ergonomics — and its portability, since `control_option` is a macOS-shaped answer.
+    from murmurflow import hotkey
+
+    config.set_value("doubleTap", False)
+    assert dictate.trigger_key() in hotkey.COMBO_TRIGGERS
+    config.set_value("doubleTap", True)
+    assert dictate.trigger_key() == "left_control"
+    assert dictate.trigger_key() in hotkey.TRIGGERS
+
+
+def test_an_explicit_trigger_wins_over_the_gesture_default():
+    config.set_value("doubleTap", True)
+    config.set_value("trigger", "command_option")
+    assert dictate.trigger_key() == "command_option"
+
+
+def test_the_windows_spelling_of_a_key_is_the_same_key():
+    from murmurflow import hotkey
+
+    assert hotkey.canonical_trigger("ctrl_alt") == "control_option"
+    assert hotkey.canonical_trigger("left_alt") == "left_option"
+    assert hotkey.canonical_trigger("CONTROL-OPTION") == "control_option"
+    config.set_value("trigger", "ctrl_alt")
+    assert dictate.trigger_key() == "control_option"  # stored loosely, resolved to one spelling
+
+
+def test_apple_dictation_can_only_clash_with_a_control_trigger():
+    # A combo cannot collide with Apple's double-tap Control, which is most of why hold defaults
+    # to one. The check must never invent a problem for a trigger that cannot have it.
+    config.set_value("trigger", "control_option")
+    assert dictate.apple_dictation_conflict() is False

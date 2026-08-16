@@ -201,6 +201,19 @@ def _doctor(*, verbs: bool = False) -> int:
             f"switch on '{_tcc_entry()}' in System Settings > Privacy & Security > Accessibility",
         )
     )
+    clash = dictate.apple_dictation_conflict()
+    rows.append(
+        (
+            not clash,
+            "apple dictation: "
+            + (
+                "not competing"
+                if not clash
+                else "ON — it fires on the same key and will fight this"
+            ),
+            "System Settings > Keyboard > Dictation > Shortcut > Off",
+        )
+    )
     _, device = dictate.resolve_input()
     rows.append((True, f"microphone: {device}", ""))
     live = dictate.listener_pids()

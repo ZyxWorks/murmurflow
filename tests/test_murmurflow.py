@@ -10,6 +10,7 @@ because a mock of CoreAudio would only ever test the mock.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -258,3 +259,30 @@ def test_stop_server_survives_a_process_that_is_already_gone(monkeypatch):
     monkeypatch.setattr(dictate.subprocess, "run", lambda argv, **kw: _Done())
     monkeypatch.setattr(dictate.os, "kill", _boom)
     assert dictate.stop_server() == 0
+
+
+# --- one listener, never two --------------------------------------------------------------------
+
+
+def test_a_second_listener_is_refused_and_told_who_has_the_key(monkeypatch):
+    # The doubled-sound bug: the login agent is live and you run `murmurflow listen` to watch it.
+    dictate.listener_lock_path().parent.mkdir(parents=True, exist_ok=True)
+    dictate.listener_lock_path().write_text("4242", "utf-8")
+    monkeypatch.setattr(dictate, "_exited", lambda pid: False)  # 4242 is alive
+    assert dictate.listener_pid() == 4242
+    assert dictate.claim_listener() == 4242
+
+
+def test_a_lock_left_by_a_crash_never_blocks_the_next_start(monkeypatch):
+    # A hard reboot must not leave dictation needing a file deleted by hand.
+    dictate.listener_lock_path().parent.mkdir(parents=True, exist_ok=True)
+    dictate.listener_lock_path().write_text("4242", "utf-8")
+    monkeypatch.setattr(dictate, "_exited", lambda pid: True)  # 4242 is gone
+    assert dictate.listener_pid() == 0
+    assert dictate.claim_listener() == 0
+    assert dictate.listener_lock_path().read_text("utf-8") == str(os.getpid())
+
+
+def test_claiming_twice_from_the_same_process_is_not_a_conflict():
+    assert dictate.claim_listener() == 0
+    assert dictate.claim_listener() == 0

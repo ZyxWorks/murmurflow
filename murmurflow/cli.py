@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import signal
 import subprocess
 import sys
 import time
@@ -107,12 +108,14 @@ def _install() -> int:
     _out("  1. Microphone      — to hear you")
     _out("  2. Accessibility   — to type into the app you are using")
     _out("")
-    _out("The apps you dictate INTO need nothing. Every permission goes to this one process.")
+    _out("The apps you dictate INTO need nothing. Every permission goes to this one program,")
+    _out("which System Settings lists as:")
+    _out(f"  {_tcc_entry()}")
     # Opening the exact pane, rather than naming a path through System Settings, is the difference
     # between "one switch is highlighted for you" and a person who has never opened Privacy &
     # Security hunting for it. Best-effort: a Mac that refuses the URL still has the sentence above.
     _out("")
-    _out("Opening the Accessibility pane now — switch murmurflow ON there.")
+    _out("Opening the Accessibility pane now — switch that entry ON.")
     with contextlib.suppress(OSError, subprocess.SubprocessError):
         subprocess.run(
             [
@@ -130,13 +133,33 @@ def _uninstall() -> int:
     # The warm whisper-server is detached on purpose and would otherwise sit on ~1.8 GB until the
     # next reboot, long after the thing that talked to it was removed.
     freed = dictate.stop_server()
+    # And the .app, or `uninstall` leaves an application in ~/Applications forever. Recreating it
+    # later at the same path from the same interpreter reproduces the cdhash, so the Privacy grant
+    # is not spent by removing it.
+    removed = service.remove_app()
     _out("[OK] dictation stopped and removed from login." if ok else f"[!] {detail}")
     if freed:
         _out("[OK] stopped the warm whisper-server")
+    if removed:
+        _out(f"[OK] removed {service.app_path()}")
     return 0 if ok else 1
 
 
 # --- diagnosis --------------------------------------------------------------------------------
+
+
+def _tcc_entry() -> str:
+    """What System Settings CALLS this program in its permission lists, and where that file is.
+
+    macOS names a permission row after the EXECUTABLE that asked. ``service.build_app`` exists so
+    that executable is the bundle and the row reads MurmurFlow — but an install that could not
+    write the bundle still has to tell the truth, and the truth there is the interpreter's own
+    name, ``python3.13``, which nobody scrolling for ``murmurflow`` would ever find.
+    """
+    if service.app_path().is_dir():
+        return f"{service.APP_NAME}  ({service.app_path()})"
+    real = Path(sys.executable).resolve()
+    return f"{real.name}  ({real})"
 
 
 def _doctor() -> int:
@@ -166,8 +189,34 @@ def _doctor() -> int:
             "grant Input Monitoring, then run: murmurflow keytest",
         )
     )
+    # The daemon is the bundle, so the bundle is who this has to be asked about — this CLI having
+    # the grant says nothing about whether the thing that types your words does.
+    trusted = service.app_accessibility_trusted()
+    if trusted is None:
+        trusted = hotkey.accessibility_trusted()
+    rows.append(
+        (
+            trusted,
+            "accessibility: " + ("granted" if trusted else "NOT granted — nothing can be typed"),
+            f"switch on '{_tcc_entry()}' in System Settings > Privacy & Security > Accessibility",
+        )
+    )
     _, device = dictate.resolve_input()
     rows.append((True, f"microphone: {device}", ""))
+    live = dictate.listener_pids()
+    rows.append(
+        (
+            len(live) <= 1,
+            "listeners: "
+            + (
+                f"{len(live)} ({', '.join(str(pid) for pid in live) or 'none — dictation is off'})"
+                if len(live) <= 1
+                else f"{len(live)} AT ONCE ({', '.join(str(pid) for pid in live)}) "
+                "— every sound and every sentence doubles"
+            ),
+            "murmurflow uninstall, then murmurflow install",
+        )
+    )
     rows.append(
         (
             not dictate.secure_input_active(),
@@ -353,6 +402,10 @@ def _transcribe(path: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # `murmurflow doctor | head` must not end in a BrokenPipeError traceback. Restoring the default
+    # SIGPIPE makes this exit quietly when the reader walks away, the way every other Unix tool does.
+    with contextlib.suppress(OSError, ValueError):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     parser = argparse.ArgumentParser(
         prog="murmurflow",
         description="Hold a key, talk, let go. The text appears at your cursor. Nothing leaves your Mac.",

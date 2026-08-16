@@ -1250,7 +1250,9 @@ class _Timbre:
 # falling = the mic closed, low and slow = something went wrong — that grammar holds across all of
 # them, so switching preset never changes what a sound MEANS.
 _CUE_PRESETS: dict[str, tuple[_Timbre, dict[str, tuple[tuple[float, float, float], ...]]]] = {
-    # Tubular-bell partials, bright and clean. The most "premium" of the set and the default.
+    # Tubular-bell partials, bright and clean. The most "premium" of the set, and it was the default
+    # until somebody dictated all day with it: a bright chime twice a sentence, hundreds of times,
+    # is the one setting that stops being a nice detail and becomes a reason to turn the tool off.
     "glass": (
         _Timbre(((1.0, 1.0), (2.76, 0.40), (5.40, 0.14)), decay=0.40),
         {
@@ -1268,7 +1270,8 @@ _CUE_PRESETS: dict[str, tuple[_Timbre, dict[str, tuple[tuple[float, float, float
             CUE_FAIL: ((392.00, 0.000, 0.26), (293.66, 0.090, 0.38)),  # G4 -> D4
         },
     ),
-    # One short low blip. The least you can play and still be understood — nearly subliminal.
+    # One short low blip. The least you can play and still be understood — nearly subliminal, which
+    # is exactly what a sound you will hear a few hundred times a day has to be. The DEFAULT.
     "pebble": (
         _Timbre(((1.0, 1.0), (2.0, 0.10)), decay=0.30, peak=0.14),
         {
@@ -1287,7 +1290,7 @@ _CUE_PRESETS: dict[str, tuple[_Timbre, dict[str, tuple[tuple[float, float, float
         },
     ),
 }
-DEFAULT_CUE = "glass"
+DEFAULT_CUE = "pebble"
 
 
 def cue_presets() -> tuple[str, ...]:
@@ -1597,6 +1600,82 @@ def trigger_hint(trigger: str = "") -> str:
     return f"double-tap {key} to start, tap once to stop" if double_tap_mode() else f"hold {key}"
 
 
+def listener_lock_path() -> Path:
+    return config.home_root() / "listener.pid"
+
+
+def listener_pid() -> int:
+    """The PID of a live listener OTHER than this process, or 0 when the trigger is free.
+
+    A lock left behind by a crash or a hard reboot reads as free, because the process it names is
+    gone. Nobody is ever told to delete a lock file.
+    """
+    try:
+        pid = int(listener_lock_path().read_text("utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+    if pid <= 0 or pid == os.getpid() or _exited(pid):
+        return 0
+    return pid
+
+
+def listener_pids() -> list[int]:
+    """Every murmurflow listener process on this Mac, whether or not it took the lock.
+
+    ``listener_pid`` answers "may I start", which is the lock's question. This answers "how many
+    are there", which is the user's — and it is deliberately not read from the lock file, because
+    the setup worth reporting is the broken one where something is listening that never claimed it.
+    """
+    try:
+        found = subprocess.run(
+            ["pgrep", "-f", "murmurflow listen"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    pids = []
+    for token in found.stdout.split():
+        with contextlib.suppress(ValueError):
+            pids.append(int(token))
+    return [pid for pid in pids if pid != os.getpid()]
+
+
+def claim_listener() -> int:
+    """Take the trigger for this process. Returns 0 when it is ours, else the PID that holds it.
+
+    Two listeners on one key is not a half-working setup, it is a doubled one: two chimes, two
+    recorders on the same microphone, and the sentence pasted twice. It arrives the ordinary way —
+    the login agent is running and you start ``murmurflow listen`` in a terminal to watch it, or a
+    second install lands its own agent — so the second one stands down and says why.
+
+    ``O_EXCL`` rather than read-then-write, because two agents CAN start in the same instant at
+    login and a check that is not atomic is exactly the race that produces the doubled sound it
+    was added to prevent.
+    """
+    path = listener_lock_path()
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            holder = listener_pid()
+            if holder:
+                return holder
+            with contextlib.suppress(OSError):
+                path.unlink()  # stale: whoever wrote it is gone
+            continue
+        except OSError:
+            return 0  # a home we cannot write to is no reason to refuse to work
+        with os.fdopen(fd, "w") as handle:
+            handle.write(str(os.getpid()))
+        return 0
+    return listener_pid()
+
+
 def listen_loop(
     *,
     trigger: str = "",
@@ -1623,6 +1702,14 @@ def listen_loop(
     ready_ok, hint = available()
     if not ready_ok:
         emit(hint)
+        return
+    holder = claim_listener()
+    if holder:
+        emit(
+            f"[!] another murmurflow listener already has {trigger_key(trigger)} "
+            f"(pid {holder}) — this one stands down rather than double every sentence. "
+            "Stop the other one first: murmurflow uninstall"
+        )
         return
     reaped = reap_orphans()
     if reaped:

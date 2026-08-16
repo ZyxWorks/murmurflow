@@ -20,7 +20,7 @@ HOME_ENV = "MURMURFLOW_HOME"
 # Recognized keys, and what they do. Kept here rather than in a schema because the only consumer
 # that needs the list is `murmurflow config` printing it.
 KEYS: dict[str, str] = {
-    "trigger": "hold-to-talk key: left_control (default), right_command, right_option, right_shift, fn",
+    "trigger": "hold-to-talk key. Default control_option (two modifiers, so no shortcut can fire it). Also: command_option, control_command, control_shift, left_control, right_shift, f13, command, option",
     "doubleTap": "true = tap the trigger twice to start, twice to stop (instead of holding)",
     "model": "path to a ggml model file, overriding the best one found in ~/.murmurflow/models/",
     "language": "the spoken language, e.g. en / de. Default auto, which costs ~0.7s per clip",

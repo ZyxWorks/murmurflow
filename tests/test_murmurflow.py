@@ -286,3 +286,50 @@ def test_a_lock_left_by_a_crash_never_blocks_the_next_start(monkeypatch):
 def test_claiming_twice_from_the_same_process_is_not_a_conflict():
     assert dictate.claim_listener() == 0
     assert dictate.claim_listener() == 0
+
+
+# --- the trigger ---------------------------------------------------------------------------------
+
+
+def test_the_default_trigger_is_two_modifiers_so_no_shortcut_can_fire_it():
+    # A bare modifier is shared with every shortcut the user already types on it. The chord guard
+    # discards the AUDIO, but it cannot un-play the tone, and a tool that chimes while you work
+    # gets uninstalled.
+    from murmurflow import hotkey
+
+    assert hotkey.DEFAULT_TRIGGER in hotkey.COMBO_TRIGGERS
+    assert len(hotkey.COMBO_TRIGGERS[hotkey.DEFAULT_TRIGGER]) == 2
+
+
+def test_a_combo_is_down_only_when_every_one_of_its_flags_is():
+    from murmurflow import hotkey
+
+    class _Lib:
+        state = 0
+
+        def CGEventSourceFlagsState(self, _which):
+            return self.state
+
+    lib = _Lib()
+    lib.state = hotkey.FLAG_CONTROL
+    assert not hotkey.is_trigger_down("control_option", lib)  # half of it is not it
+    lib.state = hotkey.FLAG_CONTROL | hotkey.FLAG_OPTION
+    assert hotkey.is_trigger_down("control_option", lib)
+
+
+def test_every_combo_has_a_label_a_person_could_read():
+    from murmurflow import hotkey
+
+    for name in hotkey.COMBO_TRIGGERS:
+        assert name in dictate.TRIGGER_LABELS, f"{name} would print as a raw config key"
+
+
+def test_the_double_tap_window_is_measured_press_to_press():
+    from murmurflow import hotkey
+
+    # Release-to-release charged the second tap's own duration to the budget, so a 200ms gap plus
+    # a 200ms press missed it and an ordinary double-tap did nothing at all.
+    gap, press = 0.20, 0.20
+    assert gap + press > 0.35  # what the old window was, and why it missed
+    assert gap <= hotkey.DOUBLE_TAP_WINDOW
+    assert press <= hotkey.TAP_MAX

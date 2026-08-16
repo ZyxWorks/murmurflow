@@ -15,7 +15,7 @@ developer tools. It installs what is missing, downloads the speech model (~1.6 G
 dictation on for every login, and opens the one permission switch macOS will not let a script
 flip for you.
 
-Then hold **left Control**, say something, let go. That's the whole product.
+Then hold **Control+Option** together, say something, let go. That's the whole product.
 
 <details>
 <summary>Rather do it by hand?</summary>
@@ -54,6 +54,37 @@ is easier on the hand for long ones, and it is what macOS's own dictation does:
 ```sh
 murmurflow config set doubleTap true   # tap twice to start, once to stop
 ```
+
+Both take effect immediately — `config set` restarts the listener for you.
+
+### The trigger, and why it is two keys
+
+The default is **hold Control+Option (⌃⌥) together**.
+
+A single bare modifier would be nicer to press, and it is what this shipped with. It was wrong. The
+listener *polls* key state rather than intercepting it — that is what keeps this dependency-free and
+out of Input Monitoring — and the price of polling is that it cannot take a keypress away from
+anything else. So on bare Control, every `⌃C`, every `⌃←` to switch desktops, opens the microphone
+and plays a tone. The chord guard throws the audio away correctly; it cannot un-play the sound, and
+a tool that chimes while you work gets uninstalled.
+
+Two modifiers held together are typed by nobody in the course of ordinary work, are bound to nothing
+in macOS, and need no system setting turned off before they are safe.
+
+```sh
+murmurflow config set trigger command_option    # ⌘⌥
+murmurflow config set trigger control_command   # ⌃⌘
+murmurflow config set trigger left_control      # a single key, if you want it
+```
+
+> **If you rebind to a single key, turn Apple's off first.** macOS has its own "press Control twice
+> for dictation" and it is on by default on many Macs. Both will fire, and you get Apple's
+> microphone panel on top of this one. *System Settings → Keyboard → Dictation → Shortcut → Off.*
+> Nothing to turn off if you stay on the default `⌃⌥`.
+
+`murmurflow keytest` shows what this Mac actually reports for every bindable key. Use it before
+believing any of the above about your hardware — some MacBooks report the right-side Command and
+Option keys as the left ones, so a `right_*` trigger can never fire there.
 
 ---
 
@@ -163,7 +194,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 
 | key | what it does |
 |---|---|
-| `trigger` | the hold key. Default `left_control` — where macOS puts dictation, so your hand knows it |
+| `trigger` | the hold key. Default `control_option` — two modifiers, so no shortcut you already type can fire it |
 | `doubleTap` | `true` = tap twice to start, twice to stop, instead of holding |
 | `language` | `en`, `de`, … Default `auto`. Pinning saves ~0.7s per sentence, so pin it if you can |
 | `inputName` | part of a microphone name. Default: system default. `murmurflow devices` lists them |
@@ -172,9 +203,9 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `polishCommand` | see below |
 | `keepAudio` | keep the last clip for debugging a bad transcription |
 
-**Right Option is deliberately not the default.** On a German layout it's AltGr — the dead key for
-`@ € \ | ~ [ ] { }` — so binding dictation there fires the microphone on every email address and
-code bracket.
+**Right Option is deliberately not offered as a default.** On a German layout it's AltGr — the dead
+key for `@ € \ | ~ [ ] { }` — so binding dictation there fires the microphone on every email
+address and code bracket.
 
 ### Polish (optional)
 

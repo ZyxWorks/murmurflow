@@ -1594,9 +1594,25 @@ def bind_trigger(
     return f"hold {key}"
 
 
+#: How each trigger name reads to a person. A combo is two keys held TOGETHER and the name has to
+#: say so, or ``control_option`` reads as a choice between them.
+TRIGGER_LABELS = {
+    "control_option": "Control+Option (⌃⌥) together",
+    "control_command": "Control+Command (⌃⌘) together",
+    "command_option": "Command+Option (⌘⌥) together",
+    "control_shift": "Control+Shift (⌃⇧) together",
+}
+
+
+def trigger_label(trigger: str = "") -> str:
+    """The trigger as a person would say it out loud."""
+    key = trigger_key(trigger)
+    return TRIGGER_LABELS.get(key, key)
+
+
 def trigger_hint(trigger: str = "") -> str:
     """How to work the trigger right now, for a banner printed BEFORE the listener blocks."""
-    key = trigger_key(trigger)
+    key = trigger_label(trigger)
     return f"double-tap {key} to start, tap once to stop" if double_tap_mode() else f"hold {key}"
 
 

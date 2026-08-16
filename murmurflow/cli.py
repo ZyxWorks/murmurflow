@@ -162,7 +162,7 @@ def _tcc_entry() -> str:
     return f"{real.name}  ({real})"
 
 
-def _doctor() -> int:
+def _doctor(*, verbs: bool = False) -> int:
     """Everything that has to be true, each with the one command that makes it true.
 
     Ordered the way it actually fails: no recorder, no transcriber, no model, no permission.
@@ -244,7 +244,37 @@ def _doctor() -> int:
     _out(f"  cue: {dictate.cue_preset_name()}")
     polish = str(config.load().get("polishCommand", "") or "")
     _out(f"  polish: {polish or 'off (deterministic cleanup only)'}")
+    if verbs:
+        _verbs()
     return 0 if all(ok for ok, _, _ in rows) else 1
+
+
+#: The bare `murmurflow` prints these under the health report. Health answers "is it working";
+#: this answers "and what do I type next", which is the question that actually followed — a user
+#: who wanted a different tone had no way to discover `config set cue` from a list of green ticks.
+_VERBS = (
+    ("config set cue pebble", "change the sound: pebble · glass · marimba · soft · system · off"),
+    ("cues", "play every tone so you can pick one"),
+    (
+        "config set trigger control_option",
+        "change the key: control_option · command_option · left_control · f13",
+    ),
+    ("config set doubleTap true", "tap twice to start and once to stop, instead of holding"),
+    ("config set language en", "pin the language — worth ~0.7s a sentence"),
+    ("config", "every setting, with what it does"),
+    ("keytest", "does this Mac see your key, and does it read your gesture the way you think"),
+    ("devices", "list microphones (then: config set inputName <part of a name>)"),
+    ("install / uninstall", "turn dictation on or off for every login"),
+    ("--help", "everything else"),
+)
+
+
+def _verbs() -> None:
+    width = max(len(verb) for verb, _ in _VERBS)
+    _out("")
+    _out("  what you can change:")
+    for verb, what in _VERBS:
+        _out(f"    murmurflow {verb.ljust(width)}  {what}")
 
 
 def _devices() -> int:
@@ -275,7 +305,9 @@ def _keytest(*, trigger: str = "", seconds: float = 20.0) -> int:
     if not hotkey.available():
         _out("cannot read key state on this machine (is this macOS?)")
         return 1
-    watching = [trigger] if trigger else [*hotkey.FLAG_TRIGGERS, *hotkey.TRIGGERS]
+    watching = (
+        [trigger] if trigger else [*hotkey.COMBO_TRIGGERS, *hotkey.FLAG_TRIGGERS, *hotkey.TRIGGERS]
+    )
     gesture = "double-tap" if dictate.double_tap_mode() else "hold"
     _out(f"press any of these now — watching {len(watching)} key(s) for {seconds:.0f}s.")
     _out(f"your trigger is {dictate.trigger_key()}, your gesture is {gesture}. ctrl-c to stop.")
@@ -350,6 +382,10 @@ def _config(action: str = "", key: str = "", value: str = "") -> int:
             return 2
         config.set_value(key, config.coerce(value) if value else None)
         _out(f"{key} = {value or '(unset)'}")
+        # The running listener read `trigger` and `doubleTap` when it bound and will not look
+        # again, so without this the setting changed and the behaviour did not.
+        if service.restart():
+            _out("[OK] restarted the listener so it takes effect now")
         return 0
     current = config.load()
     _out(f"{config.config_path()}")
@@ -452,7 +488,9 @@ def main(argv: list[str] | None = None) -> int:
         if command == "setup":
             return _setup(args.model)
         if command == "doctor":
-            return _doctor()
+            # The BARE `murmurflow` also lists what you can change. `murmurflow doctor`, typed on
+            # purpose, does not — that one is a health check somebody is reading for one answer.
+            return _doctor(verbs=not args.command)
         if command == "devices":
             return _devices()
         if command == "keytest":

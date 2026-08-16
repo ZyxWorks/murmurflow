@@ -191,6 +191,25 @@ def _load() -> ctypes.CDLL:
     return lib
 
 
+def accessibility_trusted() -> bool:
+    """Has THIS binary been granted Accessibility — the grant that lets the text be typed?
+
+    ``AXIsProcessTrusted`` and never ``AXIsProcessTrustedWithOptions``: the options form is the one
+    that raises a system dialog, and a diagnostic that puts up a modal every time it runs is worse
+    than the question it answers. The grant attaches to the EXECUTABLE, and the daemon and this CLI
+    run the same interpreter, so asking on our own behalf also answers for the daemon.
+    """
+    path = ctypes.util.find_library("ApplicationServices")
+    if not path:
+        return False
+    try:
+        lib = ctypes.CDLL(path)
+        lib.AXIsProcessTrusted.restype = ctypes.c_bool
+        return bool(lib.AXIsProcessTrusted())
+    except (OSError, AttributeError):
+        return False
+
+
 def seconds_since_keydown(lib: ctypes.CDLL | None = None) -> float:
     """Seconds since the last real key-down OR mouse click anywhere on the system.
 

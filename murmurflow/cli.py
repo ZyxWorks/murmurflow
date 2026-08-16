@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import signal
 import subprocess
 import sys
 import time
@@ -107,12 +108,14 @@ def _install() -> int:
     _out("  1. Microphone      — to hear you")
     _out("  2. Accessibility   — to type into the app you are using")
     _out("")
-    _out("The apps you dictate INTO need nothing. Every permission goes to this one process.")
+    _out("The apps you dictate INTO need nothing. Every permission goes to this one process,")
+    _out("which System Settings lists under the name of its interpreter, NOT 'murmurflow':")
+    _out(f"  {_tcc_entry()}")
     # Opening the exact pane, rather than naming a path through System Settings, is the difference
     # between "one switch is highlighted for you" and a person who has never opened Privacy &
     # Security hunting for it. Best-effort: a Mac that refuses the URL still has the sentence above.
     _out("")
-    _out("Opening the Accessibility pane now — switch murmurflow ON there.")
+    _out("Opening the Accessibility pane now — switch that entry ON.")
     with contextlib.suppress(OSError, subprocess.SubprocessError):
         subprocess.run(
             [
@@ -137,6 +140,20 @@ def _uninstall() -> int:
 
 
 # --- diagnosis --------------------------------------------------------------------------------
+
+
+def _tcc_entry() -> str:
+    """What System Settings CALLS this program in its permission lists, and where that file is.
+
+    macOS names a permission row after the EXECUTABLE that asked, and for a Python tool that is the
+    interpreter rather than the console script — so the row reads ``python3.13`` and somebody
+    scrolling for ``murmurflow`` never finds it, or worse, switches on a neighbouring row belonging
+    to some other tool sharing an interpreter. Naming it exactly is the difference between a switch
+    found and a switch hunted for. A signed .app bundle is what would make the row say MurmurFlow,
+    and that is a bigger change than this one.
+    """
+    real = Path(sys.executable).resolve()
+    return f"{real.name}  ({real})"
 
 
 def _doctor() -> int:
@@ -166,8 +183,34 @@ def _doctor() -> int:
             "grant Input Monitoring, then run: murmurflow keytest",
         )
     )
+    rows.append(
+        (
+            hotkey.accessibility_trusted(),
+            "accessibility: "
+            + (
+                "granted"
+                if hotkey.accessibility_trusted()
+                else "NOT granted — nothing can be typed"
+            ),
+            f"switch on '{_tcc_entry()}' in System Settings > Privacy & Security > Accessibility",
+        )
+    )
     _, device = dictate.resolve_input()
     rows.append((True, f"microphone: {device}", ""))
+    live = dictate.listener_pids()
+    rows.append(
+        (
+            len(live) <= 1,
+            "listeners: "
+            + (
+                f"{len(live)} ({', '.join(str(pid) for pid in live) or 'none — dictation is off'})"
+                if len(live) <= 1
+                else f"{len(live)} AT ONCE ({', '.join(str(pid) for pid in live)}) "
+                "— every sound and every sentence doubles"
+            ),
+            "murmurflow uninstall, then murmurflow install",
+        )
+    )
     rows.append(
         (
             not dictate.secure_input_active(),
@@ -353,6 +396,10 @@ def _transcribe(path: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # `murmurflow doctor | head` must not end in a BrokenPipeError traceback. Restoring the default
+    # SIGPIPE makes this exit quietly when the reader walks away, the way every other Unix tool does.
+    with contextlib.suppress(OSError, ValueError):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     parser = argparse.ArgumentParser(
         prog="murmurflow",
         description="Hold a key, talk, let go. The text appears at your cursor. Nothing leaves your Mac.",

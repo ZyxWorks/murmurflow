@@ -573,6 +573,32 @@ def start_server(*, wait: float = 60.0) -> bool:
     return False
 
 
+def stop_server() -> int:
+    """Stop the warm whisper-server this install started. Returns how many were stopped.
+
+    ``start_server`` detaches it with ``start_new_session=True`` so it outlives the listener, which
+    is the whole point while dictation is installed — and a leak the moment it is not: 1.8 GB
+    resident with nothing left to ask it anything, until the next reboot. Matched on OUR port,
+    because a whisper-server on any other port belongs to somebody else.
+    """
+    try:
+        found = subprocess.run(
+            ["pgrep", "-f", f"whisper-server.*--port {port()}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    stopped = 0
+    for token in found.stdout.split():
+        with contextlib.suppress(ValueError, ProcessLookupError, PermissionError):
+            os.kill(int(token), signal.SIGTERM)
+            stopped += 1
+    return stopped
+
+
 def _multipart(wav: Path, fields: dict[str, str]) -> tuple[bytes, str]:
     """Build a multipart/form-data body for whisper-server's ``/inference`` (stdlib only)."""
     boundary = f"----murmurflow{uuid.uuid4().hex}"

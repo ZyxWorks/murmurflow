@@ -8,6 +8,8 @@ found, the text is not typed — and each of those has its own verb that answers
 from __future__ import annotations
 
 import argparse
+import contextlib
+import subprocess
 import sys
 import time
 import urllib.error
@@ -104,15 +106,33 @@ def _install() -> int:
     _out("and both are required:")
     _out("  1. Microphone      — to hear you")
     _out("  2. Accessibility   — to type into the app you are using")
-    _out("     System Settings > Privacy & Security > Accessibility")
     _out("")
     _out("The apps you dictate INTO need nothing. Every permission goes to this one process.")
+    # Opening the exact pane, rather than naming a path through System Settings, is the difference
+    # between "one switch is highlighted for you" and a person who has never opened Privacy &
+    # Security hunting for it. Best-effort: a Mac that refuses the URL still has the sentence above.
+    _out("")
+    _out("Opening the Accessibility pane now — switch murmurflow ON there.")
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(
+            [
+                "open",
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            ],
+            timeout=10,
+            check=False,
+        )
     return 0 if ok else 1
 
 
 def _uninstall() -> int:
     ok, detail = service.uninstall()
+    # The warm whisper-server is detached on purpose and would otherwise sit on ~1.8 GB until the
+    # next reboot, long after the thing that talked to it was removed.
+    freed = dictate.stop_server()
     _out("[OK] dictation stopped and removed from login." if ok else f"[!] {detail}")
+    if freed:
+        _out("[OK] stopped the warm whisper-server")
     return 0 if ok else 1
 
 

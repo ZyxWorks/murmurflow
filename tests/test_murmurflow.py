@@ -221,3 +221,40 @@ def test_available_names_the_fix_and_never_raises():
 def test_the_short_clip_floor_is_not_treated_as_a_failure():
     # A brushed key is a gesture that was never a sentence; the daemon must not chime at it.
     assert dictate.TOO_SHORT in "too short — hold the key while you talk"
+
+
+# --- stopping the warm server -------------------------------------------------------------------
+
+
+def test_stop_server_matches_our_port_and_never_a_neighbours(monkeypatch):
+    # A second dictation tool on the same Mac runs its own whisper-server on its own port. Killing
+    # by process NAME would take it down too; killing by port is the whole safety of this function.
+    config.set_value("port", 8479)
+    seen: dict[str, list[str]] = {}
+    killed: list[int] = []
+
+    class _Done:
+        stdout = "111\n222\n"
+
+    def _run(argv, **kwargs):
+        seen["argv"] = argv
+        return _Done()
+
+    monkeypatch.setattr(dictate.subprocess, "run", _run)
+    monkeypatch.setattr(dictate.os, "kill", lambda pid, sig: killed.append(pid))
+
+    assert dictate.stop_server() == 2
+    assert killed == [111, 222]
+    assert "8479" in seen["argv"][-1]
+
+
+def test_stop_server_survives_a_process_that_is_already_gone(monkeypatch):
+    class _Done:
+        stdout = "333\n"
+
+    def _boom(pid, sig):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(dictate.subprocess, "run", lambda argv, **kw: _Done())
+    monkeypatch.setattr(dictate.os, "kill", _boom)
+    assert dictate.stop_server() == 0

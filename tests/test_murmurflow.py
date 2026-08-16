@@ -288,6 +288,21 @@ def test_claiming_twice_from_the_same_process_is_not_a_conflict():
     assert dictate.claim_listener() == 0
 
 
+def test_a_rival_daemon_on_the_same_key_is_found_and_named(monkeypatch):
+    # The doubling the lock CANNOT catch: another program, its own lock file, the same double-tap.
+    # murmurflow was extracted from zyx, so a Mac running both is the ordinary case, not an exotic
+    # one — and the murmurflow-only count reads a healthy "1" straight through it.
+    monkeypatch.setattr(
+        dictate, "_pgrep", lambda pattern: [31073] if pattern == "zyx voice listen" else []
+    )
+    assert dictate.rival_listeners() == [("zyx", [31073], "zyx voice uninstall")]
+
+
+def test_nothing_else_on_the_key_reports_no_rival(monkeypatch):
+    monkeypatch.setattr(dictate, "_pgrep", lambda pattern: [])
+    assert dictate.rival_listeners() == []
+
+
 # --- the trigger ---------------------------------------------------------------------------------
 
 

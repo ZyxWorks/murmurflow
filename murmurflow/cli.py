@@ -274,6 +274,7 @@ _VERBS = (
     ),
     ("config set doubleTap true", "tap twice to start and once to stop, instead of holding"),
     ("config set language en", "pin the language — worth ~0.7s a sentence"),
+    ("config set stripFillers true", "delete 'um' and a leading 'hey' — off, so you get verbatim"),
     ("config", "every setting, with what it does"),
     ("keytest", "does this Mac see your key, and does it read your gesture the way you think"),
     ("devices", "list microphones (then: config set inputName <part of a name>)"),
@@ -488,6 +489,14 @@ def main(argv: list[str] | None = None) -> int:
 
     p_listen = sub.add_parser("run", help=argparse.SUPPRESS)  # alias for `listen`
     p_listen.add_argument("--trigger", default="")
+
+    # `murmurflow murmurflow config set cue glass` is what happens when somebody copies a line out
+    # of the help, which prints every verb with the program name in front so it can be pasted
+    # whole. Both readings are the same intent and argparse answered the honest one with a wall of
+    # `invalid choice`. Only a LEADING repeat is dropped, so `transcribe murmurflow.wav` is safe.
+    argv = list(sys.argv[1:] if argv is None else argv)
+    while argv and argv[0] == "murmurflow":
+        argv.pop(0)
 
     args = parser.parse_args(argv)
     command = args.command or "doctor"

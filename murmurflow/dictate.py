@@ -750,26 +750,25 @@ MAX_CLIP_SECONDS = 600
 # is the worst failure this tool has — silence should produce nothing, never words you did not
 # say. Matched on the whole (stripped, lowercased) transcript only, so a sentence that genuinely
 # contains "thank you" is untouched.
+#
+# NARROWED, after it ate real utterances. It used to hold "thank you", "you", "so" and "bye" — all
+# four are things a person says as a complete sentence, and swallowing them looked to the user like
+# the microphone had failed. That list was doing the job `QUIET_DBFS` now does properly, from the
+# waveform and before whisper is ever asked: silence no longer reaches the transcriber at all, so
+# the blocklist no longer has to guess whether a short polite sentence was real.
+#
+# What stays is only what a person does NOT say: subtitle-rip credits and literal audio markers.
+# The bias is deliberate and one-directional — a hallucination that slips through is visible and
+# deletable, while a real sentence that is swallowed is invisible and looks like broken hardware.
 _HALLUCINATIONS: frozenset[str] = frozenset(
     {
-        "thank you.",
-        "thank you",
         "thanks for watching!",
         "thanks for watching.",
-        "you",
-        "you.",
-        ".",
-        "so",
-        "so.",
-        "bye.",
-        "bye",
         "[blank_audio]",
         "(silence)",
         "untertitel von stephanie geiges",
         "untertitel der amara.org-community",
         "untertitelung aufgrund der amara.org-community",
-        "vielen dank.",
-        "vielen dank",
         "amara.org",
     }
 )
@@ -819,18 +818,30 @@ _DANGLING_TAIL = re.compile(r"[,;:]+\s*$")
 
 
 def tidy(transcript: str) -> str:
-    """Deterministic cleanup of a raw transcript: strip fillers, repair the punctuation they left.
+    """Deterministic cleanup of a raw transcript. VERBATIM unless ``stripFillers`` is turned on.
 
-    Costs ~0 ms, which is why it — and not an LLM — is what runs on the hot path by default. It
-    removes only what was verifiably noise and repairs the seams; it never paraphrases, so a clean
-    transcript passes through unchanged. The judgement calls an LLM would make (resolving "no wait,
-    scratch that", reflowing into bullets) live in :func:`polish`, off by default.
+    Costs ~0 ms, which is why it — and not an LLM — runs on the hot path. The judgement calls an
+    LLM would make (resolving "no wait, scratch that", reflowing into bullets) live in
+    :func:`polish`, off by default.
+
+    **Filler stripping is OFF by default, and that is a correction, not a preference.** It shipped
+    on, and it deleted a leading "hey" — exactly as designed, and still wrong. Somebody dictating
+    "hey, it seems like our murmurflow is still not working" watched the first word of their own
+    sentence vanish, with no way to know why or that a setting existed. The contract of a dictation
+    tool is that what you said is what appears. A tool that silently edits you is not a faster
+    keyboard, it is an unpredictable one. An "um" left in is visible and deletable in one keystroke;
+    a word removed is invisible, and you only find it by re-reading your own sentence.
     """
-    text = strip_fillers(transcript)
+    stripping = config.flag("stripFillers", False, cfg=_cfg())
+    text = strip_fillers(transcript) if stripping else transcript.strip()
     text = _SPACE_BEFORE_PUNCT.sub(r"\1", text)
     text = _DOUBLED_PUNCT.sub(r"\2", text)
-    ended = transcript.rstrip().endswith((".", "!", "?"))
-    text = _DANGLING_TAIL.sub("." if ended else "", text)
+    if stripping:
+        # Seam repair, and ONLY meaningful after a strip: it exists to close the ", ," a removed
+        # filler leaves behind. Run unconditionally it would quietly eat a trailing comma somebody
+        # dictated on purpose, which is the same class of bug as the strip itself.
+        ended = transcript.rstrip().endswith((".", "!", "?"))
+        text = _DANGLING_TAIL.sub("." if ended else "", text)
     return text.strip()
 
 
@@ -1337,7 +1348,17 @@ _CUE_PRESETS: dict[str, tuple[_Timbre, dict[str, tuple[tuple[float, float, float
         },
     ),
 }
-DEFAULT_CUE = "pebble"
+# THE DEFAULT IS THE SYSTEM SOUND (operator, after living with both). The generated presets were
+# the default on the argument below — that every sound in /System/Library/Sounds is an ALERT, mixed
+# to interrupt. True, and beside the point in practice: a Mac user has heard Tink and Pop for twenty
+# years, so they read as "the machine acknowledged you" without being learned, and they are already
+# tuned to the output device and the user's alert-volume setting, which a generated tone is not.
+#
+# `pebble` is the FALLBACK, not a rival: if the system sound is missing — a stripped install, or any
+# machine that is not a Mac — a cue must still play. It is the only signal that the microphone is
+# live, so losing it to a missing file is not an acceptable failure.
+DEFAULT_CUE = "system"
+FALLBACK_PRESET = "pebble"
 
 
 def cue_presets() -> tuple[str, ...]:
@@ -1379,7 +1400,7 @@ def _cue_file(kind: str, preset: str = "") -> Path | None:
     preset costs one synthesis each. Written to a temp name and renamed, because a half-written wav
     would be a permanently broken cue.
     """
-    timbre_notes = _CUE_PRESETS.get(preset or DEFAULT_CUE)
+    timbre_notes = _CUE_PRESETS.get(preset or FALLBACK_PRESET)
     if timbre_notes is None:
         return None
     timbre, cues = timbre_notes
@@ -1387,7 +1408,7 @@ def _cue_file(kind: str, preset: str = "") -> Path | None:
     if not notes:
         return None
     try:
-        path = _scratch_dir() / "cues" / f"{preset or DEFAULT_CUE}-{kind}-v{_CUE_REVISION}.wav"
+        path = _scratch_dir() / "cues" / f"{preset or FALLBACK_PRESET}-{kind}-v{_CUE_REVISION}.wav"
         if path.is_file():
             return path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1465,9 +1486,15 @@ def _cue_path(kind: str) -> str:
                 supplied = _custom_cue(folder, kind)
                 if supplied:
                     return supplied
-    if setting.lower() == "system":
-        return _SYSTEM_CUES.get(kind, kind)
-    preset = setting.lower() if setting.lower() in _CUE_PRESETS else DEFAULT_CUE
+    if not setting or setting.lower() == "system":
+        system = _SYSTEM_CUES.get(kind, "")
+        if system and Path(system).is_file():
+            return system
+        # A missing system sound must not mean silence. The cue is the only signal that the
+        # microphone is live, so the generated fallback answers for it.
+        fallback = _cue_file(kind, FALLBACK_PRESET)
+        return str(fallback) if fallback else kind
+    preset = setting.lower() if setting.lower() in _CUE_PRESETS else FALLBACK_PRESET
     generated = _cue_file(kind, preset)
     return str(generated) if generated else _SYSTEM_CUES.get(kind, kind)
 

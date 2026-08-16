@@ -40,15 +40,25 @@ update-shell` fixes that for the next terminal you open.
 ### The first two things people change
 
 **The sound.** Two tones per sentence, a few hundred times a day, is the setting that decides
-whether the tool feels invisible or naggy. The default is `pebble` — one short low blip, close to
-subliminal. Audition the rest and pick:
+whether the tool feels invisible or naggy. The default is `system` — the Mac's own Tink and Pop,
+which you have heard for twenty years and which follow your alert-volume setting. On a machine
+without them it falls back to `pebble`, a generated blip, because the cue is the only signal that
+the microphone is live and it must never fall through to silence.
 
 ```sh
 murmurflow cues                  # plays every preset so you can hear them
-murmurflow config set cue glass  # glass · marimba · pebble · soft · system · off
+murmurflow config set cue pebble # system · pebble · glass · marimba · soft · off
 ```
 
 `off` is a real answer: the text landing at your cursor already tells you it worked.
+
+**What you said is what you get.** Nothing is removed, reworded or reordered. If you say
+"hey, ship it on Friday", "hey" appears. There is an opt-in filler strip, and it is opt-in for a
+reason — a word deleted is invisible, while an "um" left in costs one keystroke:
+
+```sh
+murmurflow config set stripFillers true   # deletes um / you know / a leading hey, so, well
+```
 
 **Hold, or double-tap.** Holding is the default and it is faster for one short sentence. Double-tap
 is easier on the hand for long ones, and it is what macOS's own dictation does:
@@ -212,6 +222,8 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `vocabulary` | proper nouns to bias the transcriber toward |
 | `cue` | tone preset: `pebble` (default, near-subliminal), `glass`, `marimba`, `soft`, `system`, `off`. `murmurflow cues` plays them |
 | `polishCommand` | see below |
+| `stripFillers` | `true` = delete `um`, `you know`, and a leading `hey`/`so`/`well`. **Off** — you get verbatim |
+| `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |
 | `keepAudio` | keep the last clip for debugging a bad transcription |
 
 **Right Option is deliberately not offered as a default.** On a German layout it's AltGr — the dead

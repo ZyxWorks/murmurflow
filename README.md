@@ -7,13 +7,33 @@ A free, local alternative to the paid cloud dictation apps. No account, no subsc
 no telemetry, and no Python dependencies at all.
 
 ```sh
-brew install whisper-cpp ffmpeg
-pipx install murmurflow      # or: uv tool install murmurflow
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/hannesreinsch/murmurflow/main/install.sh)"
+```
+
+Paste that into Terminal. It works on a Mac with nothing on it: no Homebrew, no Python, no
+developer tools. It installs what is missing, downloads the speech model (~1.6 GB, once), turns
+dictation on for every login, and opens the one permission switch macOS will not let a script
+flip for you.
+
+Then hold **left Control**, say something, let go. That's the whole product.
+
+<details>
+<summary>Rather do it by hand?</summary>
+
+macOS ships Python 3.9 and MurmurFlow needs 3.11+, so `uv` (which brings its own) is the path with
+the fewest ways to go wrong:
+
+```sh
+brew install whisper-cpp ffmpeg uv
+uv tool install --python 3.13 git+https://github.com/hannesreinsch/murmurflow
 murmurflow setup             # downloads the speech model (~1.6 GB, once)
 murmurflow install           # dictation is live now, and after every login
 ```
 
-Hold **left Control**, say something, let go. That's the whole product.
+If `murmurflow` is not found afterwards, `~/.local/bin` is not on your `PATH` — `uv tool
+update-shell` fixes that for the next terminal you open.
+
+</details>
 
 ---
 

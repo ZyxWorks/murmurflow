@@ -90,6 +90,17 @@ def build_app() -> Path | None:
     return executable
 
 
+def remove_app() -> bool:
+    """Delete the bundle. True if there was one. Uninstalling must not leave an app behind."""
+    if not app_path().is_dir():
+        return False
+    try:
+        shutil.rmtree(app_path())
+    except OSError:
+        return False
+    return True
+
+
 def bundle_env() -> dict[str, str]:
     """The two variables the bundled interpreter cannot work out for itself.
 

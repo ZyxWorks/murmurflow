@@ -133,9 +133,15 @@ def _uninstall() -> int:
     # The warm whisper-server is detached on purpose and would otherwise sit on ~1.8 GB until the
     # next reboot, long after the thing that talked to it was removed.
     freed = dictate.stop_server()
+    # And the .app, or `uninstall` leaves an application in ~/Applications forever. Recreating it
+    # later at the same path from the same interpreter reproduces the cdhash, so the Privacy grant
+    # is not spent by removing it.
+    removed = service.remove_app()
     _out("[OK] dictation stopped and removed from login." if ok else f"[!] {detail}")
     if freed:
         _out("[OK] stopped the warm whisper-server")
+    if removed:
+        _out(f"[OK] removed {service.app_path()}")
     return 0 if ok else 1
 
 

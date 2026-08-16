@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from murmurflow import config, dictate, whisper
+from murmurflow import cli, config, dictate, whisper
 
 
 @pytest.fixture(autouse=True)
@@ -74,18 +74,17 @@ def test_flag_tolerates_hand_edited_strings():
 
 
 # --- the hallucination traps -------------------------------------------------------------------
-# These are the highest-stakes logic in the tool: a false negative types words into your document
-# that you never said.
+# The highest-stakes logic in the tool, and it cuts BOTH ways: a false negative types words into
+# your document that you never said, and a false positive deletes a sentence you did say, which
+# reads as broken hardware. The list is only what a person never utters; `QUIET_DBFS` handles
+# silence from the waveform, before whisper is asked anything.
 
 
 @pytest.mark.parametrize(
     "text",
     [
-        "Thank you.",
         "thanks for watching!",
         "[BLANK_AUDIO]",
-        "Vielen Dank.",
-        "you",
         "*sad*",
         "[MUSIC]",
         "(wind blowing)",
@@ -131,6 +130,7 @@ def test_strip_never_empties_a_line_that_was_all_filler():
 
 def test_punctuation_left_dangling_by_the_strip_is_repaired():
     # "...fixed, um, you know." -> the strip leaves "fixed," hanging at the end of the line.
+    config.set_value("stripFillers", True)
     assert dictate.tidy("It is fixed, um, you know.") == "It is fixed."
 
 
@@ -425,3 +425,42 @@ def test_a_soft_voice_can_lower_the_floor_rather_than_being_stuck():
     assert dictate.quiet_floor() == dictate.QUIET_DBFS
     config.set_value("quietFloor", -45)
     assert dictate.quiet_floor() == -45.0
+
+
+# --- what you said is what you get ----------------------------------------------------------------
+
+
+def test_tidy_is_verbatim_by_default_including_the_word_hey():
+    # The report: "sometimes I say 'hey, it seems like our murmurflow is still not working' and it
+    # just redacts the hey." It did, by design, and the design was wrong. A word removed is
+    # invisible; an "um" left in costs one keystroke.
+    said = "hey, it seems like our murmurflow is still not working"
+    assert dictate.tidy(said) == said
+    assert dictate.tidy("So, um, ship it on Friday") == "So, um, ship it on Friday"
+    assert dictate.tidy("this is, you know, basically fine") == "this is, you know, basically fine"
+
+
+def test_filler_stripping_still_works_when_it_is_asked_for():
+    config.set_value("stripFillers", True)
+    assert dictate.tidy("So, um, ship it on Friday") == "ship it on Friday"
+
+
+@pytest.mark.parametrize("said", ["thank you", "Thank you.", "you", "so", "bye", "Vielen Dank."])
+def test_a_short_polite_sentence_is_never_swallowed(said):
+    # These were all on the hallucination blocklist. Every one is something a person says as a
+    # whole utterance, and swallowing it reads to the user as a broken microphone. QUIET_DBFS does
+    # this job properly now, from the waveform, before whisper is ever asked.
+    assert not dictate.is_hallucination(said)
+
+
+@pytest.mark.parametrize(
+    "junk", ["Thanks for watching!", "[BLANK_AUDIO]", "amara.org", "(silence)"]
+)
+def test_what_a_person_never_says_is_still_trapped(junk):
+    assert dictate.is_hallucination(junk)
+
+
+def test_the_program_name_typed_twice_is_the_same_command():
+    # `murmurflow murmurflow config set cue glass` - what happens when the help, which prints every
+    # verb with the program name so it can be pasted whole, gets pasted after typing the name.
+    assert cli.main(["murmurflow", "config"]) == 0

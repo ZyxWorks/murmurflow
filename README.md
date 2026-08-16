@@ -50,6 +50,14 @@ murmurflow config set cue glass  # glass · marimba · pebble · soft · system 
 
 `off` is a real answer: the text landing at your cursor already tells you it worked.
 
+**What you said is what you get.** Nothing is removed, reworded or reordered. If you say
+"hey, ship it on Friday", "hey" appears. There is an opt-in filler strip, and it is opt-in for a
+reason — a word deleted is invisible, while an "um" left in costs one keystroke:
+
+```sh
+murmurflow config set stripFillers true   # deletes um / you know / a leading hey, so, well
+```
+
 **Hold, or double-tap.** Holding is the default and it is faster for one short sentence. Double-tap
 is easier on the hand for long ones, and it is what macOS's own dictation does:
 
@@ -212,6 +220,8 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `vocabulary` | proper nouns to bias the transcriber toward |
 | `cue` | tone preset: `pebble` (default, near-subliminal), `glass`, `marimba`, `soft`, `system`, `off`. `murmurflow cues` plays them |
 | `polishCommand` | see below |
+| `stripFillers` | `true` = delete `um`, `you know`, and a leading `hey`/`so`/`well`. **Off** — you get verbatim |
+| `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |
 | `keepAudio` | keep the last clip for debugging a bad transcription |
 
 **Right Option is deliberately not offered as a default.** On a German layout it's AltGr — the dead

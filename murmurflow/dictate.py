@@ -750,26 +750,25 @@ MAX_CLIP_SECONDS = 600
 # is the worst failure this tool has — silence should produce nothing, never words you did not
 # say. Matched on the whole (stripped, lowercased) transcript only, so a sentence that genuinely
 # contains "thank you" is untouched.
+#
+# NARROWED, after it ate real utterances. It used to hold "thank you", "you", "so" and "bye" — all
+# four are things a person says as a complete sentence, and swallowing them looked to the user like
+# the microphone had failed. That list was doing the job `QUIET_DBFS` now does properly, from the
+# waveform and before whisper is ever asked: silence no longer reaches the transcriber at all, so
+# the blocklist no longer has to guess whether a short polite sentence was real.
+#
+# What stays is only what a person does NOT say: subtitle-rip credits and literal audio markers.
+# The bias is deliberate and one-directional — a hallucination that slips through is visible and
+# deletable, while a real sentence that is swallowed is invisible and looks like broken hardware.
 _HALLUCINATIONS: frozenset[str] = frozenset(
     {
-        "thank you.",
-        "thank you",
         "thanks for watching!",
         "thanks for watching.",
-        "you",
-        "you.",
-        ".",
-        "so",
-        "so.",
-        "bye.",
-        "bye",
         "[blank_audio]",
         "(silence)",
         "untertitel von stephanie geiges",
         "untertitel der amara.org-community",
         "untertitelung aufgrund der amara.org-community",
-        "vielen dank.",
-        "vielen dank",
         "amara.org",
     }
 )
@@ -819,18 +818,30 @@ _DANGLING_TAIL = re.compile(r"[,;:]+\s*$")
 
 
 def tidy(transcript: str) -> str:
-    """Deterministic cleanup of a raw transcript: strip fillers, repair the punctuation they left.
+    """Deterministic cleanup of a raw transcript. VERBATIM unless ``stripFillers`` is turned on.
 
-    Costs ~0 ms, which is why it — and not an LLM — is what runs on the hot path by default. It
-    removes only what was verifiably noise and repairs the seams; it never paraphrases, so a clean
-    transcript passes through unchanged. The judgement calls an LLM would make (resolving "no wait,
-    scratch that", reflowing into bullets) live in :func:`polish`, off by default.
+    Costs ~0 ms, which is why it — and not an LLM — runs on the hot path. The judgement calls an
+    LLM would make (resolving "no wait, scratch that", reflowing into bullets) live in
+    :func:`polish`, off by default.
+
+    **Filler stripping is OFF by default, and that is a correction, not a preference.** It shipped
+    on, and it deleted a leading "hey" — exactly as designed, and still wrong. Somebody dictating
+    "hey, it seems like our murmurflow is still not working" watched the first word of their own
+    sentence vanish, with no way to know why or that a setting existed. The contract of a dictation
+    tool is that what you said is what appears. A tool that silently edits you is not a faster
+    keyboard, it is an unpredictable one. An "um" left in is visible and deletable in one keystroke;
+    a word removed is invisible, and you only find it by re-reading your own sentence.
     """
-    text = strip_fillers(transcript)
+    stripping = config.flag("stripFillers", False, cfg=_cfg())
+    text = strip_fillers(transcript) if stripping else transcript.strip()
     text = _SPACE_BEFORE_PUNCT.sub(r"\1", text)
     text = _DOUBLED_PUNCT.sub(r"\2", text)
-    ended = transcript.rstrip().endswith((".", "!", "?"))
-    text = _DANGLING_TAIL.sub("." if ended else "", text)
+    if stripping:
+        # Seam repair, and ONLY meaningful after a strip: it exists to close the ", ," a removed
+        # filler leaves behind. Run unconditionally it would quietly eat a trailing comma somebody
+        # dictated on purpose, which is the same class of bug as the strip itself.
+        ended = transcript.rstrip().endswith((".", "!", "?"))
+        text = _DANGLING_TAIL.sub("." if ended else "", text)
     return text.strip()
 
 

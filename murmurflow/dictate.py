@@ -1348,7 +1348,17 @@ _CUE_PRESETS: dict[str, tuple[_Timbre, dict[str, tuple[tuple[float, float, float
         },
     ),
 }
-DEFAULT_CUE = "pebble"
+# THE DEFAULT IS THE SYSTEM SOUND (operator, after living with both). The generated presets were
+# the default on the argument below — that every sound in /System/Library/Sounds is an ALERT, mixed
+# to interrupt. True, and beside the point in practice: a Mac user has heard Tink and Pop for twenty
+# years, so they read as "the machine acknowledged you" without being learned, and they are already
+# tuned to the output device and the user's alert-volume setting, which a generated tone is not.
+#
+# `pebble` is the FALLBACK, not a rival: if the system sound is missing — a stripped install, or any
+# machine that is not a Mac — a cue must still play. It is the only signal that the microphone is
+# live, so losing it to a missing file is not an acceptable failure.
+DEFAULT_CUE = "system"
+FALLBACK_PRESET = "pebble"
 
 
 def cue_presets() -> tuple[str, ...]:
@@ -1390,7 +1400,7 @@ def _cue_file(kind: str, preset: str = "") -> Path | None:
     preset costs one synthesis each. Written to a temp name and renamed, because a half-written wav
     would be a permanently broken cue.
     """
-    timbre_notes = _CUE_PRESETS.get(preset or DEFAULT_CUE)
+    timbre_notes = _CUE_PRESETS.get(preset or FALLBACK_PRESET)
     if timbre_notes is None:
         return None
     timbre, cues = timbre_notes
@@ -1398,7 +1408,7 @@ def _cue_file(kind: str, preset: str = "") -> Path | None:
     if not notes:
         return None
     try:
-        path = _scratch_dir() / "cues" / f"{preset or DEFAULT_CUE}-{kind}-v{_CUE_REVISION}.wav"
+        path = _scratch_dir() / "cues" / f"{preset or FALLBACK_PRESET}-{kind}-v{_CUE_REVISION}.wav"
         if path.is_file():
             return path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1476,9 +1486,15 @@ def _cue_path(kind: str) -> str:
                 supplied = _custom_cue(folder, kind)
                 if supplied:
                     return supplied
-    if setting.lower() == "system":
-        return _SYSTEM_CUES.get(kind, kind)
-    preset = setting.lower() if setting.lower() in _CUE_PRESETS else DEFAULT_CUE
+    if not setting or setting.lower() == "system":
+        system = _SYSTEM_CUES.get(kind, "")
+        if system and Path(system).is_file():
+            return system
+        # A missing system sound must not mean silence. The cue is the only signal that the
+        # microphone is live, so the generated fallback answers for it.
+        fallback = _cue_file(kind, FALLBACK_PRESET)
+        return str(fallback) if fallback else kind
+    preset = setting.lower() if setting.lower() in _CUE_PRESETS else FALLBACK_PRESET
     generated = _cue_file(kind, preset)
     return str(generated) if generated else _SYSTEM_CUES.get(kind, kind)
 

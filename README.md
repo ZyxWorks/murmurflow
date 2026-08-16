@@ -40,12 +40,14 @@ update-shell` fixes that for the next terminal you open.
 ### The first two things people change
 
 **The sound.** Two tones per sentence, a few hundred times a day, is the setting that decides
-whether the tool feels invisible or naggy. The default is `pebble` — one short low blip, close to
-subliminal. Audition the rest and pick:
+whether the tool feels invisible or naggy. The default is `system` — the Mac's own Tink and Pop,
+which you have heard for twenty years and which follow your alert-volume setting. On a machine
+without them it falls back to `pebble`, a generated blip, because the cue is the only signal that
+the microphone is live and it must never fall through to silence.
 
 ```sh
 murmurflow cues                  # plays every preset so you can hear them
-murmurflow config set cue glass  # glass · marimba · pebble · soft · system · off
+murmurflow config set cue pebble # system · pebble · glass · marimba · soft · off
 ```
 
 `off` is a real answer: the text landing at your cursor already tells you it worked.

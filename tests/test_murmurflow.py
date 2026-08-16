@@ -464,3 +464,24 @@ def test_the_program_name_typed_twice_is_the_same_command():
     # `murmurflow murmurflow config set cue glass` - what happens when the help, which prints every
     # verb with the program name so it can be pasted whole, gets pasted after typing the name.
     assert cli.main(["murmurflow", "config"]) == 0
+
+
+def test_the_default_cue_is_the_system_sound_with_a_generated_fallback():
+    # A Mac user has heard Tink and Pop for twenty years, so they read as acknowledgement without
+    # being learned, and they follow the alert-volume setting a generated tone cannot see.
+    assert dictate.cue_preset_name() == "system"
+    assert dictate._cue_path(dictate.CUE_READY).startswith("/System/Library/Sounds/")
+
+
+def test_a_missing_system_sound_falls_back_to_a_tone_and_never_to_silence(monkeypatch):
+    # The cue is the ONLY signal that the microphone is live. Losing it to a missing file - a
+    # stripped install, or any machine that is not a Mac - is not an acceptable failure.
+    monkeypatch.setattr(dictate, "_SYSTEM_CUES", {})
+    path = dictate._cue_path(dictate.CUE_READY)
+    assert path.endswith(".wav") and dictate.FALLBACK_PRESET in path
+
+
+def test_an_explicit_preset_still_wins_over_the_system_default():
+    config.set_value("cue", "glass")
+    assert dictate.cue_preset_name() == "glass"
+    assert "glass" in dictate._cue_path(dictate.CUE_READY)

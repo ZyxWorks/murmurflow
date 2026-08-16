@@ -101,6 +101,13 @@ def _install() -> int:
     ok, detail = service.install()
     _out(f"[OK] installed {service.LABEL}" if ok else f"[!] launchctl: {detail}")
     _out("")
+    # Installing is the exact moment a second daemon joins the key, so it is the moment to say so.
+    # Silence here costs the user a session of "it worked yesterday" before anyone runs the health
+    # report that already knew.
+    for name, pids, fix in dictate.rival_listeners():
+        _out(f"[!] {name} is listening on the same key ({', '.join(str(p) for p in pids)}).")
+        _out(f"    Both will chime and both will type. Switch one off: {fix}")
+        _out("")
     _out(f"{dictate.trigger_hint()} anywhere and talk. Release: the text types itself.")
     _out("")
     _out("macOS will ask for two permissions the first time. Neither can be granted from a script,")
@@ -228,6 +235,27 @@ def _doctor(*, verbs: bool = False) -> int:
                 "— every sound and every sentence doubles"
             ),
             "murmurflow uninstall, then murmurflow install",
+        )
+    )
+    # A murmurflow-only count reads "listeners: 1 [OK]" on a Mac where a SECOND program holds the
+    # same key — which is the setup the user actually hears: two chimes in two different presets,
+    # one sentence pasted twice. Reinstalling murmurflow cannot fix that, so it is its own row
+    # with its own fix.
+    rivals = dictate.rival_listeners()
+    rows.append(
+        (
+            not rivals,
+            "other dictation: "
+            + (
+                "nothing else on this key"
+                if not rivals
+                else ", ".join(
+                    f"{name} IS LISTENING TOO ({', '.join(str(pid) for pid in pids)})"
+                    for name, pids, _ in rivals
+                )
+                + " — every sound and every sentence doubles"
+            ),
+            "; ".join(fix for _, _, fix in rivals),
         )
     )
     rows.append(

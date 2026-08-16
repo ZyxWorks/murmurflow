@@ -103,6 +103,11 @@ one keyboard reads on another.
 > `murmurflow doctor` checks for it and prints the fix; you do not have to remember this.
 > *System Settings → Keyboard → Dictation → Shortcut → Off.*
 
+> **Two chimes at once, in two different tones, and the sentence typed twice?** Something else is
+> listening on the same key. `murmurflow doctor` names it and prints the one command that stops it.
+> The usual one is `zyx voice listen` — murmurflow was extracted from zyx, so a Mac running both
+> hears every cue from both, and murmurflow's own lock cannot see another program's daemon.
+
 `murmurflow keytest` shows what this Mac actually reports for every bindable key. Use it before
 believing any of the above about your hardware — some MacBooks report the right-side Command and
 Option keys as the left ones, so a `right_*` trigger can never fire there.

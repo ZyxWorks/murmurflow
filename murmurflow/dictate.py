@@ -1746,16 +1746,11 @@ def listener_pid() -> int:
     return pid
 
 
-def listener_pids() -> list[int]:
-    """Every murmurflow listener process on this Mac, whether or not it took the lock.
-
-    ``listener_pid`` answers "may I start", which is the lock's question. This answers "how many
-    are there", which is the user's — and it is deliberately not read from the lock file, because
-    the setup worth reporting is the broken one where something is listening that never claimed it.
-    """
+def _pgrep(pattern: str) -> list[int]:
+    """Live PIDs whose full command line contains ``pattern``, this process excluded."""
     try:
         found = subprocess.run(
-            ["pgrep", "-f", "murmurflow listen"],
+            ["pgrep", "-f", pattern],
             capture_output=True,
             text=True,
             timeout=10,
@@ -1768,6 +1763,38 @@ def listener_pids() -> list[int]:
         with contextlib.suppress(ValueError):
             pids.append(int(token))
     return [pid for pid in pids if pid != os.getpid()]
+
+
+def listener_pids() -> list[int]:
+    """Every murmurflow listener process on this Mac, whether or not it took the lock.
+
+    ``listener_pid`` answers "may I start", which is the lock's question. This answers "how many
+    are there", which is the user's — and it is deliberately not read from the lock file, because
+    the setup worth reporting is the broken one where something is listening that never claimed it.
+    """
+    return _pgrep("murmurflow listen")
+
+
+#: Dictation daemons that are NOT murmurflow and fire on the SAME double-tap key. murmurflow was
+#: extracted from zyx's ``core.dictate``, so a machine that runs both hears every cue twice — in
+#: two different presets, which is exactly what the report sounds like ("several different start
+#: and fail sounds at once"). The listener lock cannot see this: it is one program's lock file and
+#: the other program never asks for it, so the only honest place to catch it is the health report.
+#: (pgrep pattern, what it is, how to switch it off.)
+RIVAL_LISTENERS: tuple[tuple[str, str, str], ...] = (
+    ("zyx voice listen", "zyx", "zyx voice uninstall"),
+    ("anton voice listen", "anton", "anton voice uninstall"),
+)
+
+
+def rival_listeners() -> list[tuple[str, list[int], str]]:
+    """(name, pids, how to stop it) for every non-murmurflow listener on the same trigger."""
+    rivals = []
+    for pattern, name, fix in RIVAL_LISTENERS:
+        pids = _pgrep(pattern)
+        if pids:
+            rivals.append((name, pids, fix))
+    return rivals
 
 
 def claim_listener() -> int:

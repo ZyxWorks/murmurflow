@@ -85,6 +85,22 @@ FLAG_TRIGGERS: dict[str, int] = {
     "fn": FLAG_FN,
 }
 
+#: COMBINATION triggers: every one of these flags must be held at once, and nothing types.
+#:
+#: This is the answer to the real cost of polling. A poll cannot CONSUME a key, so a single bare
+#: modifier is shared with everything the user already does with it: ⌃C, ⌃←, ⌃-click. The chord
+#: guard discards the audio, but the guard only has :data:`CHORD_GRACE` to notice, and a person who
+#: holds Control and *then* reaches for the arrow key beats it — so the microphone opens and the
+#: cue plays for a keystroke that was never dictation. Two modifiers together are bound to nothing
+#: in macOS, are typed by nobody in the course of ordinary work, and need no setting turned off
+#: first — unlike Fn (the emoji picker) or double-tap Control (Apple's own dictation).
+COMBO_TRIGGERS: dict[str, tuple[int, ...]] = {
+    "control_option": (FLAG_CONTROL, FLAG_OPTION),
+    "control_command": (FLAG_CONTROL, FLAG_COMMAND),
+    "command_option": (FLAG_COMMAND, FLAG_OPTION),
+    "control_shift": (FLAG_CONTROL, FLAG_SHIFT),
+}
+
 #: Trigger names accepted in config (``trigger``) -> the keycode they poll.
 TRIGGERS: dict[str, int] = {
     "left_control": LEFT_CONTROL,
@@ -98,16 +114,25 @@ TRIGGERS: dict[str, int] = {
     "f13": F13,
 }
 
-# Left Control — the same key macOS itself puts dictation on (double-tap
-# Control), so the hand already knows where it lives.
+# Control+Option held together. It used to be bare left Control, "where macOS itself puts
+# dictation, so the hand already knows where it lives" — which is true, and was still the wrong
+# default, because it is also the most CHORDED modifier on the machine.
 #
-# It is the most CHORDED modifier there is, though: a terminal presses ⌃C/⌃D/⌃R constantly. Two
-# guards make it safe. (1) The chord abort in `listen` kills the recording the moment a real key
-# goes down. (2) `INTENT_DELAY` below means a chord never starts a recording in the first place.
+# The chord guard does discard the audio from a ⌃C. It cannot discard the EXPERIENCE: the guard has
+# only `CHORD_GRACE` to notice, and holding Control and then reaching for an arrow key (Mission
+# Control's space switch, which everybody uses) beats it — so the microphone opens and a tone plays
+# for a keystroke that was never dictation. A tool that chimes while you work gets uninstalled, and
+# no amount of correct discarding fixes that.
 #
-# Conflict to know about: if macOS's own "press Control twice for dictation" is still enabled, both
-# will fire. Turn Apple's off in System Settings > Keyboard > Dictation > Shortcut.
-DEFAULT_TRIGGER = "left_control"
+# Two modifiers together are typed by nobody in the course of ordinary work, are bound to nothing
+# in macOS, and — unlike Fn (the emoji picker) or double-tap Control (Apple's own dictation) —
+# need no system setting turned off before they are safe. ⌃⌥ specifically because on a Mac
+# keyboard they are adjacent, so one hand reaches both without moving.
+#
+# Still true and still worth knowing: if you rebind to `left_control` AND macOS's "press Control
+# twice for dictation" is on, both fire. Turn Apple's off in
+# System Settings > Keyboard > Dictation > Shortcut.
+DEFAULT_TRIGGER = "control_option"
 
 
 # DEAD TIME IS LOST WORDS. The recorder now starts on key-DOWN, immediately, and the chord guard
@@ -136,11 +161,18 @@ CHORD_GRACE = 0.18
 # terminal is two short Control presses inside the window. The guard is in `listen_double_tap` — a
 # press with a real keystroke inside it is a shortcut, not a tap — and it is what the claim was
 # standing in for.
-DOUBLE_TAP_WINDOW = 0.35
+#
+# Measured PRESS TO PRESS, and that is the whole reliability of the gesture. Release-to-release —
+# what shipped first — makes the second tap's own duration count against the budget: a 200ms gap
+# plus a 200ms press blows a 350ms window, so an ordinary double-tap read as two unrelated taps and
+# nothing happened at all. Press-to-press is also how macOS measures a double-click, and 500ms is
+# its default there.
+DOUBLE_TAP_WINDOW = 0.50
 
 # A tap is a press SHORTER than this. Longer and it is a hold, not a tap — which is what lets both
-# modes coexist on one key rather than needing two.
-TAP_MAX = 0.35
+# modes coexist on one key rather than needing two. Generous on purpose: a tap that lingers is the
+# common human miss, and reading it as a hold silently breaks the pair.
+TAP_MAX = 0.50
 
 # Virtual keycode of the LAST key macOS saw go down, used only to notice that the user pressed
 # a real key while holding the trigger — i.e. typing ⌘S, not dictating. Any such chord aborts
@@ -233,7 +265,12 @@ def is_trigger_down(name: str, lib: ctypes.CDLL | None = None) -> bool:
     reports them apart at all.
     """
     lib = lib or _load()
-    flag = FLAG_TRIGGERS.get(str(name).strip().lower())
+    key = str(name).strip().lower()
+    combo = COMBO_TRIGGERS.get(key)
+    if combo is not None:
+        state = flags(lib)
+        return all(state & bit for bit in combo)
+    flag = FLAG_TRIGGERS.get(key)
     if flag is not None:
         return bool(flags(lib) & flag)
     return is_held(keycode(name), lib)
@@ -249,8 +286,13 @@ def available() -> bool:
 
 
 def keycode(name: str) -> int:
-    """The virtual keycode for a configured trigger name; falls back to the default trigger."""
-    return TRIGGERS.get(str(name).strip().lower(), TRIGGERS[DEFAULT_TRIGGER])
+    """The virtual keycode for a configured trigger name.
+
+    The fallback is LEFT_CONTROL and not ``TRIGGERS[DEFAULT_TRIGGER]``: the default is a combo now,
+    and a combo has no single keycode. Nothing reaches here with a combo name — `is_trigger_down`
+    handles those first — so this is only the answer for a name nobody recognises.
+    """
+    return TRIGGERS.get(str(name).strip().lower(), LEFT_CONTROL)
 
 
 def is_held(code: int, lib: ctypes.CDLL | None = None) -> bool:
@@ -410,12 +452,14 @@ def listen_double_tap(
                 recording, last_tap = False, -999.0
                 saw("stop")
                 _safe(on_stop)
-            elif now - last_tap <= window:
+            elif pressed_at - last_tap <= window:
+                # PRESS to PRESS. Comparing releases charged the second tap's own duration to the
+                # window and made an ordinary double-tap miss.
                 recording, last_tap = True, -999.0
                 saw("start")
                 _safe(on_start)
             else:
-                last_tap = now
+                last_tap = pressed_at
                 saw("tap")
         time.sleep(interval)
 

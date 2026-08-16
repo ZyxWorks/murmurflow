@@ -240,6 +240,20 @@ def uninstall() -> tuple[bool, str]:
     return True, ""
 
 
+def restart() -> bool:
+    """Bounce the agent so it re-reads its config. False if it was not running.
+
+    The listener reads `trigger` and `doubleTap` ONCE, when it binds, and then blocks in the poll
+    loop forever — so `config set doubleTap true` changed the file and nothing else, and the honest
+    report was "I set it and it still works the old way". Nobody should have to know a daemon is
+    involved, let alone restart one.
+    """
+    if not is_macos() or not running():
+        return False
+    ok, _ = _launchctl("kickstart", "-k", f"{_domain()}/{LABEL}")
+    return ok
+
+
 def running() -> bool:
     """True if launchd currently has the agent loaded."""
     if not is_macos():

@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# One job, and it runs on a Mac on purpose. The suite is hermetic (no microphone, no whisper, no
+# network) but it is not platform-free: it asserts that the default cue resolves to the Mac's own
+# /System/Library/Sounds, and murmurflow.platforms picks its backend at import from sys.platform.
+# On a Linux runner the same tests would be exercising the `unsupported` backend, which proves
+# nothing about the product. Standard runners are free on public repositories, macOS included.
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - run: uv sync --group dev
+
+      - name: lint
+        run: uv run ruff check .
+
+      - name: types
+        run: uv run mypy murmurflow
+
+      - name: tests
+        run: uv run pytest -q
+        env:
+          MURMURFLOW_NO_AUDIO: "1"

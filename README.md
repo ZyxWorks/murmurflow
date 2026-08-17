@@ -1,23 +1,31 @@
 # MurmurFlow
 
 **Hold a key, talk, let go. The text appears at your cursor.** In Slack, in your terminal, in a
-browser, in your notes app — anywhere. Nothing you say ever leaves your Mac.
+browser, in your notes app — anywhere. Nothing you say ever leaves your machine.
 
 A free, local alternative to the paid cloud dictation apps. No account, no subscription, no server,
-no telemetry, and no Python dependencies at all.
+no telemetry, and no Python dependencies at all. **macOS and Windows.**
+
+**macOS** — paste into Terminal:
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/hannesreinsch/murmurflow/main/install.sh)"
 ```
 
-Paste that into Terminal. It works on a Mac with nothing on it: no Homebrew, no Python, no
-developer tools. It installs what is missing, downloads the speech model (~1.6 GB, once), turns
-dictation on for every login, and opens the one permission switch macOS will not let a script
-flip for you.
+**Windows** — paste into PowerShell:
 
-Then hold **Control+Option** together, say something, let go. That's the whole product.
-(Prefer hands-free? `murmurflow config set doubleTap true` — then it is a double-tap of **Control**,
-the way macOS does it.)
+```powershell
+irm https://raw.githubusercontent.com/hannesreinsch/murmurflow/main/install.ps1 | iex
+```
+
+Either one works on a machine with nothing on it: no package manager, no Python, no developer
+tools, and on Windows no Administrator either. It installs what is missing, downloads the speech
+model (~1.6 GB, once), and turns dictation on for every login. On macOS it also opens the one
+permission switch the OS will not let a script flip for you; Windows has no such switch.
+
+Then hold **Control+Option** (Windows: **Control+Alt**) together, say something, let go. That's the
+whole product. (Prefer hands-free? `murmurflow config set doubleTap true` — then it is a double-tap
+of **Control**, the way macOS does it.)
 
 <details>
 <summary>Rather do it by hand?</summary>
@@ -32,8 +40,42 @@ murmurflow setup             # downloads the speech model (~1.6 GB, once)
 murmurflow install           # dictation is live now, and after every login
 ```
 
+On Windows the only difference is whisper: there is no package for it, so the installer downloads
+[whisper.cpp's own release build](https://github.com/ggml-org/whisper.cpp/releases) and unzips it
+into `%LOCALAPPDATA%\MurmurFlow\bin`. Everything else is the same:
+
+```powershell
+winget install Gyan.FFmpeg astral-sh.uv
+uv tool install --python 3.13 git+https://github.com/hannesreinsch/murmurflow
+murmurflow setup
+murmurflow install
+```
+
 If `murmurflow` is not found afterwards, `~/.local/bin` is not on your `PATH` — `uv tool
 update-shell` fixes that for the next terminal you open.
+
+</details>
+
+<details>
+<summary>What is different on Windows</summary>
+
+Four things, and none of them is a setting you have to find. The trigger names, the config file,
+every command and every message are identical — `alt`, `win`, `super` and `meta` are accepted
+spellings of the same keys, so a config file moves between machines unchanged.
+
+| | macOS | Windows |
+|---|---|---|
+| permission to type | Accessibility, granted per executable | **none** — there is nothing to grant |
+| the trigger `fn` | works | not available: the key is handled in keyboard firmware and never reaches the OS |
+| the trigger `right_command` | not available: these Macs report the right-side keys as the left ones | works |
+| the clipboard, while a dictation lands | every flavour is restored, images included | text only |
+
+One ceiling worth knowing: Windows does not let an ordinary program type into a window running as
+Administrator. Dictating into an elevated console needs MurmurFlow running elevated too.
+
+**Linux is not supported yet**, and that is a decision rather than an oversight. Recording and
+typing are both small there; the hotkey is not, because Wayland exposes no global hotkey API at
+all. `murmurflow doctor` runs on Linux and says exactly that.
 
 </details>
 

@@ -714,3 +714,16 @@ def test_resume_is_idempotent_and_says_which_it_was():
     dictate.pause(60)
     assert dictate.resume() is True
     assert dictate.resume() is False
+
+
+def test_the_trigger_verb_prints_one_parseable_name(capsys):
+    # The reader is a PROGRAM deciding whether its own hotkey collides with this one. Everything
+    # else that says which key this is on says it in a sentence, which is right for a person and
+    # unparseable for that. Borrowing the key when it does not collide stands dictation down across
+    # every other app for as long as the borrower runs, silently — so the answer has to be exact.
+    config.set_value("doubleTap", True)
+    assert cli.main(["trigger"]) == 0
+    assert capsys.readouterr().out.strip() == "left_control"
+    config.set_value("trigger", "ctrl_alt")
+    assert cli.main(["trigger"]) == 0
+    assert capsys.readouterr().out.strip() == "control_option"  # canonical, not as it was typed

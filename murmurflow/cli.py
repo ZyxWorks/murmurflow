@@ -558,6 +558,7 @@ def main(argv: list[str] | None = None) -> int:
     p_pause.add_argument("--seconds", type=float, default=dictate.DEFAULT_PAUSE_SECONDS)
     p_pause.add_argument("--who", default="", help="what is borrowing it, in words")
     sub.add_parser("resume", help="take the trigger key back")
+    sub.add_parser("trigger", help="print the trigger key this install is on, and nothing else")
 
     p_cfg = sub.add_parser("config", help="show or change settings")
     p_cfg.add_argument("action", nargs="?", default="", choices=["", "set"])
@@ -603,6 +604,15 @@ def main(argv: list[str] | None = None) -> int:
             return _pause(args.seconds, args.who)
         if command == "resume":
             return _resume()
+        if command == "trigger":
+            # ONE canonical name on stdout and nothing else, because the reader is a program.
+            # Everything else that says which key this is on says it in a sentence ("double-tap
+            # left Control to start, tap once to stop"), which is right for a person and unparseable
+            # for the tool deciding whether its own hotkey COLLIDES with this one. Borrowing the key
+            # when it does not collide is not a small mistake: it stands dictation down across every
+            # other app for as long as the borrower runs, silently.
+            _out(dictate.trigger_key())
+            return 0
         if command == "config":
             return _config(args.action, args.key, args.value)
         if command == "toggle":

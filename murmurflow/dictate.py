@@ -594,6 +594,25 @@ def _multipart(wav: Path, fields: dict[str, str]) -> tuple[bytes, str]:
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
+# An older whisper-server answers with the language NAME and no `language_probabilities` to read a
+# code off. Only the names anybody actually lists in `languages` need to be here; anything else
+# falls through as itself, and an unrecognised language is compared as whisper spelled it.
+_LANGUAGE_CODES: dict[str, str] = {
+    "english": "en",
+    "german": "de",
+    "french": "fr",
+    "spanish": "es",
+    "italian": "it",
+    "dutch": "nl",
+    "portuguese": "pt",
+    "polish": "pl",
+    "russian": "ru",
+    "japanese": "ja",
+    "chinese": "zh",
+    "korean": "ko",
+}
+
+
 class Heard(NamedTuple):
     """A transcript plus how sure whisper was that it was listening to speech at all.
 
@@ -608,6 +627,11 @@ class Heard(NamedTuple):
     text: str
     confidence: float = 1.0
     language: str = ""
+    #: Did the WARM server answer this one? A wedged server is invisible otherwise — it answers
+    #: every request with an error, every clip quietly takes the cold path, and the two gates that
+    #: read a confidence and a language are weaker there. That degradation has to be legible in the
+    #: log, or the next person to hit it is also debugging blind. ``None`` = nothing was decoded.
+    warm: bool | None = None
 
 
 def _confidence(payload: str) -> tuple[str, float, str]:
@@ -627,7 +651,22 @@ def _confidence(payload: str) -> tuple[str, float, str]:
         return payload.strip(), 1.0, ""
     text = str(data.get("text", "")).strip()
     raw = data.get("detected_language_probability")
-    spoken = str(data.get("language", "") or "").strip().lower()
+    # A CODE, NEVER THE NAME. whisper-server reports `"language": "english"` while a person writes
+    # `["de", "en"]` in their config, so the gate below compared "english" against {"de","en"} and
+    # would have rejected every sentence he ever spoke the moment the warm server came back up —
+    # a gate that is inert today and catastrophic tomorrow. `language_probabilities` is keyed by
+    # the codes themselves, so the top key IS the answer with no table to keep in sync.
+    probabilities = data.get("language_probabilities")
+    spoken = ""
+    if isinstance(probabilities, dict) and probabilities:
+        numeric = {k: v for k, v in probabilities.items() if isinstance(v, (int, float))}
+        if numeric:
+            spoken = str(max(numeric, key=lambda k: numeric[k])).strip().lower()
+    if not spoken:
+        spoken = _LANGUAGE_CODES.get(
+            str(data.get("language", "") or "").strip().lower(),
+            str(data.get("language", "") or "").strip().lower(),
+        )
     return text, float(raw) if isinstance(raw, (int, float)) else 1.0, spoken
 
 
@@ -660,7 +699,7 @@ def transcribe_warm(wav: Path, *, timeout: float = 60.0) -> Heard:
             payload = response.read().decode("utf-8", errors="ignore")
     except (urllib.error.URLError, OSError, ValueError):
         return Heard("")
-    return Heard(*_confidence(payload))
+    return Heard(*_confidence(payload), warm=True)
 
 
 def transcribe(wav: Path, *, timeout: float = 60.0) -> Heard:
@@ -673,7 +712,13 @@ def transcribe(wav: Path, *, timeout: float = 60.0) -> Heard:
     if warm.text:
         return warm
     try:
-        return Heard(whisper.transcribe(wav, timeout=timeout))
+        # THE COLD PATH REPORTS ITS LANGUAGE TOO. It used to report only text, which made the
+        # "is that one of yours" gate inert on the exact path a wedged warm server drops you onto
+        # — and that is how a desk bump came back as Japanese and got typed. Confidence stays the
+        # fail-open 1.0: whisper.cpp's CLI has no probability to give and a missing number must
+        # never swallow a real sentence.
+        text, spoken = whisper.transcribe_heard(wav, timeout=timeout)
+        return Heard(text, 1.0, spoken, warm=False)
     except Exception:  # noqa: BLE001 — any failure at all: dictation degrades, it never crashes
         return Heard("")
 
@@ -749,6 +794,26 @@ _HALLUCINATIONS: frozenset[str] = frozenset(
         "untertitel der amara.org-community",
         "untertitelung aufgrund der amara.org-community",
         "amara.org",
+        # THE SAME BOILERPLATE, IN THE LANGUAGES IT INVENTS. Whisper does not answer silence with
+        # nothing; it answers with the credit line of whatever it was trained on, and which
+        # language that lands in is a coin toss. Live: a 1.8s desk bump came back as
+        # "ご視聴ありがとうございました" (thank you for watching) and was typed into a terminal.
+        # The structural guards above it are the real fix; this is the list for the exact strings
+        # already seen, and it costs nothing to carry.
+        "ご視聴ありがとうございました",
+        "ご視聴ありがとうございます",
+        "おやすみなさい",
+        "字幕by索兰娅",
+        "字幕由amara.org社区提供",
+        "字幕志愿者 李宗盛",
+        "请不吝点赞 订阅 转发 打赏支持明镜与点点栏目",
+        "多谢您的观看",
+        "감사합니다",
+        "구독과 좋아요 부탁드립니다",
+        "sous-titres réalisés par la communauté d'amara.org",
+        "subtítulos realizados por la comunidad de amara.org",
+        "sottotitoli e revisione a cura di qtss",
+        "legendas pela comunidade amara.org",
     }
 )
 
@@ -1021,7 +1086,13 @@ def spoken_languages() -> frozenset[str]:
     """
     raw = _cfg().get("languages", [])
     values = raw if isinstance(raw, list) else str(raw).split(",")
-    return frozenset(str(v).strip().lower() for v in values if str(v).strip())
+    # Written as a code OR as a name: somebody who types `["english"]` means the same thing as
+    # `["en"]`, and a gate that silently disagrees with them rejects everything they say.
+    return frozenset(
+        _LANGUAGE_CODES.get(str(v).strip().lower(), str(v).strip().lower())
+        for v in values
+        if str(v).strip()
+    )
 
 
 # Peak amplitude below which the microphone WAS working and nobody spoke into it — the trigger got
@@ -1118,6 +1189,8 @@ class Result:
     #: What the paste reported about itself: the app it went to, and whether the whole transcript
     #: was still on the clipboard for it. Empty when nothing was pasted. See :func:`inject`.
     paste_note: str = ""
+    #: Which transcriber answered — see :attr:`Heard.warm`. ``None`` when none was asked.
+    warm: bool | None = None
 
 
 def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
@@ -1196,7 +1269,7 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     # Whisper's own verdict, and the only one that catches an invented sentence in an invented
     # language. Checked before the word-list because it subsumes it.
     if heard.confidence < SPEECH_CONFIDENCE:
-        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level, captured)
+        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level, captured, warm=heard.warm)
     # And the language it landed on, if you have said which ones you speak. Confidence answers
     # "is this SOME language" and passes fluent invented Icelandic; this answers "is it one of
     # YOURS". Only ever consulted when the server reported a language it detected — a pinned
@@ -1211,17 +1284,18 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
             f"{NO_SPEECH} — heard {heard.language}, which is not one of yours ({', '.join(sorted(allowed))})",
             level,
             captured,
+            warm=heard.warm,
         )
     if is_hallucination(raw):
-        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level, captured)
+        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level, captured, warm=heard.warm)
     text = tidy(raw)
     if not text or is_hallucination(text):
-        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level, captured)
+        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level, captured, warm=heard.warm)
     text = polish(text)  # a no-op unless `polishCommand` is configured
     if not paste:
-        return Result(text, seconds, elapsed_ms, False, "", level, captured)
+        return Result(text, seconds, elapsed_ms, False, "", level, captured, warm=heard.warm)
     ok, problem, note = inject(text)
-    return Result(text, seconds, elapsed_ms, ok, problem, level, captured, note)
+    return Result(text, seconds, elapsed_ms, ok, problem, level, captured, note, heard.warm)
 
 
 def toggle(*, paste: bool = True) -> Result | None:
@@ -1973,9 +2047,13 @@ def listen_loop(
         # delivers half a sentence is invisible in all of them, and it is the failure people
         # actually report.
         went = f" · {result.paste_note}" if result.paste_note else ""
+        # COLD, SAID OUT LOUD. A wedged warm server answers every request with an error and every
+        # clip silently takes the slower path where the silence gates are weaker — which is how a
+        # desk bump was transcribed as Japanese and typed. One word in the line he already reads.
+        how = " · cold" if result.warm is False else ""
         emit(
             f"[OK] {result.seconds:.1f}s{captured} · {result.peak_dbfs:.0f}dBFS · "
-            f'{result.transcribe_ms}ms · {len(result.text)} chars{went} · "{result.text}"'
+            f'{result.transcribe_ms}ms{how} · {len(result.text)} chars{went} · "{result.text}"'
         )
 
     def on_abort() -> None:

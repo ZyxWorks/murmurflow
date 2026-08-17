@@ -1084,6 +1084,54 @@ def permission_hint() -> str:
 #: bounded so a log nobody ever rotates cannot turn a health check into a full file read.
 _LOG_TAIL_BYTES = 65_536
 
+#: The ceiling on the daemon log, and how much of it survives a trim.
+#:
+#: **Nothing rotates this file**, and that is not a detail on a background daemon: launchd and Task
+#: Scheduler both redirect the listener's stdout into it and then never look at it again. A clip
+#: costs about 120 bytes, so ordinary use grows it by a few MB a year and nobody would ever notice.
+#: The case that is not ordinary is the one that matters: a listener that cannot start writes its
+#: reason and exits, `KeepAlive` starts it again ten seconds later (`ThrottleInterval`), and it
+#: does that all night. Nobody is dictating in that state, so a trim that only ran per clip would
+#: never run at all — which is why this also runs once at daemon start, where a restart loop is
+#: guaranteed to reach it.
+#:
+#: A megabyte is roughly eight thousand clips, which is months of real use, and the tail that
+#: survives keeps the last few thousand. Cheap, because the ordinary path is one `stat` and a
+#: comparison.
+LOG_MAX_BYTES = 1_000_000
+LOG_KEEP_BYTES = 400_000
+
+
+def trim_log(*, cap: int = LOG_MAX_BYTES, keep: int = LOG_KEEP_BYTES) -> bool:
+    """Drop the oldest lines once the daemon log passes ``cap``. ``True`` if it had to. Never raises.
+
+    Rewrites the file with its last ``keep`` bytes, from the first line boundary inside them, so no
+    half line is ever left at the top of the log.
+
+    Best-effort ON PURPOSE, in both directions. The service holds this file open in append mode and
+    may write between the read and the rewrite, so a line can be lost here; a lost diagnostic line
+    is a fair price for a log that cannot grow without limit, and the alternative is a lock that a
+    keyboard daemon has to take on its hot path. Any failure at all leaves the file exactly as it
+    was: a housekeeping routine must never be the reason dictation stops.
+    """
+    path = config.log_path()
+    try:
+        if path.stat().st_size <= cap:
+            return False
+        with path.open("rb") as handle:
+            handle.seek(-keep, os.SEEK_END)
+            tail = handle.read()
+        # Start at a line boundary. Without this the log opens mid-sentence, and the first thing
+        # anybody reads when they finally look at it is a fragment.
+        newline = tail.find(b"\n")
+        if newline != -1:
+            tail = tail[newline + 1 :]
+        with path.open("wb") as handle:
+            handle.write(tail)
+    except OSError:
+        return False
+    return True
+
 
 def last_paste_verdict() -> bool | None:
     """Did the DAEMON's most recent paste actually land? ``None`` if it has not tried one.
@@ -2172,6 +2220,10 @@ def listen_loop(
     reaped = reap_orphans()
     if reaped:
         emit(f"[!] stopped {reaped} orphaned recorder(s) left by a previous run")
+    # HERE as well as after each clip, and the restart loop is the reason: a listener that cannot
+    # start writes its reason, exits, and is started again ten seconds later, all night. Nobody
+    # dictates in that state, so a per-clip trim would never run on the one machine that needs it.
+    trim_log()
     warm_expected = start_server()
     if warm_expected:
         emit(f"whisper warm on :{port()}")
@@ -2252,6 +2304,8 @@ def listen_loop(
         # No cue here: `finish` already played it when the microphone closed, and the text landing
         # at the cursor is a better confirmation than any second tone.
         emit(log_line(result))
+        # One stat per dictation, off the felt path: the text is already at the cursor by now.
+        trim_log()
 
     def on_abort() -> None:
         """A keyboard shortcut, not speech: throw the audio away without transcribing it."""

@@ -1,5 +1,7 @@
 # MurmurFlow
 
+[![CI](https://github.com/hannesreinsch/murmurflow/actions/workflows/ci.yml/badge.svg)](https://github.com/hannesreinsch/murmurflow/actions/workflows/ci.yml)
+
 **Hold a key, talk, let go. The text appears at your cursor.** In Slack, in your terminal, in a
 browser, in your notes app — anywhere. Nothing you say ever leaves your machine.
 

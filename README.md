@@ -240,8 +240,8 @@ Mac roughly doubled every row. Measure your own before believing any of them, in
 - **No streaming.** It would cost a permanently resident microphone to save a fraction of a batch
   pass.
 - **No LLM on the hot path**, unless you ask for one — see [polish](#polish-optional).
-- **No Linux or Windows.** The capture (`avfoundation`) and the key polling are both macOS-only.
-  This isn't a stub waiting to be filled in; it's what the tool is.
+- **No Linux.** Recording and typing are both small there; the hotkey is not, because Wayland
+  exposes no global hotkey API at all. `murmurflow doctor` runs on Linux and says exactly that.
 
 ## Permissions
 
@@ -296,7 +296,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `languages` | the languages you actually speak, e.g. `["de","en"]`. A clip whisper reads as any other one is dropped. Empty = accept all |
 | `inputName` | part of a microphone name. Default: system default. `murmurflow devices` lists them |
 | `vocabulary` | proper nouns to bias the transcriber toward |
-| `cue` | tone preset: `pebble` (default, near-subliminal), `glass`, `marimba`, `soft`, `system`, `off`. `murmurflow cues` plays them |
+| `cue` | tone preset: `system` (default — the Mac's own Tink and Pop), `pebble` (near-subliminal), `glass`, `marimba`, `soft`, `off`. `murmurflow cues` plays them |
 | `polishCommand` | see below |
 | `stripFillers` | `true` = delete `um`, `you know`, and a leading `hey`/`so`/`well`. **Off** — you get verbatim |
 | `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |
@@ -340,8 +340,19 @@ murmurflow setup        download a speech model
 murmurflow config       show or change settings
 murmurflow toggle       start/stop one recording (bind this to a macOS Shortcut)
 murmurflow transcribe   transcribe an audio file and print the text
+murmurflow pause        lend the trigger key to another program for a while
+murmurflow resume       take it back
+murmurflow trigger      print the trigger key this install is on, for another program to read
 murmurflow uninstall    stop dictation and remove it from login
 ```
+
+Every clip the daemon handles is logged — how long you held the key, how much audio actually
+landed, the peak level, the transcribe time, the app the paste went to, and the transcript itself.
+That file is `~/.murmurflow/listen.log`, and `murmurflow doctor` prints the path.
+
+`config set` refuses a setting it does not recognise and a value that cannot work — a trigger name
+this machine cannot poll, a cue that is not a preset, a model path that is not there. All of those
+used to be accepted and then fail silently, which is the same symptom as broken hardware.
 
 `doctor` and `keytest` exist because dictation fails in exactly four ways — the key isn't seen, the
 microphone isn't heard, the model isn't found, the text isn't typed — and from the outside those are

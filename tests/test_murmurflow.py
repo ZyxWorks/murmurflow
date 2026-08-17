@@ -819,3 +819,320 @@ def test_the_cold_path_reports_its_language_so_the_gate_still_applies(monkeypatc
     assert result.text == ""
     assert "ja" in result.problem
     assert result.warm is False
+
+
+# --- a setting that cannot work is refused, not written -------------------------------------------
+#
+# Every way of misconfiguring this daemon fails SILENTLY and they all fail identically: you hold
+# the key and nothing happens. A trigger name the platform cannot poll, a cue that is not a preset,
+# a misspelt key written to a file nothing reads — none of them leaves a trace anywhere. The typo
+# is the only moment any of it is cheap to catch.
+
+
+def test_a_misspelt_setting_is_refused_and_the_real_one_is_named(capsys):
+    assert cli.main(["config", "set", "stripfillers", "true"]) == 2
+    out = capsys.readouterr().out
+    assert "stripFillers" in out  # the near match, not just "unknown"
+    assert config.load() == {}  # and nothing was written
+
+
+def test_a_trigger_this_machine_cannot_poll_is_never_bound(capsys):
+    assert cli.main(["config", "set", "trigger", "left_ctrl"]) == 2
+    assert "left_control" in capsys.readouterr().out  # the list of what does work
+    assert "trigger" not in config.load()
+
+
+def test_a_trigger_is_stored_under_one_spelling_however_it_was_typed(monkeypatch):
+    monkeypatch.setattr(cli.service, "restart", lambda: False)
+    assert cli.main(["config", "set", "trigger", "ctrl_alt"]) == 0
+    assert config.load()["trigger"] == "control_option"
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("cue", "pebbel"),  # a near miss silently plays a DIFFERENT sound
+        ("doubleTap", "yep"),  # anything but true/false reads as false
+        ("quietFloor", "quiet"),  # the gate would fall back to -30 and never say so
+        ("port", "99999"),
+        ("language", "deutsch"),  # `de` is the code; a name pins nothing
+        ("languages", '["de", "klingon"]'),  # a clip in a language not on the list is DISCARDED
+        ("model", "~/there-is-no-model-here.bin"),
+    ],
+)
+def test_a_value_that_cannot_work_is_refused_rather_than_written(key, value):
+    assert cli.main(["config", "set", key, value]) == 2
+    assert key not in config.load()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("cue", "off"), ("language", "auto"), ("language", "en"), ("languages", '["de", "english"]')],
+)
+def test_the_spellings_a_person_actually_uses_are_all_accepted(key, value, monkeypatch):
+    monkeypatch.setattr(cli.service, "restart", lambda: False)
+    assert cli.main(["config", "set", key, value]) == 0
+
+
+def test_unsetting_a_key_still_works_but_not_one_that_never_existed(monkeypatch):
+    monkeypatch.setattr(cli.service, "restart", lambda: False)
+    config.set_value("cue", "glass")
+    assert cli.main(["config", "set", "cue"]) == 0
+    assert "cue" not in config.load()
+    assert cli.main(["config", "set", "cuu"]) == 2
+
+
+def test_changing_the_model_stops_the_server_that_baked_the_old_one_in(monkeypatch):
+    """Restarting the LISTENER cannot do it, and that is the whole trap.
+
+    The daemon comes back, finds the old whisper-server still answering on the port, reuses it by
+    design — and the model the user just chose never loads. Stopped before the write, so a change
+    to `port` still finds the server on the port it is really on.
+    """
+    order: list[str] = []
+    monkeypatch.setattr(cli.service, "running", lambda: True)
+    monkeypatch.setattr(cli.service, "restart", lambda: bool(order.append("restart")) or True)
+    monkeypatch.setattr(cli.dictate, "stop_server", lambda: bool(order.append("stop")) or 1)
+    assert cli.main(["config", "set", "port", "9001"]) == 0
+    assert order == ["stop", "restart"]
+    # ...and a setting the server knows nothing about does not pay for a model reload.
+    order.clear()
+    assert cli.main(["config", "set", "cue", "glass"]) == 0
+    assert order == ["restart"]
+
+
+# --- the level gate reads the waveform, fast ------------------------------------------------------
+
+
+def _wav(path: Path, samples: list[int]) -> Path:
+    import array
+    import wave
+
+    with wave.open(str(path), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(array.array("h", samples).tobytes())
+    return path
+
+
+def test_the_peak_is_the_loudest_sample_in_either_direction(tmp_path):
+    # `max(max(s), -min(s))` replaced a per-sample Python loop on the hot path. It has to agree
+    # with the obvious version everywhere, INCLUDING on the negative full-scale sample that has no
+    # positive twin: -32768 negated does not fit in the sample type it came from.
+    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(0.0, abs=0.01)
+    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(0.0, abs=0.01)
+    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(-40, abs=0.5)
+    assert dictate.peak_dbfs(_wav(tmp_path / "silent.wav", [0, 0, 0])) == float("-inf")
+    assert dictate.peak_dbfs(tmp_path / "not-a-file.wav") == 0.0  # no opinion, never a crash
+
+
+# --- a warm server that answers wrongly is bounced ------------------------------------------------
+
+
+def _drive_listener(monkeypatch, results, *, warm_starts=True):
+    """Run `listen_loop` over a fixed list of dictations. Returns (server starts, server stops)."""
+    starts: list[int] = []
+    stops: list[int] = []
+
+    class _Inline:  # the bounce runs on a thread; here it runs where the assertion can see it
+        def __init__(self, target=None, daemon=False):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(dictate.threading, "Thread", _Inline)
+    monkeypatch.setattr(dictate, "available", lambda: (True, ""))
+    monkeypatch.setattr(dictate, "claim_listener", lambda: 0)
+    monkeypatch.setattr(dictate, "reap_orphans", lambda: 0)
+    monkeypatch.setattr(dictate, "resolve_input", lambda: ("0", "a mic"))
+    monkeypatch.setattr(dictate, "paused", lambda: (False, ""))
+    monkeypatch.setattr(dictate, "start_server", lambda **_k: bool(starts.append(1)) or warm_starts)
+    monkeypatch.setattr(dictate, "stop_server", lambda: bool(stops.append(1)) or 1)
+    monkeypatch.setattr(dictate, "start_and_cue", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
+    pending = list(results)
+    monkeypatch.setattr(dictate, "finish", lambda _rec: pending.pop(0))
+
+    def _bind(on_press, on_release, **_kwargs):
+        for _ in range(len(results)):
+            on_press()
+            on_release()
+        return "driven"
+
+    monkeypatch.setattr(dictate, "bind_trigger", _bind)
+    dictate.listen_loop()
+    return starts, stops
+
+
+def _clip(warm):
+    return dictate.Result("hello", 1.0, 900, True, "", -14.0, 1.0, "", warm)
+
+
+def test_a_warm_server_that_stopped_answering_is_restarted(monkeypatch):
+    """A server that DIED is visible — `server_up` says no. One that answers wrongly is not.
+
+    Live (2026-08-17): whisper-server replied "FFmpeg conversion failed" to every request, every
+    clip silently took the cold path where the confidence gate can judge nothing, and a bump on
+    the desk came back as Japanese and was typed. Nothing on screen said the fast path was gone.
+    """
+    starts, stops = _drive_listener(monkeypatch, [_clip(False), _clip(False), _clip(False)])
+    assert stops == [1]  # bounced once, at the second cold clip
+    assert len(starts) == 2  # the one at daemon start, and the one that brought it back
+
+
+def test_one_cold_clip_is_not_enough_to_bounce_a_loading_server(monkeypatch):
+    # A single cold clip is what a server still loading its 1.6 GB model looks like, and bouncing
+    # it for that restarts the load it was in the middle of.
+    _starts, stops = _drive_listener(monkeypatch, [_clip(False), _clip(True), _clip(False)])
+    assert stops == []
+
+
+def test_a_machine_with_no_warm_server_is_never_bounced(monkeypatch):
+    # Cold on every clip is the DESIGN when whisper-server was never there. Restarting a server
+    # that does not exist would hammer a missing binary after every sentence.
+    _starts, stops = _drive_listener(
+        monkeypatch, [_clip(False)] * 4, warm_starts=False
+    )
+    assert stops == []
+
+
+def test_the_daemon_log_lives_with_the_rest_of_the_home(tmp_path, monkeypatch):
+    """Both service backends redirect the daemon here, and both used to spell it out themselves —
+    which split the log away from the home the moment `MURMURFLOW_HOME` was set."""
+    from murmurflow.platforms import macos, windows
+
+    # Rendering the job normally BUILDS the .app bundle, which copies a 17 MB interpreter into the
+    # real ~/Applications. Hermetic means hermetic: nothing here touches anything outside tmp_path.
+    monkeypatch.setattr(macos, "_launchd_argv", lambda args: ["/bin/true", *args])
+    assert config.log_path() == tmp_path / "listen.log"
+    assert str(config.log_path()) in str(macos.render_plist(["listen"], {}))
+    assert windows._log_path() == config.log_path()
+
+
+# --- who has the typing permission, and how we know -----------------------------------------------
+#
+# `AXIsProcessTrusted` answers for the process that ASKS. A probe spawned from this CLI is
+# attributed by TCC to whatever is responsible for the CLI, never to the .app the launchd agent
+# runs as — so the health report said NOT GRANTED on a Mac that had been typing dictations all
+# afternoon, and sent its owner to switch on a switch that was already on.
+
+
+def test_a_paste_that_landed_settles_the_permission_question(tmp_path):
+    config.log_path().write_text(
+        '[OK] 4.4s · -17dBFS · 1999ms · 24 chars · → Slack · "ship it on friday"\n', "utf-8"
+    )
+    assert dictate.last_paste_verdict() is True
+    granted, evidence = cli._typing_permission()
+    assert granted and "last paste landed" in evidence
+
+
+def test_a_paste_that_was_refused_says_so_and_is_not_a_probe(tmp_path):
+    config.log_path().write_text(
+        '[OK] 1.0s · -14dBFS · 900ms · 4 chars · → Notes · "yes"\n'
+        "[!] not permitted to control this Mac. Accessibility must be granted...\n",
+        "utf-8",
+    )
+    assert dictate.last_paste_verdict() is False  # the LAST attempt, not the best one
+
+
+def test_secure_input_is_not_read_as_a_missing_permission(tmp_path):
+    # It is a password field somebody had focused for a moment, it clears on its own, and it has
+    # its own row. Reading it as a revoked grant would send the user to System Settings for it.
+    config.log_path().write_text(
+        "[!] Secure Input is active, so macOS is blocking synthetic paste. "
+        "The text is on your clipboard — press paste.\n",
+        "utf-8",
+    )
+    assert dictate.last_paste_verdict() is None
+
+
+def test_a_daemon_that_has_never_pasted_has_no_opinion(tmp_path):
+    assert dictate.last_paste_verdict() is None  # no log at all
+    config.log_path().write_text("listening — hold control_option (mic: a mic)\n", "utf-8")
+    assert dictate.last_paste_verdict() is None
+
+
+# --- a recorder that had to be killed still leaves an honest clip ---------------------------------
+#
+# ffmpeg writes the real lengths when it EXITS. SIGKILL on the fallback path skips that, and on
+# Windows there is no gentler path at all: `os.kill` can only send CTRL_C/CTRL_BREAK — which a
+# `pythonw` daemon has no console to send — and anything else is TerminateProcess.
+#
+# MEASURED against real ffmpeg rather than assumed: what it leaves behind is `0xFFFFFFFF` in both
+# size fields, not zero. The audio still decodes, so this is not the disaster it looks like. What
+# breaks is `audio_seconds`, which believes the header and reports 37 hours — and that number is
+# the whole capture-fault diagnostic, blind on exactly the clips something already went wrong with.
+
+_KILLED = (0xFFFFFFFF).to_bytes(4, "little")  # what a hard-killed ffmpeg really leaves
+
+
+def _killed_wav(path: Path, samples: list[int], placeholder: bytes = _KILLED) -> Path:
+    """A wav exactly as a killed ffmpeg leaves it: every sample written, both lengths unpatched."""
+    _wav(path, samples)
+    raw = bytearray(path.read_bytes())
+    raw[4:8] = placeholder
+    data = raw.index(b"data")
+    raw[data + 4 : data + 8] = placeholder
+    path.write_bytes(bytes(raw))
+    return path
+
+
+def test_a_killed_recorder_leaves_a_clip_that_lies_about_its_length(tmp_path):
+    import wave
+
+    clip = _killed_wav(tmp_path / "killed.wav", [10000, -10000] * 800)
+    assert dictate.audio_seconds(clip) > 3600  # 37 hours of "captured audio", from a 0.1s clip
+    assert dictate.repair_wav(clip) is True
+    with wave.open(str(clip), "rb") as after:
+        assert after.getnframes() == 1600
+    assert dictate.audio_seconds(clip) == pytest.approx(0.1, abs=0.01)
+    assert dictate.peak_dbfs(clip) == pytest.approx(-10.3, abs=0.2)
+
+
+def test_a_header_left_at_zero_is_repaired_too(tmp_path):
+    # Not what ffmpeg does today, and the one shape where the clip really is undecodable: `wave`
+    # refuses a RIFF chunk of length zero outright, so the audio would be lost rather than wrong.
+    clip = _killed_wav(tmp_path / "zeroed.wav", [4000] * 500, placeholder=bytes(4))
+    assert dictate.repair_wav(clip) is True
+    assert dictate.audio_seconds(clip) == pytest.approx(500 / 16000, abs=0.001)
+
+
+def test_a_clip_that_closed_cleanly_is_left_exactly_as_it_is(tmp_path):
+    clip = _wav(tmp_path / "clean.wav", [500] * 100)
+    before = clip.read_bytes()
+    assert dictate.repair_wav(clip) is False
+    assert clip.read_bytes() == before
+
+
+def test_the_repair_never_raises_on_anything_that_is_not_a_wav(tmp_path):
+    for name, blob in [
+        ("empty.wav", b""),
+        ("header-only.wav", b"RIFF" + bytes(40)),
+        ("not-riff.wav", b"OggS" + bytes(200)),
+        ("no-data.wav", b"RIFF" + bytes(4) + b"WAVEfmt " + (16).to_bytes(4, "little") + bytes(100)),
+    ]:
+        path = tmp_path / name
+        path.write_bytes(blob)
+        assert dictate.repair_wav(path) is False, name
+    assert dictate.repair_wav(tmp_path / "gone.wav") is False
+
+
+def test_speaking_one_language_is_told_it_can_pin_the_decoder(monkeypatch, capsys):
+    # ~0.7s a sentence, and nothing connected the two settings: `languages` deliberately does not
+    # pin the decoder, `language` does, and somebody who speaks one language had no way to know.
+    monkeypatch.setattr(cli.service, "restart", lambda: False)
+    assert cli.main(["config", "set", "languages", '["de"]']) == 0
+    assert "config set language de" in capsys.readouterr().out
+    # Two languages is the case the pin cannot serve, so it stays quiet.
+    assert cli.main(["config", "set", "languages", '["de", "en"]']) == 0
+    assert "set language" not in capsys.readouterr().out
+
+
+def test_pinning_a_language_you_said_you_do_not_speak_is_called_out(monkeypatch, capsys):
+    # The trigger works, the microphone works, and every single clip is thrown away as a language
+    # you do not speak. Nothing appears and nothing explains it.
+    monkeypatch.setattr(cli.service, "restart", lambda: False)
+    config.set_value("languages", ["de"])
+    assert cli.main(["config", "set", "language", "en"]) == 0
+    assert "thrown away" in capsys.readouterr().out

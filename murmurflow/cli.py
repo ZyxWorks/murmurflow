@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import difflib
+import shlex
 import signal
 import subprocess
 import sys
@@ -72,6 +74,13 @@ def _setup(name: str = "") -> int:
         return 1
     tmp.replace(target)  # atomic: a half-downloaded model must never look like a usable one
     _out(f"[OK] {target}")
+    # The warm whisper-server loaded whichever model was best WHEN IT STARTED and answers with
+    # that one until something stops it — so downloading a better model would otherwise change
+    # nothing at all until the next reboot, which reads as "I got the big model and it is still
+    # guessing at names".
+    if service.running() and dictate.stop_server():
+        service.restart()
+        _out("[OK] restarted the listener so it transcribes with this model now")
     return 0
 
 
@@ -174,6 +183,29 @@ def _tcc_entry() -> str:
     return f"{real.name}  ({real})"
 
 
+def _typing_permission() -> tuple[bool, str]:
+    """Does the thing that does the typing have permission to — and how do we know.
+
+    Asked in order of how much the answer is worth. What the DAEMON's last paste actually did beats
+    any probe: see :func:`dictate.last_paste_verdict` for why asking the OS from here answers about
+    the wrong process and reported NOT GRANTED on a Mac that was typing dictations all afternoon.
+    Only when the daemon has never tried does this fall back to asking the bundle, and then to
+    asking this CLI about itself, which is the weakest answer of the three and still better than a
+    blank row.
+    """
+    landed = dictate.last_paste_verdict()
+    if landed is not None:
+        return landed, (
+            "granted — the listener's last paste landed"
+            if landed
+            else "NOT granted — the listener's last paste was refused"
+        )
+    trusted = service.permission_trusted()
+    if trusted is None:
+        trusted = hotkey.accessibility_trusted()
+    return bool(trusted), "granted" if trusted else "NOT granted — nothing can be typed"
+
+
 def _doctor(*, verbs: bool = False) -> int:
     """Everything that has to be true, each with the one command that makes it true.
 
@@ -194,6 +226,26 @@ def _doctor(*, verbs: bool = False) -> int:
     )
     model = whisper.model()
     rows.append((bool(model), f"model: {model or 'NOT FOUND'}", "murmurflow setup"))
+    # A warm server is the difference between the first sentence after a boot taking ~1s and
+    # taking ~13s, and it is invisible either way — the tool just feels slow. Worth its own row
+    # for the second reason too: a server that is up but WEDGED answers every request with an
+    # error, so every clip silently takes the cold path where the language and confidence gates
+    # are weaker. The daemon bounces one now (see `dictate.COLD_CLIPS_BEFORE_RESTART`); this is
+    # where you see whether it is currently there at all.
+    if server:
+        warm = dictate.server_up()
+        rows.append(
+            (
+                warm,
+                "warm server: "
+                + (
+                    f"answering on :{dictate.port()}"
+                    if warm
+                    else f"nothing on :{dictate.port()} — every clip pays the model load again"
+                ),
+                "murmurflow install   (the listener starts and keeps it warm)",
+            )
+        )
     rows.append(
         (
             hotkey.available(),
@@ -210,17 +262,14 @@ def _doctor(*, verbs: bool = False) -> int:
     # On macOS the daemon is the .app bundle, so the BUNDLE is who this has to be asked about:
     # this CLI having the grant says nothing about whether the thing that types your words does.
     needed = bool(dictate.permission_hint())
-    trusted = service.permission_trusted()
-    if trusted is None:
-        trusted = hotkey.accessibility_trusted()
     if not needed:
         rows.append((True, f"typing permission: not required on {platforms.NAME}", ""))
     else:
+        trusted, evidence = _typing_permission()
         rows.append(
             (
                 trusted,
-                "accessibility: "
-                + ("granted" if trusted else "NOT granted — nothing can be typed"),
+                f"accessibility: {evidence}",
                 f"switch on '{_tcc_entry()}' in System Settings > Privacy & Security > "
                 "Accessibility",
             )
@@ -309,6 +358,9 @@ def _doctor(*, verbs: bool = False) -> int:
             _out(f"       fix: {fix}")
     _out("")
     _out(f"  config: {config.config_path()}")
+    # "It did not work" has one answer and it is this file: every clip's hold, level, transcribe
+    # time, transcript and the app the paste went to is already written there. Nothing said so.
+    _out(f"  log: {config.log_path()}")
     _out(f"  trigger: {dictate.trigger_hint()}")
     _out(f"  cue: {dictate.cue_preset_name()}")
     polish = str(config.load().get("polishCommand", "") or "")
@@ -466,13 +518,166 @@ def _resume() -> int:
     return 0
 
 
+#: Settings the running whisper-server BAKED IN at the moment it started, so changing one of them
+#: has to stop the server as well. Restarting the listener alone cannot do it: the daemon comes
+#: back, finds the old server still answering on the port, reuses it by design, and the setting
+#: the user just changed never takes effect anywhere.
+_SERVER_SETTINGS = frozenset({"model", "port"})
+
+
+def _reject(key: str, value: object) -> str:
+    """Why writing ``value`` to ``key`` would not do what was just asked for, or ``""``.
+
+    **Every way of misconfiguring this daemon fails silently, and they all fail the same way.** A
+    trigger name this machine cannot poll binds a key that never fires. A cue name that is not a
+    preset quietly falls back to a different sound. A misspelt setting is written to a file nothing
+    ever reads. From the outside all three are "I hold the key and nothing happens", none of them
+    leaves a trace anywhere, and each costs an evening to find. The typo is the only moment any of
+    it is cheap to catch, so it is caught here and the write is refused.
+    """
+    if key not in config.KEYS:
+        near = difflib.get_close_matches(key, list(config.KEYS), n=1)
+        return (
+            f"unknown setting `{key}`."
+            + (f" Did you mean `{near[0]}`?" if near else "")
+            + " `murmurflow config` lists every one."
+        )
+    text = str(value).strip()
+    if key == "trigger":
+        if hotkey.canonical_trigger(text) not in hotkey.trigger_names():
+            return (
+                f"`{text}` is not a key {platforms.NAME} can poll, so the listener would bind a "
+                f"trigger that never fires. Pick one of: "
+                f"{', '.join(sorted(hotkey.trigger_names()))}"
+            )
+    elif key == "cue":
+        accepted = {*dictate.cue_presets(), "system", *dictate.CUE_OFF}
+        if text.lower() not in accepted and not Path(text).expanduser().is_dir():
+            # OFFERED is not the same set as ACCEPTED: `none`/`mute`/`silent`/`false`/`0` all mean
+            # off and all keep working, but listing five spellings of one answer makes the four
+            # real choices harder to see.
+            offered = (*dictate.cue_presets(), "system", "off")
+            return (
+                f"`{text}` is not a cue, and an unknown one plays a different sound instead of "
+                f"saying so. Pick one of: {', '.join(offered)} — or a folder holding your own "
+                "ready/done/fail sound files."
+            )
+    elif key in {"doubleTap", "stripFillers", "keepAudio"}:
+        if not isinstance(value, bool):
+            return f"`{key}` is true or false, not `{text}`."
+    elif key == "quietFloor":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return f"`{key}` is a peak level in dBFS below zero, e.g. -30 or -40, not `{text}`."
+    elif key == "port":
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
+            return f"`{key}` is a TCP port between 1 and 65535, not `{text}`."
+    elif key == "language":
+        code = dictate.language_code(text)
+        if code != "auto" and not (len(code) == 2 and code.isalpha()):
+            return (
+                f"`{text}` is not a language. Use `auto`, or a two-letter code like `en` or `de` "
+                "— pinning the WRONG one makes whisper translate instead of transcribe."
+            )
+    elif key == "languages":
+        entries = value if isinstance(value, list) else text.split(",")
+        bad = [str(v).strip() for v in entries if len(dictate.language_code(str(v))) != 2]
+        if bad:
+            return (
+                f"`{', '.join(bad)}` is not a language code, and a clip in a language that is not "
+                "on this list is thrown away. Write it as a JSON list of two-letter codes: "
+                '\'["de", "en"]\''
+            )
+    elif key == "model":
+        # A bare NAME is legal here — an openai-whisper CLI downloads its own weights by name (see
+        # `whisper.openai_model_name`). Only something shaped like a PATH is checked, because that
+        # one belongs to whisper.cpp and a typo in it silently keeps the old model.
+        looks_like_path = "/" in text or text.endswith(".bin")
+        if looks_like_path and not Path(text).expanduser().is_file():
+            return (
+                f"no model file at {Path(text).expanduser()} — the best model in "
+                f"{config.home_root() / 'models'} would go on being used and nothing would change."
+            )
+    return ""
+
+
+def _warn(key: str, value: object) -> str:
+    """A setting that is legal but probably not what was meant. Said out loud, never refused.
+
+    The line between this and :func:`_reject` is whether we can be sure. An unplugged headset is a
+    perfectly reasonable thing to name in ``inputName`` before plugging it back in, so refusing it
+    would be wrong; saying nothing while dictation quietly records the wrong microphone is worse.
+    """
+    text = str(value).strip()
+    if key == "inputName" and text:
+        known = any(text.lower() in name.lower() for _id, name in dictate.list_inputs())
+        if not known:
+            return (
+                f"no microphone here has `{text}` in its name (`murmurflow devices` lists them), "
+                "so recording falls back to the system default until one does."
+            )
+    if key == "languages":
+        # Somebody who speaks ONE language into this is leaving ~0.7s a sentence on the table and
+        # has no way to know it: `languages` deliberately does not pin the decoder, `language`
+        # does, and nothing connects the two. Said once, here, rather than made automatic — pinning
+        # behind somebody's back is how German speech comes back as an English paraphrase.
+        spoken = dictate.spoken_languages()
+        if len(spoken) == 1 and whisper.language() == "auto":
+            only = next(iter(spoken))
+            return (
+                f"you speak only {only}, so `murmurflow config set language {only}` pins the "
+                "decoder and saves about 0.7s on every sentence."
+            )
+    if key == "language" and text.lower() != "auto":
+        # Pin `en`, then have `["de"]` in `languages`, and EVERY clip is thrown away as a language
+        # you do not speak — the trigger works, the microphone works, and nothing ever appears.
+        spoken = dictate.spoken_languages()
+        if spoken and dictate.language_code(text) not in spoken:
+            return (
+                f"`languages` says you speak {', '.join(sorted(spoken))}, so every clip decoded as "
+                f"{dictate.language_code(text)} would be thrown away. Add it there, or unset it."
+            )
+    if key == "polishCommand" and text:
+        program = ""
+        with contextlib.suppress(ValueError, IndexError):
+            program = shlex.split(text)[0]
+        if program and not dictate.resolve_bin(program):
+            return (
+                f"`{program}` is not on PATH, so polish would fail and degrade to the plain "
+                "transcript on every sentence."
+            )
+    return ""
+
+
 def _config(action: str = "", key: str = "", value: str = "") -> int:
     if action == "set":
         if not key:
             _out("usage: murmurflow config set <key> <value>")
             return 2
-        config.set_value(key, config.coerce(value) if value else None)
+        parsed = config.coerce(value) if value else None
+        if key == "trigger" and isinstance(parsed, str):
+            # ONE spelling in the file. `ctrl_alt` and `control_option` are the same key and both
+            # are accepted, but a config that stores whichever one was typed cannot be compared
+            # against anything — least of all by the person reading it back.
+            parsed = value = hotkey.canonical_trigger(parsed)
+        if parsed is None and key not in config.KEYS:
+            _out(f"[!] unknown setting `{key}` — there is nothing to unset.")
+            return 2
+        if parsed is not None:
+            problem = _reject(key, parsed)
+            if problem:
+                _out(f"[!] {problem}")
+                return 2
+        # Stopped BEFORE the write, so that changing `port` still finds the server on the port it
+        # is actually running on. Only when a listener is up to start it again — killing the warm
+        # server with nothing left to restart it would trade a stale model for a slow one.
+        bounce = key in _SERVER_SETTINGS and service.running() and dictate.stop_server()
+        config.set_value(key, parsed)
         _out(f"{key} = {value or '(unset)'}")
+        note = _warn(key, parsed) if parsed is not None else ""
+        if note:
+            _out(f"[!] {note}")
+        if bounce:
+            _out("[OK] stopped the warm whisper-server so it reloads with this setting")
         # The running listener read `trigger` and `doubleTap` when it bound and will not look
         # again, so without this the setting changed and the behaviour did not.
         if service.restart():

@@ -29,7 +29,8 @@ KEYS: dict[str, str] = {
     "accept every language. Unlike `language` this does NOT pin the decoder, so it costs nothing",
     "inputName": "substring of the microphone name to record from. Default: system default",
     "vocabulary": "list of proper nouns to bias the transcriber toward (names, jargon, acronyms)",
-    "cue": "tone preset: glass (default), soft, pure, wood, bell, or off for silence",
+    "cue": "tone preset: system (default, the Mac's own Tink/Pop), pebble, glass, marimba, soft, "
+    "off for silence, or a folder holding your own ready/done/fail files",
     "polishCommand": "shell command receiving the transcript on stdin and printing the cleaned text",
     "stripFillers": "true = delete 'um', 'you know', and a leading 'hey'/'so'/'well' from what you "
     "said. OFF by default: a dictation tool types what you said, and a word removed is invisible",
@@ -55,6 +56,17 @@ def home_root() -> Path:
 
 def config_path() -> Path:
     return home_root() / "config.json"
+
+
+def log_path() -> Path:
+    """Where the installed listener writes everything it says.
+
+    Both service backends redirect the daemon's stdout here, and both used to spell it out for
+    themselves — which quietly split the log away from the rest of the home the moment
+    ``MURMURFLOW_HOME`` was set. It is also the answer to "it did not work, where do I look", so
+    ``murmurflow doctor`` prints it: every clip's length, level and transcript is already in there.
+    """
+    return home_root() / "listen.log"
 
 
 def load() -> dict[str, Any]:

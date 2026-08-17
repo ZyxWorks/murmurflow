@@ -384,6 +384,59 @@ def _exited(pid: int) -> bool:
     return False
 
 
+def repair_wav(wav: Path) -> bool:
+    """Patch a RIFF header whose lengths were never written. ``True`` if it had to. Never raises.
+
+    **ffmpeg writes the real lengths when it EXITS, and it does not always get to.** SIGKILL on the
+    fallback path in :func:`stop` is one way; Windows is the other, and there it is not a fallback
+    but the only path — ``os.kill`` there cannot deliver anything gentler than ``TerminateProcess``
+    for a signal that is not CTRL_C/CTRL_BREAK, and a daemon started by ``pythonw`` has no console
+    to send those through.
+
+    Measured rather than assumed, because the guess was wrong and the wrong guess would have been
+    a scary comment about a bug that does not exist. A killed ffmpeg leaves ``0xFFFFFFFF`` in both
+    size fields, not zero, so the audio still decodes — ``-flush_packets 1`` already wrote every
+    sample (see :func:`start`) and the readers stop at the end of the file. What breaks is
+    :func:`audio_seconds`, which believes the header and reports **37 hours** of captured audio:
+    that number is the entire capture-fault diagnostic (see the daemon loop, where a clip shorter
+    than the hold is how a throttled agent recording a quarter of every sentence was found), and it
+    goes silently blind on exactly the clips something already went wrong with.
+
+    Cheaper than what it protects: a stat and twelve bytes on the ordinary path, where the header
+    is already right and this returns immediately.
+    """
+    try:
+        size = wav.stat().st_size
+        if size <= 44:  # a header and nothing else — there is nothing to rescue
+            return False
+        with wav.open("r+b") as handle:
+            if handle.read(4) != b"RIFF":
+                return False
+            handle.seek(8)
+            if handle.read(4) != b"WAVE":
+                return False
+            offset = 12
+            while offset + 8 <= size:
+                handle.seek(offset)
+                name = handle.read(4)
+                declared = int.from_bytes(handle.read(4), "little")
+                if name == b"data":
+                    actual = size - (offset + 8)
+                    if declared and declared <= actual:
+                        return False  # the trailer was written; leave it exactly as it is
+                    handle.seek(offset + 4)
+                    handle.write(actual.to_bytes(4, "little"))
+                    handle.seek(4)
+                    handle.write((size - 8).to_bytes(4, "little"))
+                    return True
+                if declared <= 0:
+                    return False  # a chunk with no length: the walk cannot go on honestly
+                offset += 8 + declared + (declared % 2)  # chunks are padded to an even length
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def stop(rec: Recording | None = None) -> Path | None:
     """Stop the in-flight capture and return the finished wav (``None`` if nothing was recording).
 
@@ -409,7 +462,10 @@ def stop(rec: Recording | None = None) -> Path | None:
     if _PROC is not None and _PROC.pid == rec.pid:
         _PROC = None
     _clear_state_for(rec.pid)
-    return rec.wav if rec.wav.is_file() else None
+    if not rec.wav.is_file():
+        return None
+    repair_wav(rec.wav)  # a recorder that had to be killed still leaves a decodable clip
+    return rec.wav
 
 
 def reap_orphans() -> int:
@@ -613,6 +669,16 @@ _LANGUAGE_CODES: dict[str, str] = {
 }
 
 
+def language_code(name: str) -> str:
+    """``"german"``, ``"German"`` and ``"de"`` are one answer; anything else passes through as itself.
+
+    One seam, so the gate that reads what whisper detected and the gate that reads what the user
+    said they speak can never disagree about what a language is called.
+    """
+    key = str(name).strip().lower()
+    return _LANGUAGE_CODES.get(key, key)
+
+
 class Heard(NamedTuple):
     """A transcript plus how sure whisper was that it was listening to speech at all.
 
@@ -663,10 +729,7 @@ def _confidence(payload: str) -> tuple[str, float, str]:
         if numeric:
             spoken = str(max(numeric, key=lambda k: numeric[k])).strip().lower()
     if not spoken:
-        spoken = _LANGUAGE_CODES.get(
-            str(data.get("language", "") or "").strip().lower(),
-            str(data.get("language", "") or "").strip().lower(),
-        )
+        spoken = language_code(str(data.get("language", "") or ""))
     return text, float(raw) if isinstance(raw, (int, float)) else 1.0, spoken
 
 
@@ -993,6 +1056,43 @@ def permission_hint() -> str:
     return platforms.permission_hint()
 
 
+#: How long a slice of the daemon log :func:`last_paste_verdict` reads. Days of dictation, and
+#: bounded so a log nobody ever rotates cannot turn a health check into a full file read.
+_LOG_TAIL_BYTES = 65_536
+
+
+def last_paste_verdict() -> bool | None:
+    """Did the DAEMON's most recent paste actually land? ``None`` if it has not tried one.
+
+    **The only ground truth there is about the typing permission**, and the reason it is read off a
+    log rather than asked of the OS: ``AXIsProcessTrusted`` answers for the process that ASKS, and
+    a probe spawned from this CLI is attributed by TCC to whatever is responsible for the CLI — a
+    terminal, an editor, whatever launched it — and never to the ``.app`` the launchd agent runs
+    as. So the question "does the daemon have Accessibility" came back NOT GRANTED on a Mac where
+    dictation had been typing into Slack all afternoon, and the health report sent its owner off to
+    switch on a switch that was already on. A confidently wrong diagnostic is worse than none.
+
+    The daemon already writes what happened to every paste, so its last attempt answers the
+    question outright — text at the cursor, or the refusal — with nothing to probe and no guessing.
+
+    Secure Input is deliberately NOT read as a refusal: it is a password field somebody had focused
+    for a moment, it clears on its own, and it has its own row.
+    """
+    try:
+        with config.log_path().open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - _LOG_TAIL_BYTES))
+            lines = handle.read().decode("utf-8", "ignore").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if line.startswith("[OK] ") and " · → " in line:
+            return True
+        if "not permitted to control this Mac" in line:
+            return False
+    return None
+
+
 def secure_input_active() -> bool:
     """True if the OS is refusing synthetic keyboard events right now.
 
@@ -1088,11 +1188,7 @@ def spoken_languages() -> frozenset[str]:
     values = raw if isinstance(raw, list) else str(raw).split(",")
     # Written as a code OR as a name: somebody who types `["english"]` means the same thing as
     # `["en"]`, and a gate that silently disagrees with them rejects everything they say.
-    return frozenset(
-        _LANGUAGE_CODES.get(str(v).strip().lower(), str(v).strip().lower())
-        for v in values
-        if str(v).strip()
-    )
+    return frozenset(language_code(str(v)) for v in values if str(v).strip())
 
 
 # Peak amplitude below which the microphone WAS working and nobody spoke into it — the trigger got
@@ -1147,12 +1243,16 @@ def peak_dbfs(wav: Path) -> float:
         return float("-inf")
     samples = array.array("h")
     samples.frombytes(frames[: len(frames) - (len(frames) % 2)])
-    peak = max((abs(s) for s in samples), default=0)
+    if not samples:
+        return float("-inf")
+    # `max(max(...), -min(...))` and not `max(abs(s) for s in samples)`: both find the same peak,
+    # but the generator runs one Python-level loop per SAMPLE — a minute of dictation is ~1M of
+    # them — where two array scans stay in C. This sits on the hot path between the key coming up
+    # and the transcribe starting, which is the one stretch of the product a person is waiting on.
+    peak = max(max(samples), -min(samples))
     if peak == 0:
         return float("-inf")
-    import math
-
-    return 20 * math.log10(peak / 32768.0)
+    return 20 * math.log10(min(peak, 32768) / 32768.0)
 
 
 def audio_seconds(wav: Path) -> float:
@@ -1322,7 +1422,7 @@ CUE_READY = "ready"
 CUE_DONE = "done"
 CUE_FAIL = "fail"
 
-#: ``voiceCue`` values that mean "make no sound at all" — see :func:`cues_muted`.
+#: ``cue`` values that mean "make no sound at all" — see :func:`cues_muted`.
 CUE_OFF = frozenset({"off", "none", "silent", "mute", "false", "0"})
 
 # The cue log's ceiling — see `_note_cue`. Trimmed to the last 200 plays, which is days of use.
@@ -1507,7 +1607,7 @@ def _custom_cue(folder: Path, kind: str) -> str:
 
 
 def cue_preset_name() -> str:
-    """What ``voiceCue`` currently resolves to: a preset name, ``system``, or a folder path.
+    """What ``cue`` currently resolves to: a preset name, ``system``, or a folder path.
 
     Reported by ``murmurflow cues``/``doctor`` so "which sound am I hearing" is answerable without
     reading the config and re-deriving the fallback rules.
@@ -1523,11 +1623,11 @@ def cue_preset_name() -> str:
 
 
 def _cue_path(kind: str) -> str:
-    """Resolve a cue name to a playable file. ``voiceCue`` decides, most specific first:
+    """Resolve a cue name to a playable file. ``cue`` decides, most specific first:
 
     1. a file you dropped in ``~/.murmurflow/audio/cues/custom/`` — ALWAYS wins, whatever else is set, so
        a downloaded sound needs no config at all,
-    2. a folder path in ``voiceCue`` (``~/Sounds/mine``) holding ``ready``/``done``/``fail``,
+    2. a folder path in ``cue`` (``~/Sounds/mine``) holding ``ready``/``done``/``fail``,
     3. ``system`` — the macOS Tink/Pop/Basso,
     4. a built-in preset name (``glass``/``marimba``/``pebble``/``soft``),
     5. the default preset.
@@ -1718,7 +1818,7 @@ def bind_trigger(
     should_stop: object | None = None,
     on_tap: object | None = None,
 ) -> str:
-    """Run the key listener in whichever mode ``voiceMode`` selects. Blocks. Returns a description.
+    """Run the key listener in whichever mode ``doubleTap`` selects. Blocks. Returns a description.
 
     One seam, so dictation and a huddle can never end up on different keys or different gestures —
     which is exactly what happened while each surface bound the keyboard for itself.
@@ -1862,7 +1962,15 @@ def listener_pid() -> int:
 
 
 def _pgrep(pattern: str) -> list[int]:
-    """Live PIDs whose full command line contains ``pattern``, this process excluded."""
+    """Live PIDs whose full command line contains ``pattern``, this process excluded.
+
+    ponytail: ``pgrep`` is POSIX, so on Windows this answers ``[]`` for "none" and ``[]`` for "I
+    cannot look" alike. The ceiling is that three things degrade quietly there — orphan reaping
+    (bounded anyway by :data:`MAX_CLIP_SECONDS`), stopping the warm server on uninstall, and the
+    doctor's listener count, which reads as "dictation is off" on a machine where it is on. The
+    upgrade is one seam function over ``tasklist``, and it is worth writing the first time somebody
+    actually runs this on Windows — not blind from a Mac, where it cannot be tested even once.
+    """
     try:
         found = subprocess.run(
             ["pgrep", "-f", pattern],
@@ -1945,6 +2053,19 @@ def claim_listener() -> int:
     return listener_pid()
 
 
+# How many clips in a row may fall through to the cold path before the warm server is presumed
+# WEDGED and bounced. Two, not one: a single cold clip is what a server that is still loading its
+# model looks like, and bouncing it for that would restart the load it was in the middle of.
+#
+# The failure this exists for is not a server that DIED — that one is visible, because `server_up`
+# says no. It is a server that keeps answering and answers wrongly. Live (2026-08-17): whisper-
+# server replied "FFmpeg conversion failed" to every single request, so every clip silently took
+# the cold path, where the confidence gate reports 1.0 and can judge nothing — and a bump on the
+# desk came back as two sentences of Japanese and was typed into a terminal. Nothing on screen
+# said the fast path was gone; the daemon simply got slower and less safe for the rest of the day.
+COLD_CLIPS_BEFORE_RESTART = 2
+
+
 def listen_loop(
     *,
     trigger: str = "",
@@ -1983,10 +2104,43 @@ def listen_loop(
     reaped = reap_orphans()
     if reaped:
         emit(f"[!] stopped {reaped} orphaned recorder(s) left by a previous run")
-    if start_server():
+    warm_expected = start_server()
+    if warm_expected:
         emit(f"whisper warm on :{port()}")
     else:
         emit("whisper-server unavailable — falling back to cold whisper-cli (~1s slower)")
+
+    #: Consecutive clips that took the cold path while a warm server was supposed to be answering.
+    cold_streak = [0]
+
+    def watch_warm(warm: bool | None) -> None:
+        """Bounce the warm server once it has stopped answering. See COLD_CLIPS_BEFORE_RESTART.
+
+        On a THREAD, because the restart waits for a 1.6 GB model to load and the poll loop that
+        calls this is the only thing watching the trigger key — a listener deaf for ten seconds
+        after every dictation is a worse bug than the one being healed. The clip that noticed is
+        already pasted, so nothing is waiting on this.
+        """
+        if warm is None or not warm_expected:
+            return  # nothing was decoded, or there was never a warm server to lose
+        if warm:
+            cold_streak[0] = 0
+            return
+        cold_streak[0] += 1
+        if cold_streak[0] < COLD_CLIPS_BEFORE_RESTART:
+            return
+        cold_streak[0] = 0
+
+        def bounce() -> None:
+            stop_server()
+            emit("[!] the warm whisper-server stopped answering — restarting it")
+            emit(
+                f"whisper warm again on :{port()}"
+                if start_server(wait=30.0)
+                else "[!] the warm whisper-server would not come back — staying on cold whisper-cli"
+            )
+
+        threading.Thread(target=bounce, daemon=True).start()
 
     # WHICH recording is ours. `current()` is a machine-wide marker — it is how `murmurflow toggle`
     # and a stale clip from a crashed run are both visible — so the daemon finishes only the
@@ -2015,6 +2169,7 @@ def listen_loop(
         if not mine:
             return  # nothing of OURS was recording
         result = finish(mine.pop())
+        watch_warm(result.warm)
         if result.problem:
             # A clip too short to hold a word is not a FAILURE, it is a gesture that was never a
             # sentence — a brushed key, or a hand that changed its mind. Chiming at it is the

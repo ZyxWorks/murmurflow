@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MurmurFlow: write at the speed you talk</title>
 <meta name="description" content="Press-to-talk dictation that runs on your own machine. Hold a key, say it, let go: the words land at your cursor in any app. Free, no account, no subscription, and nothing you say leaves your machine.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'><g stroke='%23c9903f' stroke-width='11' stroke-linecap='round' fill='none'><line x1='60' y1='62' x2='60' y2='30'/><line x1='60' y1='62' x2='32' y2='82'/><line x1='60' y1='62' x2='88' y2='82'/></g></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120' fill='none'><rect width='120' height='120' rx='18' fill='%230B0C10'/><g stroke='%23F6F5F1' stroke-width='11' stroke-linecap='round'><line x1='60' y1='60' x2='60' y2='30'/><line x1='60' y1='60' x2='30' y2='82'/><line x1='60' y1='60' x2='94' y2='74'/></g></svg>">
 <meta property="og:title" content="MurmurFlow: write at the speed you talk">
 <meta property="og:description" content="Hold a key, say it, let go. The words land at your cursor in any app. Runs on your machine. Free.">
 <meta property="og:type" content="website">
@@ -50,7 +50,8 @@
     --edge: rgba(255, 255, 255, 0.09);
     --edge-strong: rgba(255, 255, 255, 0.16);
     /* THE one signal colour. Brass is not an accent: it marks the press that matters, so on this
-       page it is the install button, the focus ring and the mark. Nothing else. */
+       page it is the install button and the focus ring. Nothing else, and never the mark, which is
+       one ink on every product the studio ships. */
     --signal: #c9903f;
     --signal-ink: #0b0c10;
   }
@@ -123,7 +124,7 @@
   /* --- nav --- */
   nav { display: flex; align-items: center; justify-content: space-between; padding: 26px 0 0; }
   .lockup { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
-  .lockup .name { font-weight: 600; letter-spacing: -0.03em; font-size: 17px; }
+  .lockup .name { font-weight: 600; letter-spacing: -0.04em; font-size: 17px; }
   nav .right { font-size: 14px; color: var(--muted); }
 
   header { padding: 76px 0 4px; }
@@ -203,8 +204,8 @@
 
   <nav>
     <a class="lockup" href="#top">
-      <svg class="mk mk-vanish" viewBox="0 0 120 120" width="22" height="22" fill="none" aria-hidden="true" style="color: var(--signal)">
-        <line x1="60" y1="62" x2="60" y2="30"/><line x1="60" y1="62" x2="32" y2="82"/><line x1="60" y1="62" x2="88" y2="82"/>
+      <svg class="mk mk-vanish" viewBox="0 0 120 120" width="22" height="22" fill="none" aria-hidden="true">
+        <line x1="60" y1="60" x2="60" y2="30"/><line x1="60" y1="60" x2="30" y2="82"/><line x1="60" y1="60" x2="94" y2="74"/>
       </svg>
       <span class="name">murmurflow</span>
     </a>
@@ -296,16 +297,14 @@
 
   <section>
     <h2>Privacy, concretely</h2>
-    <p>Audio is written to <code>~/.murmurflow/audio/</code> and deleted <strong>the instant it is
-    transcribed</strong>, before the optional polish call and before the paste, so a crash
-    downstream cannot leave your voice on disk. The recorder bounds its own life at ten minutes, so
-    a daemon killed mid-clip cannot leave the microphone hot.</p>
+    <p>Your voice is transcribed by your own machine and <strong>the recording is discarded the
+    moment that is done</strong>, before anything else happens to it. The microphone closes with
+    the key, and it cannot be left open.</p>
     <p>The transcript is never inspected, filtered, or written down. It goes to your clipboard,
     then your cursor, and your previous clipboard contents are put back. Nothing here makes a
     network request except the one-off model download.</p>
-    <p class="after"><a href="https://github.com/hannesreinsch/murmurflow#readme">Read the whole
-    thing on GitHub.</a> It is one of the few products where the README is longer than the pitch,
-    on purpose.</p>
+    <p class="after"><a href="https://github.com/hannesreinsch/murmurflow#readme">The source is
+    public, and so is every claim on this page.</a></p>
   </section>
 
 </div>
@@ -320,10 +319,8 @@
           </svg>
           <span class="name">exwyezed</span>
         </a>
-        <p class="tagline">A product studio and forward deployed engineering practice. We build
-        Zyx, the runtime a company talks to instead of clicking through its tools, and we come and
-        set it up inside the company. MurmurFlow is one of the things we built for ourselves and
-        gave away.</p>
+        <p class="tagline">A product studio and forward deployed engineering practice.
+        MurmurFlow is one of the things we built for ourselves and gave away.</p>
       </div>
       <div class="col">
         <h4>Product</h4>

@@ -55,24 +55,12 @@
     --signal: #c9903f;
     --signal-ink: #0b0c10;
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      color-scheme: light;
-      --surface: #f6f5f1;
-      --panel: #ffffff;
-      --ink: #0b0c10;
-      --subtle: #43464f;
-      --muted: #6a6c77;
-      --dim: #8a8d96;
-      --faint: #9a9ca6;
-      --ghost: #e4e2dc;
-      --ghost-near: #dedcd5;
-      --ghost-far: #ebe9e3;
-      --edge: rgba(11, 12, 16, 0.1);
-      --edge-strong: rgba(11, 12, 16, 0.18);
-    }
-  }
-
+  /* DARK ONLY, and that is the ratified brand rather than an omission. The light ramp exists in
+     the zyx codebase and is PARKED there by decision ("doesn't look this cool, park it for later"),
+     with the toggle still in the tree and nothing activating it. A product page that flips itself
+     white because a visitor's OS is in light mode is a second brand, shown to exactly the people
+     we did not choose it for. `color-scheme: dark` above is what keeps the scrollbars and any form
+     control dark with it. */
   *, *::before, *::after { box-sizing: border-box; }
   /* The background lives on the ROOT, not on body: the backdrop is a z-index -1 child of body, and
      an opaque body would paint straight over it. */

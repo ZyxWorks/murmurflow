@@ -1136,3 +1136,122 @@ def test_pinning_a_language_you_said_you_do_not_speak_is_called_out(monkeypatch,
     config.set_value("languages", ["de"])
     assert cli.main(["config", "set", "language", "en"]) == 0
     assert "thrown away" in capsys.readouterr().out
+
+
+# --- what the daemon writes down about you --------------------------------------------------------
+
+
+def _result(text: str = "the quick brown fox", **kw):
+    fields = {
+        "seconds": 3.2,
+        "transcribe_ms": 640,
+        "injected": True,
+        "peak_dbfs": -14.0,
+        "audio_seconds": 3.1,
+        "paste_note": "→ Slack",
+        "warm": True,
+    }
+    fields.update(kw)
+    return dictate.Result(text=text, **fields)
+
+
+def test_the_log_keeps_every_fact_about_a_clip_except_the_words():
+    # It used to quote the transcript, and under the installed agent that line is appended to a log
+    # nothing ever rotates — so every sentence ever dictated sat in plaintext on disk forever.
+    line = dictate.log_line(_result())
+    assert "the quick brown fox" not in line
+    assert "19 chars" in line  # the LENGTH still says whether a paste was truncated
+    assert "3.2s" in line
+    assert "-14dBFS" in line
+    assert "640ms" in line
+    assert "→ Slack" in line
+
+
+def test_the_health_report_can_still_read_a_paste_off_the_shortened_line():
+    # `last_paste_verdict` is the only ground truth about the typing permission and it reads the
+    # log. Dropping the transcript must not drop the shape it matches on.
+    line = dictate.log_line(_result())
+    assert line.startswith("[OK] ")
+    assert " · → " in line
+
+
+def test_debugging_one_bad_dictation_brings_the_words_back():
+    config.set_value("keepAudio", True)
+    assert "the quick brown fox" in dictate.log_line(_result())
+
+
+def test_a_capture_fault_is_still_named_apart_from_a_model_fault():
+    # 21s held, 15s captured: only the second is about the recorder, and they used to read alike.
+    assert "captured 15.0s" in dictate.log_line(_result(seconds=21.0, audio_seconds=15.0))
+    assert "captured" not in dictate.log_line(_result(seconds=3.2, audio_seconds=3.1))
+
+
+def test_the_cold_path_is_still_said_out_loud():
+    assert " · cold" in dictate.log_line(_result(warm=False))
+    assert "cold" not in dictate.log_line(_result(warm=True))
+
+
+# --- a paste that cannot land says what it cost ----------------------------------------------------
+
+
+def test_a_blocked_paste_admits_it_overwrote_the_clipboard(monkeypatch):
+    # Secure Input is macOS saying a password field has focus THIS SECOND, so what the transcript
+    # replaces on the clipboard is more likely than usual to be a password just copied out of a
+    # manager. "Press paste" alone reads as free, and it is not.
+    monkeypatch.setattr(dictate.platforms, "input_blocked", lambda: "Secure Input is active.")
+    monkeypatch.setattr(dictate.platforms, "clipboard_set", lambda text: True)
+    ok, problem, _note = dictate.inject("hello there")
+    assert ok is False
+    assert "in place of what was there" in problem
+
+
+def test_a_refused_paste_tells_the_same_story_as_a_blocked_one(monkeypatch):
+    # The injection script writes the clipboard before it sends the chord and aborts before the
+    # restore, so a refused paste costs exactly what a blocked one does.
+    monkeypatch.setattr(dictate.platforms, "input_blocked", lambda: "")
+    monkeypatch.setattr(dictate.platforms, "inject", lambda text, settle: (False, "refused.", ""))
+    _ok, problem, _note = dictate.inject("hello there")
+    assert dictate.PASTE_YOURSELF in problem
+
+
+def test_a_clipboard_that_could_not_be_written_says_the_text_is_lost(monkeypatch):
+    # Promising a recovery paste over a clipboard nothing was written to is worse than saying so.
+    monkeypatch.setattr(dictate.platforms, "input_blocked", lambda: "Secure Input is active.")
+    monkeypatch.setattr(dictate.platforms, "clipboard_set", lambda text: False)
+    _ok, problem, _note = dictate.inject("hello there")
+    assert "The text is lost." in problem
+
+
+# --- a microphone that turns up late ----------------------------------------------------------------
+
+
+def test_a_headset_that_connects_after_login_is_found_without_a_restart(monkeypatch):
+    # The agent is installed with KeepAlive, so "cached for this run" meant weeks. A Bluetooth
+    # headset still connecting at login is absent from the first enumeration, and every sentence
+    # after that was recorded on the fallback microphone with nothing on screen to say so.
+    config.set_value("inputName", "Headset")
+    devices = [("0", "MacBook Pro Microphone")]
+    monkeypatch.setattr(dictate.platforms, "list_inputs", lambda: devices)
+    monkeypatch.setattr(dictate.platforms, "default_input", lambda: "default")
+    monkeypatch.setattr(dictate, "_INPUT_CACHE", None)
+    monkeypatch.setattr(dictate, "_INPUT_CACHED_AT", 0.0)
+
+    clock = [1000.0]
+    monkeypatch.setattr(dictate.time, "monotonic", lambda: clock[0])
+
+    assert dictate.resolve_input()[1] == "MacBook Pro Microphone"
+    devices.append(("1", "Bose Headset"))
+    # Still cached, and deliberately so: re-listing devices costs an ffmpeg on every key press.
+    assert dictate.resolve_input()[1] == "MacBook Pro Microphone"
+    clock[0] += dictate.INPUT_CACHE_SECONDS + 1
+    assert dictate.resolve_input() == ("1", "Bose Headset")
+
+
+def test_a_failed_enumeration_is_never_cached_as_an_answer(monkeypatch):
+    # ffmpeg may simply not have been ready. Caching "no devices" would be caching a hiccup.
+    monkeypatch.setattr(dictate.platforms, "list_inputs", lambda: [])
+    monkeypatch.setattr(dictate.platforms, "default_input", lambda: "default")
+    monkeypatch.setattr(dictate, "_INPUT_CACHE", None)
+    monkeypatch.setattr(dictate, "_INPUT_CACHED_AT", 0.0)
+    assert dictate.resolve_input() == ("default", "system default")
+    assert dictate._INPUT_CACHE is None

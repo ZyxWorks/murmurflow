@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MurmurFlow: hold a key, talk, let go</title>
+<meta name="description" content="Local press-to-talk dictation for macOS and Windows. Hold a key, talk, let go: the text appears at your cursor. No account, no subscription, no network.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎙️</text></svg>">
+<meta property="og:title" content="MurmurFlow">
+<meta property="og:description" content="Hold a key, talk, let go. The text appears at your cursor. Nothing you say leaves your machine.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<!--
+  One file, no build step, no dependency, no web font request. The same rule the product itself
+  keeps, and the reason this page can live in /docs and be served by GitHub Pages with nothing to
+  deploy. The palette is the exwyezed monochrome: near-black page, warm-white ink, one grey ramp,
+  brass reserved for a single mark. Dark is the default; a viewer whose OS asks for light gets the
+  inverted ramp and nothing else changes.
+-->
+<style>
+  :root {
+    color-scheme: dark;
+    --surface: #0b0c10;
+    --panel: #16181f;
+    --ink: #f6f5f1;
+    --subtle: #c9cad0;
+    --muted: #9a9ca6;
+    --dim: #6a6c77;
+    --faint: #4e505a;
+    --edge: rgba(255, 255, 255, 0.09);
+    --edge-strong: rgba(255, 255, 255, 0.16);
+    --signal: #c9903f;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      color-scheme: light;
+      --surface: #f6f5f1;
+      --panel: #ffffff;
+      --ink: #0b0c10;
+      --subtle: #43464f;
+      --muted: #6a6c77;
+      --dim: #8a8d96;
+      --faint: #9a9ca6;
+      --edge: rgba(11, 12, 16, 0.1);
+      --edge-strong: rgba(11, 12, 16, 0.18);
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+    letter-spacing: -0.011em;
+    -webkit-font-smoothing: antialiased;
+  }
+  .shell { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 60px 0; border-top: 1px solid var(--edge); }
+
+  h1 { font-size: clamp(38px, 8vw, 60px); line-height: 1.04; letter-spacing: -0.035em; margin: 0; font-weight: 600; }
+  h2 { font-size: 13px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--dim); font-weight: 500; margin: 0 0 26px; }
+  p { margin: 0 0 16px; color: var(--subtle); }
+  p.lead { font-size: 20px; color: var(--muted); margin-top: 20px; max-width: 46ch; }
+  a { color: var(--ink); text-decoration-color: var(--edge-strong); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--signal); }
+  a:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 3px; }
+  strong { color: var(--ink); font-weight: 600; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; }
+
+  header { padding: 84px 0 4px; }
+  .mark {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px; letter-spacing: 0.02em; color: var(--muted); margin-bottom: 40px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); }
+
+  .cmd {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 10px; padding: 14px 14px 14px 16px; margin: 10px 0 6px;
+  }
+  /* The COMMAND scrolls, not the row: a copy button that scrolls out of sight with a long install
+     line is a copy button nobody finds on a phone. */
+  .cmd .line { flex: 1; min-width: 0; overflow-x: auto; }
+  .cmd code { line-height: 1.5; color: var(--ink); white-space: pre; font-size: 13.5px; }
+  .cmd button {
+    flex: none; font: inherit; font-size: 12px; line-height: 1;
+    padding: 8px 11px; border-radius: 6px; cursor: pointer;
+    color: var(--muted); background: transparent; border: 1px solid var(--edge-strong);
+  }
+  .cmd button:hover { color: var(--ink); border-color: var(--signal); }
+  .os { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--dim); margin: 26px 0 0; }
+  .after { color: var(--muted); font-size: 15px; margin-top: 24px; }
+  kbd {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.86em;
+    border: 1px solid var(--edge-strong); border-radius: 5px; padding: 2px 6px; color: var(--ink);
+  }
+
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 26px 32px; }
+  .fact strong { display: block; font-size: 16px; margin-bottom: 4px; }
+  .fact span { color: var(--muted); font-size: 15px; }
+
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; min-width: 440px; }
+  th, td { text-align: left; padding: 11px 0; border-bottom: 1px solid var(--edge); color: var(--subtle); }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; }
+  td:last-child, th:last-child { text-align: right; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  td:last-child { color: var(--ink); }
+  .note { font-size: 14px; color: var(--dim); margin-top: 18px; }
+
+  ul { margin: 0; padding: 0; list-style: none; }
+  li { padding: 12px 0; border-bottom: 1px solid var(--edge); color: var(--subtle); font-size: 16px; }
+  li:last-child { border-bottom: 0; }
+
+  footer { padding: 52px 0 80px; border-top: 1px solid var(--edge); color: var(--faint); font-size: 14px; }
+  footer a { color: var(--muted); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 18px; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <header>
+    <div class="mark"><span class="dot"></span> MurmurFlow</div>
+    <h1>Hold a key.<br>Talk. Let go.</h1>
+    <p class="lead">The text appears at your cursor: Slack, a terminal, your notes.
+    Nothing you say leaves your machine.</p>
+  </header>
+
+  <section>
+    <h2>Install</h2>
+    <p class="os">macOS, paste into Terminal</p>
+    <div class="cmd">
+      <div class="line"><code id="c1">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/hannesreinsch/murmurflow/main/install.sh)"</code></div>
+      <button data-copy="c1">copy</button>
+    </div>
+    <p class="os">Windows, paste into PowerShell</p>
+    <div class="cmd">
+      <div class="line"><code id="c2">irm https://raw.githubusercontent.com/hannesreinsch/murmurflow/main/install.ps1 | iex</code></div>
+      <button data-copy="c2">copy</button>
+    </div>
+    <p class="after">Either one works on a machine with nothing on it: no package manager, no
+    Python, no developer tools, and on Windows no Administrator either. It installs what is
+    missing, downloads the speech model once, and turns dictation on for every login.</p>
+    <p class="after">Then hold <kbd>Control</kbd>+<kbd>Option</kbd>, say something, let go.
+    That is the whole product.</p>
+  </section>
+
+  <section>
+    <h2>What it is</h2>
+    <div class="facts">
+      <div class="fact"><strong>Local</strong><span>whisper.cpp on your own machine. No account, no server, no telemetry.</span></div>
+      <div class="fact"><strong>Free</strong><span>MIT licensed. No subscription, and nothing to cancel.</span></div>
+      <div class="fact"><strong>No dependencies</strong><span>The Python standard library, ffmpeg, and the OS. Nothing else.</span></div>
+      <div class="fact"><strong>Everywhere</strong><span>Any app that takes a paste, which is all of them.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Speed, measured</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>step</th><th>seconds</th></tr></thead>
+        <tbody>
+          <tr><td>first transcription after boot, cold</td><td>13.3</td></tr>
+          <tr><td>first transcription, warm server</td><td>2.3</td></tr>
+          <tr><td>microphone open, first ever</td><td>9.9</td></tr>
+          <tr><td>microphone open, thereafter</td><td>0.3</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">M4 Pro, macOS 26, large-v3-turbo, an 11 second clip. The warm server earns its
+    place on the first sentence after a boot, which is the one a person forms their opinion on, so
+    the daemon pays that cost at login while nobody is waiting. Measure your own before believing
+    any of these, including ours.</p>
+  </section>
+
+  <section>
+    <h2>What it does not do</h2>
+    <ul>
+      <li><strong>No compiled helper.</strong> Key state is polled through stdlib <code>ctypes</code>. No Xcode, no signing, no notarization.</li>
+      <li><strong>No streaming.</strong> It would cost a permanently resident microphone to save a fraction of a batch pass.</li>
+      <li><strong>No LLM on the hot path</strong>, unless you ask for one.</li>
+      <li><strong>No Linux.</strong> Wayland exposes no global hotkey API at all, so the answer is honest rather than half working.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Privacy, concretely</h2>
+    <p>Audio is written to <code>~/.murmurflow/audio/</code> and deleted <strong>the instant it is
+    transcribed</strong>, before the optional polish call and before the paste, so a crash
+    downstream cannot leave your voice on disk. The recorder bounds its own life at ten minutes, so
+    a daemon killed mid-clip cannot leave the microphone hot.</p>
+    <p>The transcript is never inspected, filtered, or written down. It goes to your clipboard,
+    then your cursor, and your previous clipboard contents are put back. Nothing here makes a
+    network request except the one-off model download.</p>
+  </section>
+
+  <footer>
+    <div class="row">
+      <a href="https://github.com/hannesreinsch/murmurflow">GitHub</a>
+      <a href="https://github.com/hannesreinsch/murmurflow#readme">Docs</a>
+      <a href="https://github.com/hannesreinsch/murmurflow/blob/main/LICENSE">MIT</a>
+    </div>
+    <div>Built by <a href="https://runzyx.xyz">exwyezed</a>. Not affiliated with any dictation vendor.</div>
+  </footer>
+
+</div>
+
+<script>
+  // Copy button. Nothing else on this page is scripted.
+  document.querySelectorAll("[data-copy]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var text = document.getElementById(button.dataset.copy).textContent;
+      navigator.clipboard.writeText(text).then(function () {
+        button.textContent = "copied";
+        setTimeout(function () { button.textContent = "copy"; }, 1600);
+      });
+    });
+  });
+</script>
+
+</body>
+</html>

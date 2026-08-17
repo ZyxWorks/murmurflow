@@ -1615,7 +1615,7 @@ def start_and_cue() -> Recording | None:
     def _cue_when_live() -> None:
         # Generous timeout. The device normally opens in ~300ms everywhere — the "launchd takes
         # SECONDS" reading this cap was widened for turned out to be launchd THROTTLING the agent
-        # (fixed by `ProcessType: Interactive`, see `service.voice_service`), not a slow CoreAudio.
+        # (fixed by `ProcessType: Interactive`, see `platforms.macos.render_plist`), not a slow CoreAudio.
         # The wide cap stays as cheap insurance on unknown client hardware: this is a daemon thread
         # with the recording already running, so waiting longer costs nothing and giving up early
         # costs the user the cue, and with it the sentence.
@@ -1682,6 +1682,81 @@ def trigger_hint(trigger: str = "") -> str:
     """How to work the trigger right now, for a banner printed BEFORE the listener blocks."""
     key = trigger_label(trigger)
     return f"double-tap {key} to start, tap once to stop" if double_tap_mode() else f"hold {key}"
+
+
+# --- lending the key ---------------------------------------------------------------------------
+#
+# The listener LOCK above answers "may I start a second listener", and its answer is no. That is a
+# REFUSAL, and a refusal is the wrong shape for the thing people actually want, which is to borrow
+# the key for a moment: a voice assistant that wants the same double-tap for a conversation, a
+# screen recorder that must not have a microphone taken out from under it, a meeting.
+#
+# So there is a second, separate idea: a PAUSE. While one is held, the listener sees the trigger and
+# does not record. It is not a stop — the daemon stays up, the whisper server stays warm, and the
+# key comes back on its own.
+#
+# EVERY PAUSE EXPIRES, and that is the whole design rather than a safety net. A borrower that
+# crashes while holding the key would otherwise leave dictation silently dead with nothing on
+# screen to explain it, which is the worst failure this tool can have: the key is pressed, the cue
+# does not play, and there is nothing to read. A deadline means the worst case is a few minutes of
+# no dictation that fixes itself, and `murmurflow doctor` names the holder the whole time.
+
+#: How long a pause lasts when the borrower does not say. Long enough for a conversation, short
+#: enough that a crashed borrower is an annoyance rather than an outage.
+DEFAULT_PAUSE_SECONDS = 300.0
+
+#: And the ceiling on one, however long the borrower asks for. An hour of silently no dictation is
+#: already past the point where somebody would file a bug instead of waiting.
+MAX_PAUSE_SECONDS = 3600.0
+
+
+def pause_path() -> Path:
+    return config.home_root() / "paused"
+
+
+def pause(seconds: float = DEFAULT_PAUSE_SECONDS, *, who: str = "") -> float:
+    """Stand the listener down until a deadline, and return that deadline as a unix time.
+
+    ``who`` is whoever is borrowing the key, in words a person would recognise ("a Zyx huddle").
+    It costs nothing to pass and it is the entire difference between ``murmurflow doctor`` saying
+    "paused" and it saying "paused by a Zyx huddle for another 4 minutes" — one of those is a
+    diagnosis and the other is a new question.
+    """
+    until = time.time() + min(max(1.0, float(seconds)), MAX_PAUSE_SECONDS)
+    with contextlib.suppress(OSError):
+        pause_path().write_text(
+            json.dumps({"until": until, "pid": os.getpid(), "who": who.strip()}), "utf-8"
+        )
+    return until
+
+
+def resume() -> bool:
+    """Give the key back. ``True`` if it had been borrowed. Idempotent, and safe from anyone."""
+    existed = pause_path().is_file()
+    with contextlib.suppress(OSError):
+        pause_path().unlink(missing_ok=True)
+    return existed
+
+
+def paused() -> tuple[bool, str]:
+    """``(is the key lent out, who has it and for how long)``. Never raises.
+
+    An expired pause is NOT paused, and the marker is cleaned up on the way past — a borrower that
+    died holding the key must not need anybody to know that a file exists. Unreadable or malformed
+    is also not paused, for the same reason: every failure here resolves to "the key is yours",
+    because the failure mode on the other side is a microphone that never opens again.
+    """
+    try:
+        data = json.loads(pause_path().read_text("utf-8"))
+        until = float(data.get("until", 0.0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False, ""
+    remaining = until - time.time()
+    if remaining <= 0:
+        resume()
+        return False, ""
+    who = str(data.get("who", "") or "another program").strip()
+    return True, f"{who}, for another {int(remaining) // 60}m {int(remaining) % 60}s"
 
 
 def listener_lock_path() -> Path:
@@ -1836,6 +1911,19 @@ def listen_loop(
     mine: list[Recording] = []
 
     def on_press() -> None:
+        # THE LENT KEY IS CHECKED HERE AND NOT IN `start_and_cue`, and the difference is the whole
+        # rule: a pause stands the DAEMON down, it does not disable recording. Somebody who types
+        # `murmurflow toggle` while the key is lent is asking for a recording on purpose and gets
+        # one; only the trigger stands down.
+        #
+        # No cue, deliberately. The person pressing it knows they lent the key out — they are
+        # talking to whatever borrowed it — and a sound here would be this program interrupting the
+        # conversation it stood down for. The log says so once per press, because a daemon that
+        # does nothing still has to be explainable after the fact.
+        lent, holder = paused()
+        if lent:
+            emit(f"[--] the trigger is lent to {holder} — not recording")
+            return
         rec = start_and_cue()
         if rec is not None:
             mine.append(rec)

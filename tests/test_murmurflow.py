@@ -672,3 +672,45 @@ def test_an_unported_platform_never_reports_that_input_just_happened():
 
     assert unsupported.seconds_since_input() == float("inf")
     assert unsupported.keys_unavailable()  # and it says why
+
+
+# --- lending the key --------------------------------------------------------------------------
+
+
+def test_lending_the_key_expires_on_its_own():
+    # The whole design. A borrower that crashes holding the key would otherwise leave dictation
+    # silently dead with nothing on screen to explain it — the key is pressed, no cue plays, and
+    # there is nothing to read. An expiry makes the worst case a few minutes, not an outage.
+    assert dictate.paused() == (False, "")
+    dictate.pause(60, who="a Zyx huddle")
+    lent, holder = dictate.paused()
+    assert lent and "a Zyx huddle" in holder
+    dictate.pause(-5)  # clamped to the 1s floor, so this is the shortest pause there is
+    import time as _t
+
+    _t.sleep(1.1)
+    assert dictate.paused() == (False, "")
+    assert not dictate.pause_path().exists(), "an expired pause cleans itself up"
+
+
+def test_a_pause_is_capped_however_long_the_borrower_asks():
+    until = dictate.pause(999_999)
+    import time as _t
+
+    assert until - _t.time() <= dictate.MAX_PAUSE_SECONDS + 1
+    dictate.resume()
+
+
+def test_every_way_the_marker_can_be_broken_reads_as_yours():
+    # Fail OPEN, one-directionally: the failure on the other side is a microphone that never opens
+    # again, and nobody would ever guess that a file is why.
+    for junk in ("", "not json", '{"until": "soon"}', "[]"):
+        dictate.pause_path().write_text(junk, "utf-8")
+        assert dictate.paused() == (False, ""), junk
+    dictate.resume()
+
+
+def test_resume_is_idempotent_and_says_which_it_was():
+    dictate.pause(60)
+    assert dictate.resume() is True
+    assert dictate.resume() is False

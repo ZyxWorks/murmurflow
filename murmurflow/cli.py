@@ -283,6 +283,17 @@ def _doctor(*, verbs: bool = False) -> int:
             "quit whatever has a password field focused",
         )
     )
+    # A LENT KEY MUST NEVER BE AN INVISIBLE SILENCE. This is the one state where everything above
+    # is green and the trigger still does nothing, so it is the one state a health check exists for.
+    # It reads as OK rather than as a fault: somebody asked for it, and it expires by itself.
+    lent, holder = dictate.paused()
+    rows.append(
+        (
+            True,
+            "trigger: " + (f"LENT to {holder}" if lent else "yours"),
+            "murmurflow resume" if lent else "",
+        )
+    )
     installed = service.installed()
     rows.append(
         (
@@ -323,6 +334,7 @@ _VERBS = (
     ("config", "every setting, with what it does"),
     ("keytest", "does this Mac see your key, and does it read your gesture the way you think"),
     ("devices", "list microphones (then: config set inputName <part of a name>)"),
+    ("pause / resume", "lend the trigger key to another program, and take it back"),
     ("install / uninstall", "turn dictation on or off for every login"),
     ("--help", "everything else"),
 )
@@ -431,6 +443,27 @@ def _cues(name: str = "") -> int:
 # --- settings ---------------------------------------------------------------------------------
 
 
+def _pause(seconds: float, who: str) -> int:
+    """Lend the trigger key. Prints the deadline, because a pause with no visible end is a bug.
+
+    This exists for the program that wants the SAME double-tap for something else — a voice
+    assistant taking a turn, a screen recorder that must not have the microphone pulled out from
+    under it. The listener stays up and the whisper server stays warm; only the trigger stands down.
+    """
+    until = dictate.pause(seconds, who=who)
+    stamp = time.strftime("%H:%M:%S", time.localtime(until))
+    _out(f"[OK] the trigger is lent out until {stamp}. It comes back on its own; `resume` is sooner.")
+    return 0
+
+
+def _resume() -> int:
+    if dictate.resume():
+        _out("[OK] the trigger is yours again.")
+        return 0
+    _out("the trigger was not lent out.")
+    return 0
+
+
 def _config(action: str = "", key: str = "", value: str = "") -> int:
     if action == "set":
         if not key:
@@ -521,6 +554,11 @@ def main(argv: list[str] | None = None) -> int:
     p_cues = sub.add_parser("cues", help="play the three tones, or switch preset")
     p_cues.add_argument("preset", nargs="?", default="")
 
+    p_pause = sub.add_parser("pause", help="lend the trigger key to another program for a while")
+    p_pause.add_argument("--seconds", type=float, default=dictate.DEFAULT_PAUSE_SECONDS)
+    p_pause.add_argument("--who", default="", help="what is borrowing it, in words")
+    sub.add_parser("resume", help="take the trigger key back")
+
     p_cfg = sub.add_parser("config", help="show or change settings")
     p_cfg.add_argument("action", nargs="?", default="", choices=["", "set"])
     p_cfg.add_argument("key", nargs="?", default="")
@@ -561,6 +599,10 @@ def main(argv: list[str] | None = None) -> int:
             return _keytest(trigger=args.trigger, seconds=args.seconds)
         if command == "cues":
             return _cues(args.preset)
+        if command == "pause":
+            return _pause(args.seconds, args.who)
+        if command == "resume":
+            return _resume()
         if command == "config":
             return _config(args.action, args.key, args.value)
         if command == "toggle":

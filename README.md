@@ -120,6 +120,25 @@ murmurflow config set doubleTap true   # tap twice to start, once to stop
 
 Both take effect immediately — `config set` restarts the listener for you.
 
+### Lending the key to another program
+
+Something else wants the same double-tap for a moment — a voice assistant taking a turn, a screen
+recorder that must not have the microphone pulled out from under it. That is a **pause**, not a
+stop: the listener stays up and the whisper server stays warm, and only the trigger stands down.
+
+```sh
+murmurflow pause --seconds 120 --who "a Zyx huddle"
+murmurflow resume                                   # or just wait
+```
+
+**Every pause expires**, and that is the design rather than a safety net. A borrower that crashes
+holding the key would otherwise leave dictation silently dead with nothing on screen to explain it,
+which is the worst failure this tool can have. The default is five minutes, the ceiling is an hour,
+and `murmurflow doctor` names the holder and the time left for as long as it lasts.
+
+An explicit `murmurflow toggle` still records while the key is lent — a pause stands the *trigger*
+down, it does not disable dictation.
+
 ### The trigger: the gesture picks the key
 
 | gesture | default | why |

@@ -24,6 +24,9 @@ KEYS: dict[str, str] = {
     "doubleTap": "true = tap the trigger twice to start, twice to stop (instead of holding)",
     "model": "path to a ggml model file, overriding the best one found in ~/.murmurflow/models/",
     "language": "the spoken language, e.g. en / de. Default auto, which costs ~0.7s per clip",
+    "languages": 'the languages you actually speak, e.g. ["de", "en"]. A clip whisper decides is '
+    "some OTHER language never happened — that is what an invented sentence looks like. Empty = "
+    "accept every language. Unlike `language` this does NOT pin the decoder, so it costs nothing",
     "inputName": "substring of the microphone name to record from. Default: system default",
     "vocabulary": "list of proper nouns to bias the transcriber toward (names, jargon, acronyms)",
     "cue": "tone preset: glass (default), soft, pure, wood, bell, or off for silence",

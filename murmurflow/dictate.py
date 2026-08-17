@@ -630,10 +630,11 @@ class Heard(NamedTuple):
 
     text: str
     confidence: float = 1.0
+    language: str = ""
 
 
-def _confidence(payload: str) -> tuple[str, float]:
-    """Pull ``(text, detected_language_probability)`` out of a verbose_json body. Never raises.
+def _confidence(payload: str) -> tuple[str, float, str]:
+    """Pull ``(text, detected_language_probability, language)`` out of verbose_json. Never raises.
 
     ``strict=False`` is load-bearing, not defensive dressing: whisper-server puts the transcript's
     trailing newline into the JSON string RAW, which is invalid JSON that ``json.loads`` rejects
@@ -644,12 +645,13 @@ def _confidence(payload: str) -> tuple[str, float]:
     except (ValueError, TypeError):
         # Not JSON at all — an older server answering a verbose_json request with plain text. Take
         # it as the transcript and claim no opinion rather than discarding a real sentence.
-        return payload.strip(), 1.0
+        return payload.strip(), 1.0, ""
     if not isinstance(data, dict):
-        return payload.strip(), 1.0
+        return payload.strip(), 1.0, ""
     text = str(data.get("text", "")).strip()
     raw = data.get("detected_language_probability")
-    return text, float(raw) if isinstance(raw, (int, float)) else 1.0
+    spoken = str(data.get("language", "") or "").strip().lower()
+    return text, float(raw) if isinstance(raw, (int, float)) else 1.0, spoken
 
 
 def transcribe_warm(wav: Path, *, timeout: float = 60.0) -> Heard:
@@ -914,9 +916,31 @@ def polish(text: str, *, timeout: float = 20.0) -> str:
 # --- injection --------------------------------------------------------------------------------
 
 # How long to let the target app read the pasteboard before we put your own clipboard back.
-# Measured generously: apps read the pasteboard synchronously on Cmd-V, but the event itself is
-# delivered asynchronously, so this covers event delivery, not the read.
+# Apps read the pasteboard synchronously on Cmd-V, but the event itself is delivered
+# asynchronously, so this covers event delivery — and, for a long transcript, the target's own
+# insertion of it.
 _PASTE_SETTLE = 0.35
+
+# ...and the ceiling on that wait. Only reached by a transcript of several thousand characters.
+_PASTE_SETTLE_MAX = 2.0
+
+
+def paste_settle(text: str) -> float:
+    """How long to wait before restoring the clipboard, for a paste of ``text``.
+
+    Grows with the text, because the failure it prevents does. A fixed 0.35s was measured against
+    short sentences and is fine for them; a minute of dictation is ~1000 characters, and a target
+    that inserts it through a pipe — a terminal writing into a pty, a pty feeding a TUI — is still
+    consuming the pasteboard's contents when a fixed wait has already put the old clipboard back.
+    What the user sees then is the first part of their sentence and nothing after it, which is
+    exactly the report this exists to answer ("when I talk longer, only a few words paste").
+
+    The wait costs nothing anybody is looking at: the paste is already on screen, and this only
+    delays the restore of a clipboard they are not using this instant. Capped at
+    :data:`_PASTE_SETTLE_MAX` so a pathological transcript cannot hold the clipboard hostage.
+    """
+    return min(_PASTE_SETTLE_MAX, _PASTE_SETTLE + len(text) / 1000.0)
+
 
 # The whole injection, in ONE AppleScript. Paste is chosen over typing the string
 # character-by-character (`keystroke "<text>"`) because it is O(1) instead of O(chars) — a
@@ -940,7 +964,7 @@ _PASTE_SETTLE = 0.35
 # Cost: restoring a 12 MB screenshot re-materializes ~9 derived flavours and takes ~2s. It runs
 # AFTER the paste is already on screen, so it delays nothing you are looking at. Saving is cheap
 # (the flavours are already resolved).
-_INJECT_SCRIPT = f"""
+_INJECT_SCRIPT = """
 on run argv
 	set saved to missing value
 	try
@@ -948,7 +972,7 @@ on run argv
 	end try
 	set the clipboard to (item 1 of argv)
 	tell application "System Events" to keystroke "v" using command down
-	delay {_PASTE_SETTLE}
+	delay {settle}
 	if saved is not missing value then
 		try
 			set the clipboard to saved
@@ -1027,7 +1051,12 @@ def inject(text: str) -> tuple[bool, str]:
         )
     try:
         proc = subprocess.run(
-            [resolve_bin("osascript"), "-e", _INJECT_SCRIPT, text],
+            [
+                resolve_bin("osascript"),
+                "-e",
+                _INJECT_SCRIPT.format(settle=f"{paste_settle(text):.2f}"),
+                text,
+            ],
             capture_output=True,
             text=True,
             # The restore re-materializes every pasteboard flavour, which on a large copied image
@@ -1075,6 +1104,26 @@ SILENT_DBFS = -70.0
 # er hann?") as though it were a question. No blocklist can grow fast enough to cover that; asking
 # whisper how sure it was covers all of it at once.
 SPEECH_CONFIDENCE = 0.75
+
+
+def spoken_languages() -> frozenset[str]:
+    """The languages you actually speak (``languages``), or empty = accept every one.
+
+    The last gap `SPEECH_CONFIDENCE` cannot close. It asks "how sure are you it is SOME language",
+    and on room tone whisper is sometimes very sure indeed: two clips on 2026-08-17, at -21 and
+    -26 dBFS, came back as fluent invented Icelandic and were typed into the operator's window —
+    above the quiet floor, above the confidence bar, and not on any blocklist.
+
+    Naming the languages you speak turns that from an open class into a closed one, and it is the
+    only check that scales: a hallucination can invent any of whisper's ~99 languages, but a person
+    speaks two or three. Deliberately NOT derived from ``language``, which pins the decoder and
+    therefore only ever has ONE value — somebody who dictates German and English cannot use it, and
+    this is exactly that person. Empty by default, so nothing changes until you say what you speak.
+    """
+    raw = _cfg().get("languages", [])
+    values = raw if isinstance(raw, list) else str(raw).split(",")
+    return frozenset(str(v).strip().lower() for v in values if str(v).strip())
+
 
 # Peak amplitude below which the microphone WAS working and nobody spoke into it — the trigger got
 # pressed and then the room was recorded. `SILENT_DBFS` cannot catch this: room tone is a real
@@ -1136,6 +1185,24 @@ def peak_dbfs(wav: Path) -> float:
     return 20 * math.log10(peak / 32768.0)
 
 
+def audio_seconds(wav: Path) -> float:
+    """How long the RECORDING is, from its own header. ``0.0`` if it cannot be read.
+
+    Not the same number as :attr:`Recording.seconds`, and the gap between them is the point.
+    ``Recording.seconds`` is wall clock from spawning ffmpeg to stopping it; this is how much
+    audio actually reached the file. A daemon log that prints only the first cannot tell "whisper
+    mis-heard 21 seconds of speech" from "we captured 15 of the 21 seconds you spoke", which are
+    the two halves of every report that a dictation came back short, and they have completely
+    different fixes. Both are printed now, and only when they disagree — see the daemon loop.
+    """
+    try:
+        with wave.open(str(wav), "rb") as handle:
+            rate = handle.getframerate()
+            return handle.getnframes() / rate if rate else 0.0
+    except Exception:  # noqa: BLE001 — a diagnostic must never break a dictation
+        return 0.0
+
+
 @dataclass(frozen=True)
 class Result:
     """What one dictation produced, for the CLI and the huddle loop to report on."""
@@ -1146,6 +1213,9 @@ class Result:
     injected: bool
     problem: str = ""
     peak_dbfs: float = 0.0
+    #: How much audio actually landed in the file, against ``seconds`` of wall clock. See
+    #: :func:`audio_seconds` — the two disagreeing is a capture fault, not a model fault.
+    audio_seconds: float = 0.0
 
 
 def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
@@ -1176,6 +1246,7 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     # which is the whole point: the tone marks the microphone closing, not the text arriving.
     cue(CUE_DONE)
     level = peak_dbfs(wav)
+    captured = audio_seconds(wav)
 
     def retire() -> None:
         # `keepAudio` keeps the LAST clip (one file, overwritten) so a bad transcription can be
@@ -1207,10 +1278,11 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
             f"microphone input. Check System Settings > Privacy & Security > Microphone for "
             f"{Path(sys.executable).name}.",
             level,
+            captured,
         )
     if level < quiet_floor():
         retire()
-        return Result("", seconds, 0, False, f"{NOTHING_SAID} ({level:.0f} dBFS)", level)
+        return Result("", seconds, 0, False, f"{NOTHING_SAID} ({level:.0f} dBFS)", level, captured)
 
     started = time.monotonic()
     try:
@@ -1222,17 +1294,32 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     # Whisper's own verdict, and the only one that catches an invented sentence in an invented
     # language. Checked before the word-list because it subsumes it.
     if heard.confidence < SPEECH_CONFIDENCE:
-        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level)
+        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level, captured)
+    # And the language it landed on, if you have said which ones you speak. Confidence answers
+    # "is this SOME language" and passes fluent invented Icelandic; this answers "is it one of
+    # YOURS". Only ever consulted when the server reported a language it detected — a pinned
+    # `language` or the cold path report none, and an unanswered question is not a refusal.
+    allowed = spoken_languages()
+    if allowed and heard.language and heard.language not in allowed:
+        return Result(
+            "",
+            seconds,
+            elapsed_ms,
+            False,
+            f"{NO_SPEECH} — heard {heard.language}, which is not one of yours ({', '.join(sorted(allowed))})",
+            level,
+            captured,
+        )
     if is_hallucination(raw):
-        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level)
+        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level, captured)
     text = tidy(raw)
     if not text or is_hallucination(text):
-        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level)
+        return Result("", seconds, elapsed_ms, False, NO_SPEECH, level, captured)
     text = polish(text)  # a no-op unless `polishCommand` is configured
     if not paste:
-        return Result(text, seconds, elapsed_ms, False, "", level)
+        return Result(text, seconds, elapsed_ms, False, "", level, captured)
     ok, problem = inject(text)
-    return Result(text, seconds, elapsed_ms, ok, problem, level)
+    return Result(text, seconds, elapsed_ms, ok, problem, level, captured)
 
 
 def toggle(*, paste: bool = True) -> Result | None:
@@ -1904,9 +1991,19 @@ def listen_loop(
         # thought is ambiguous on its own — bad audio and a bad model look identical — but "3.1s at
         # -52 dBFS came back as four words" says the microphone was barely picking anything up, and
         # "3.1s at -14 dBFS" says it was loud and clear and the model is the problem.
+        #
+        # And the clip length is the WALL CLOCK, so when the audio that reached the file is
+        # shorter it is named separately. Printing only the wall clock made a capture fault read
+        # as a transcription fault: "21.0s came back as one sentence" and "we captured 15 of the
+        # 21 seconds you spoke" are the same line, and only the second one is about the recorder.
+        # Shown only when they disagree by more than the ~0.6s of device start-up and stop, so
+        # the ordinary line stays as short as it was.
+        captured = ""
+        if result.audio_seconds and result.seconds - result.audio_seconds > 1.0:
+            captured = f" (captured {result.audio_seconds:.1f}s)"
         emit(
-            f"[OK] {result.seconds:.1f}s · {result.peak_dbfs:.0f}dBFS · "
-            f'{result.transcribe_ms}ms · "{result.text}"'
+            f"[OK] {result.seconds:.1f}s{captured} · {result.peak_dbfs:.0f}dBFS · "
+            f'{result.transcribe_ms}ms · {len(result.text)} chars · "{result.text}"'
         )
 
     def on_abort() -> None:

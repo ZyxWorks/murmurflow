@@ -1255,3 +1255,56 @@ def test_a_failed_enumeration_is_never_cached_as_an_answer(monkeypatch):
     monkeypatch.setattr(dictate, "_INPUT_CACHED_AT", 0.0)
     assert dictate.resolve_input() == ("default", "system default")
     assert dictate._INPUT_CACHE is None
+
+
+# --- the log cannot grow forever ------------------------------------------------------------------
+
+
+def test_a_log_under_the_ceiling_is_left_exactly_as_it_is():
+    # The ordinary path is one stat. A housekeeping routine that rewrites a file nobody asked it to
+    # is a worse bug than the growth it prevents.
+    config.log_path().write_text("one line\n", "utf-8")
+    assert dictate.trim_log() is False
+    assert config.log_path().read_text("utf-8") == "one line\n"
+
+
+def test_a_log_past_the_ceiling_keeps_the_newest_and_drops_the_oldest():
+    # Driven with a small ceiling rather than by writing a real megabyte: the behaviour under test
+    # is which end survives, and that is the same at any size.
+    path = config.log_path()
+    path.write_text("".join(f"[OK] clip {i}\n" for i in range(2_000)), "utf-8")
+    before = path.stat().st_size
+    assert dictate.trim_log(cap=4_000, keep=2_000) is True
+    after = path.read_text("utf-8")
+    assert path.stat().st_size < before
+    assert path.stat().st_size <= 2_000
+    assert "clip 1999" in after  # the newest survives, which is the half anybody reads
+    assert "clip 0\n" not in after
+
+
+def test_the_trimmed_log_never_opens_on_half_a_line():
+    # Read back by a person or by `last_paste_verdict`, a fragment at the top is noise at best.
+    path = config.log_path()
+    path.write_text("".join(f"[OK] {i} some text on the line\n" for i in range(2_000)), "utf-8")
+    dictate.trim_log(cap=4_000, keep=2_000)
+    assert path.read_text("utf-8").startswith("[OK] ")
+
+
+def test_a_missing_log_is_not_an_error():
+    # `murmurflow listen` in a terminal never creates one; only the installed service does.
+    config.log_path().unlink(missing_ok=True)
+    assert dictate.trim_log() is False
+
+
+def test_the_paste_verdict_still_reads_a_trimmed_log():
+    path = config.log_path()
+    line = "[OK] 1.0s \u00b7 -14dBFS \u00b7 600ms \u00b7 12 chars \u00b7 \u2192 Slack\n"
+    path.write_text(line * 2_000, "utf-8")
+    dictate.trim_log(cap=4_000, keep=2_000)
+    assert dictate.last_paste_verdict() is True
+
+
+def test_the_shipped_ceiling_leaves_months_of_real_use_in_the_file():
+    # ~120 bytes a clip. The point of the number is that trimming is rare, not that it is tidy.
+    assert dictate.LOG_MAX_BYTES / 120 > 5_000
+    assert dictate.LOG_KEEP_BYTES < dictate.LOG_MAX_BYTES

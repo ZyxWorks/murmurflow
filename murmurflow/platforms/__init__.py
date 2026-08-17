@@ -75,7 +75,9 @@ dictation_conflict = impl.dictation_conflict
 input_blocked = impl.input_blocked
 #: Put text on the clipboard. ``True`` on success.
 clipboard_set = impl.clipboard_set
-#: Type text into whatever has focus, restoring the clipboard. ``(ok, problem)``; never raises.
+#: Type text into whatever has focus, restoring the clipboard. Never raises.
+#: ``(ok, problem, note)`` — the note is a diagnostic for the daemon log (how much of the text
+#: survived the copy, and where the keystroke went), never an error anybody is shown.
 inject = impl.inject
 #: Has this executable been granted whatever permission :func:`inject` needs. ``True`` when the
 #: platform has no such concept, because "not required" and "granted" are the same answer to a

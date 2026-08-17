@@ -948,8 +948,14 @@ def clipboard_set(text: str) -> bool:
     return platforms.clipboard_set(text)
 
 
-def inject(text: str) -> tuple[bool, str]:
-    """Type ``text`` into whatever app has focus. ``(ok, problem)``; never raises.
+def inject(text: str) -> tuple[bool, str, str]:
+    """Type ``text`` into whatever app has focus. ``(ok, problem, note)``; never raises.
+
+    ``note`` is a diagnostic for the daemon log and nothing else: which app the keystroke went to,
+    and whether the whole transcript was still on the clipboard when the target read it. A paste
+    that lands in full and one that lands as its first eight words returned the identical
+    ``(True, "")`` before this, which is why "when I talk longer, only a few words paste" could be
+    reported for weeks without the log holding a single fact about it.
 
     Both platforms do the same thing for the same reason — put the text on the clipboard, send the
     paste chord, wait, put the old clipboard back — because pasting is O(1) where typing the string
@@ -962,7 +968,7 @@ def inject(text: str) -> tuple[bool, str]:
     """
     text = (text or "").strip()
     if not text:
-        return False, "nothing to type"
+        return False, "nothing to type", ""
     blocked = platforms.input_blocked()
     if blocked:
         # The copy has to happen HERE, not be assumed. This branch returns before anything is
@@ -971,11 +977,11 @@ def inject(text: str) -> tuple[bool, str]:
         # the dictation was simply gone.
         copied = platforms.clipboard_set(text)
         recovery = "The text is on your clipboard — press paste." if copied else "The text is lost."
-        return False, f"{blocked} {recovery}"
-    ok, problem = platforms.inject(text, paste_settle(text))
+        return False, f"{blocked} {recovery}", ""
+    ok, problem, note = platforms.inject(text, paste_settle(text))
     if ok:
-        return True, ""
-    return False, f"{problem} The text is on your clipboard — press paste."
+        return True, "", note
+    return False, f"{problem} The text is on your clipboard — press paste.", note
 
 
 # --- the flow ---------------------------------------------------------------------------------
@@ -1109,6 +1115,9 @@ class Result:
     #: How much audio actually landed in the file, against ``seconds`` of wall clock. See
     #: :func:`audio_seconds` — the two disagreeing is a capture fault, not a model fault.
     audio_seconds: float = 0.0
+    #: What the paste reported about itself: the app it went to, and whether the whole transcript
+    #: was still on the clipboard for it. Empty when nothing was pasted. See :func:`inject`.
+    paste_note: str = ""
 
 
 def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
@@ -1211,8 +1220,8 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     text = polish(text)  # a no-op unless `polishCommand` is configured
     if not paste:
         return Result(text, seconds, elapsed_ms, False, "", level, captured)
-    ok, problem = inject(text)
-    return Result(text, seconds, elapsed_ms, ok, problem, level, captured)
+    ok, problem, note = inject(text)
+    return Result(text, seconds, elapsed_ms, ok, problem, level, captured, note)
 
 
 def toggle(*, paste: bool = True) -> Result | None:
@@ -1959,9 +1968,14 @@ def listen_loop(
         captured = ""
         if result.audio_seconds and result.seconds - result.audio_seconds > 1.0:
             captured = f" (captured {result.audio_seconds:.1f}s)"
+        # And WHERE it went, plus whether the words were still on the clipboard when it got there.
+        # Every fact before this clause is about the audio and the model; a paste that silently
+        # delivers half a sentence is invisible in all of them, and it is the failure people
+        # actually report.
+        went = f" · {result.paste_note}" if result.paste_note else ""
         emit(
             f"[OK] {result.seconds:.1f}s{captured} · {result.peak_dbfs:.0f}dBFS · "
-            f'{result.transcribe_ms}ms · {len(result.text)} chars · "{result.text}"'
+            f'{result.transcribe_ms}ms · {len(result.text)} chars{went} · "{result.text}"'
         )
 
     def on_abort() -> None:

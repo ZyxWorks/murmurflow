@@ -356,8 +356,14 @@ def clipboard_set(text: str) -> bool:
         _user32.CloseClipboard()
 
 
-def inject(text: str, settle: float) -> tuple[bool, str]:
+def inject(text: str, settle: float) -> tuple[bool, str, str]:
     """Clipboard-swap + synthetic ^V, then put the previous TEXT back.
+
+    ``(ok, problem, note)``. The note is the same diagnostic clause the Mac writes into the daemon
+    log — how much of the transcript survived the copy, and whether it was still there when the
+    restore came round. There is no cheap answer here for WHICH app got the keystroke (that needs
+    ``GetForegroundWindow`` + a PID walk), so this reports the two lengths and no target: half a
+    diagnostic that is true beats a name that would have to be guessed at.
 
     Paste rather than typing the string a character at a time, for the same two reasons as macOS:
     it is O(1) instead of O(chars), and it is immune to the keyboard-layout mangling that synthetic
@@ -368,23 +374,30 @@ def inject(text: str, settle: float) -> tuple[bool, str]:
     Only text is restored. See the module docstring: an image on the clipboard is lost.
     """
     if _user32 is None:
-        return False, "user32 unavailable — is this Windows?"
+        return False, "user32 unavailable — is this Windows?", ""
     saved = _clipboard_text()
     if not clipboard_set(text):
-        return False, "could not put the text on the clipboard"
+        return False, "could not put the text on the clipboard", ""
+    held = len(_clipboard_text() or "")
     try:
         _user32.keybd_event(VK_CONTROL, 0, 0, 0)
         _user32.keybd_event(_VK_V, 0, 0, 0)
         _user32.keybd_event(_VK_V, 0, _KEYEVENTF_KEYUP, 0)
         _user32.keybd_event(VK_CONTROL, 0, _KEYEVENTF_KEYUP, 0)
     except OSError as exc:
-        return False, f"paste failed: {exc}. The text is on your clipboard — press Ctrl-V."
+        return False, f"paste failed: {exc}. The text is on your clipboard — press Ctrl-V.", ""
     # The same race the Mac has, and the same answer: the restore is what ENDS the window in which
     # the target may read the clipboard, so it waits for the text rather than a fixed tick.
     time.sleep(settle)
+    still = len(_clipboard_text() or "")
     if saved is not None:
         clipboard_set(saved)
-    return True, ""
+    note = ""
+    if held != len(text):
+        note = f"COPIED ONLY {held}/{len(text)}"
+    elif still != held:
+        note = f"CLIPBOARD CHANGED UNDER THE PASTE ({still}/{len(text)})"
+    return True, "", note
 
 
 def input_permitted() -> bool:

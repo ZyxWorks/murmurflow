@@ -452,7 +452,9 @@ def _pause(seconds: float, who: str) -> int:
     """
     until = dictate.pause(seconds, who=who)
     stamp = time.strftime("%H:%M:%S", time.localtime(until))
-    _out(f"[OK] the trigger is lent out until {stamp}. It comes back on its own; `resume` is sooner.")
+    _out(
+        f"[OK] the trigger is lent out until {stamp}. It comes back on its own; `resume` is sooner."
+    )
     return 0
 
 

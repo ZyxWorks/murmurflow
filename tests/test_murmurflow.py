@@ -727,3 +727,38 @@ def test_the_trigger_verb_prints_one_parseable_name(capsys):
     config.set_value("trigger", "ctrl_alt")
     assert cli.main(["trigger"]) == 0
     assert capsys.readouterr().out.strip() == "control_option"  # canonical, not as it was typed
+
+
+# --- the paste says what it did -----------------------------------------------------------------
+#
+# A dictation that lands in full and one that lands as its first eight words were the SAME `[OK]`
+# line, because `osascript` exiting 0 only means the keystroke was posted. These read the report
+# the inject script now hands back.
+
+
+def test_a_clean_paste_names_the_app_it_went_to():
+    from murmurflow.platforms import macos
+
+    assert macos._paste_note("566\t566\tiTerm2\n", 566) == "→ iTerm2"
+
+
+def test_a_truncated_copy_says_so_loudly():
+    from murmurflow.platforms import macos
+
+    note = macos._paste_note("120\t120\tiTerm2", 566)
+    assert "COPIED ONLY 120/566" in note and "iTerm2" in note
+
+
+def test_a_clipboard_taken_mid_paste_is_a_different_story_and_says_so():
+    from murmurflow.platforms import macos
+
+    note = macos._paste_note("566\t-1\tMail", 566)
+    assert "CLIPBOARD CHANGED UNDER THE PASTE (-1/566)" in note
+
+
+def test_an_unreadable_report_is_no_note_and_never_an_exception():
+    # The diagnostic must never be able to break the paste it is describing.
+    from murmurflow.platforms import macos
+
+    for junk in ("", "nonsense", "1\t2", "a\tb\tc", "566\t566\tiTerm2\textra"):
+        assert macos._paste_note(junk, 566) == "", junk

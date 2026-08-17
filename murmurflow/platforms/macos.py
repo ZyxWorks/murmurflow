@@ -309,6 +309,20 @@ def clipboard_set(text: str) -> bool:
 # Order is the design: save, overwrite, paste, settle, restore. If the paste raises — Secure Input,
 # no Accessibility grant — the script aborts BEFORE the restore, leaving your words on the
 # clipboard for a manual Cmd-V, which is exactly what the error text promises.
+#
+# AND IT REPORTS WHAT IT DID. A dictation that lands in full and one that lands as its first eight
+# words are the SAME `[OK]` line in the daemon log, because a zero exit from `osascript` only says
+# the keystroke was posted. Three facts split that open, and the report they answer ("when I talk
+# longer, only a few words paste") could not be diagnosed without them:
+#
+#   held    the clipboard's length right after the transcript is written to it. Short means the
+#           COPY truncated, and the paste never had the words to give.
+#   still   its length again after the settle, before the restore. Short means something took the
+#           pasteboard mid-flight and the target read that instead.
+#   target  the app the keystroke actually went to. "it drops in iTerm and never in Mail" is a
+#           whole diagnosis, and it was unanswerable from this log.
+#
+# Tab-separated on stdout: a transcript can contain any other separator, but never a tab.
 _INJECT_SCRIPT = """
 on run argv
 	set saved to missing value
@@ -316,26 +330,63 @@ on run argv
 		set saved to (the clipboard as record)
 	end try
 	set the clipboard to (item 1 of argv)
+	set held to length of (the clipboard as text)
+	set target to "?"
+	try
+		tell application "System Events" to set target to name of first process whose frontmost is true
+	end try
 	tell application "System Events" to keystroke "v" using command down
 	delay {settle}
+	set still to -1
+	try
+		set still to length of (the clipboard as text)
+	end try
 	if saved is not missing value then
 		try
 			set the clipboard to saved
 		end try
 	end if
+	return (held as text) & tab & (still as text) & tab & target
 end run
 """
 
 
-def inject(text: str, settle: float) -> tuple[bool, str]:
+def _paste_note(stdout: str, sent: int) -> str:
+    """The diagnostic clause for the daemon log, read off what the script reported.
+
+    Always present on a successful paste, never only on a suspicious one: a line that appears only
+    when something looks wrong is a line nobody has a baseline for, and the baseline is the whole
+    point of writing it. Never raises — a diagnostic that can break a paste is worse than no
+    diagnostic, so anything unparseable degrades to ``""`` and the log reads exactly as before.
+    """
+    parts = (stdout or "").strip("\n").split("\t")
+    if len(parts) != 3:
+        return ""
+    try:
+        held, still = int(parts[0]), int(parts[1])
+    except ValueError:
+        return ""
+    note = f"→ {parts[2].strip() or '?'}"
+    if held != sent:
+        note += f" · COPIED ONLY {held}/{sent}"
+    elif still != held:
+        # -1 is "the clipboard was no longer text at all", which is the same story: our words were
+        # not there to be read by the time the target got round to reading them.
+        note += f" · CLIPBOARD CHANGED UNDER THE PASTE ({still}/{sent})"
+    return note
+
+
+def inject(text: str, settle: float) -> tuple[bool, str, str]:
     """Clipboard-swap + synthetic ⌘V, then put back whatever was on the clipboard.
+
+    ``(ok, problem, note)``. The note is for the log and is never shown to anybody as an error.
 
     Requires the **Accessibility** TCC grant for whichever process runs this. That is the one
     permission dictation genuinely cannot avoid: it is what "type into another app" *means* here.
     """
     osascript = shutil.which("osascript")
     if not osascript:
-        return False, "osascript missing — is this macOS?"
+        return False, "osascript missing — is this macOS?", ""
     try:
         proc = subprocess.run(
             [osascript, "-e", _INJECT_SCRIPT.format(settle=f"{settle:.2f}"), text],
@@ -347,14 +398,14 @@ def inject(text: str, settle: float) -> tuple[bool, str]:
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        return False, f"paste failed: {exc}"
+        return False, f"paste failed: {exc}", ""
     if proc.returncode == 0:
-        return True, ""
+        return True, "", _paste_note(proc.stdout, len(text))
     detail = (proc.stderr or "").strip().splitlines()
     hint = detail[-1] if detail else "unknown error"
     if "not allowed" in hint.lower() or "1002" in hint:
         hint = permission_hint()
-    return False, f"paste failed: {hint}."
+    return False, f"paste failed: {hint}.", ""
 
 
 def input_permitted() -> bool:

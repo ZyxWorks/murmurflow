@@ -74,8 +74,10 @@ def clipboard_set(text: str) -> bool:
     return False
 
 
-def inject(text: str) -> tuple[bool, str]:
-    return False, _WHY
+def inject(text: str, settle: float) -> tuple[bool, str, str]:
+    # `settle` was missing here while every caller passed it, so on Linux the one honest message
+    # this backend exists to give ("MurmurFlow has no backend for this platform") was a TypeError.
+    return False, _WHY, ""
 
 
 def input_permitted() -> bool:

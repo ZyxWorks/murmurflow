@@ -1,89 +1,36 @@
-"""Global press-to-talk key detection on macOS, in stdlib :mod:`ctypes` and nothing else.
+"""Press-to-talk key detection and the GESTURE it makes, in stdlib and nothing else.
 
-The obvious way to do this is a global-hotkey listener library and a synthetic-keystroke library,
-both of them dependencies. Neither is needed. macOS exposes the two facts we want through
-CoreGraphics C functions that :mod:`ctypes` can call directly:
+Everything here is portable. The two facts that are not — "is this key down right now" and "how
+long since the user did something else" — come from :mod:`murmurflow.platforms`, which is the only
+module that knows which operating system this is.
 
-* ``CGEventSourceFlagsState`` — which modifier keys are held right now.
-* ``CGEventSourceKeyState``   — whether a given virtual keycode is held right now.
+That split is the whole reason a Windows port is four files and not a fork. The gesture is the hard
+part and it is written once: the intent delay, the chord abort, the press-to-press double-tap
+window, the tap/hold distinction, and the rule that a callback which raises never kills the loop.
+Every one of those is a decision made against a person's hand, not against an API.
 
-So the listener is a **poll loop**, not an event tap. That matters more than it sounds:
+**A poll loop, not an event tap**, and that is the design rather than a shortcut. Polling needs no
+special grant, no run loop and no callback glue on either platform, and nothing is compiled — so a
+client's machine needs no toolchain and no signing. The cost is honest: a poll cannot *consume* the
+keystroke, so the trigger must be a key the frontmost app will not miss. That is what the two
+guards below are for.
 
-* A ``CGEventTap`` requires the **Input Monitoring** TCC grant, a ``CFRunLoop``, and ~150 lines of
-  fragile callback glue. Polling requires none of it — these two functions read HID state and, in
-  testing on macOS 26, prompted for nothing.
-* An Automator/Shortcuts hotkey (the other dependency-free option) fires on key-DOWN only, with no
-  key-UP callback, so it **structurally cannot** do hold-to-talk. Polling can: key down starts the
-  recording, key up ends it.
-* Nothing is compiled, so a client's Mac needs no Xcode, no code signing and no notarization — and
-  the TCC grant cannot be invalidated by a rebuild (the trap that bites ad-hoc-signed helpers).
+Right *Option* is deliberately never the default, and that is not a preference: on the German
+layout right Option is AltGr, the dead key for ``@ € \\ | ~ [ ] { }``. Anyone typing German all day
+would fire the microphone on virtually every email address and code bracket. This is true on both
+platforms, which is exactly why the trigger vocabulary is shared and not per-OS.
 
-**Cost of the shortcut.** A poll loop cannot *consume* the keystroke, so the trigger must be a key
-the frontmost app will not miss. The default is **left Control** (:data:`LEFT_CONTROL`) — where
-macOS itself puts dictation, so the hand already knows it. A modifier types nothing on its own, and
-the two guards in :func:`listen` (:data:`INTENT_DELAY`, then the chord abort) mean a ``⌃C`` never
-starts the microphone at all.
-
-Right *Option* is deliberately never the default, and that is not a preference: on the German layout
-right Option is AltGr, the dead key for ``@ € \\ | ~ [ ] { }``. Anyone typing German all day would
-fire the microphone on virtually every email address and code bracket.
-``fn``/Globe is out too — macOS claims it system-wide for the emoji picker and dictation, and a poll
-cannot suppress that. ``F13`` is not on a built-in MacBook keyboard.
-
-ponytail: a 60 Hz poll of two C calls, not an event tap. The ceiling is that we observe rather than
-intercept the key; upgrade to a ``CGEventTap`` only if a trigger key that must be swallowed is ever
-required.
+ponytail: a 60 Hz poll of two cheap calls, not an event tap. The ceiling is that we observe rather
+than intercept the key; upgrade only if a trigger key that must be swallowed is ever required.
 """
 
 from __future__ import annotations
 
 import contextlib
-import ctypes
-import ctypes.util
 import time
 from collections.abc import Callable
 
-# kCGEventSourceStateHIDSystemState — real hardware state, not the synthetic/session view. This is
-# what makes the poll see a physical key press rather than events we ourselves post.
-_HID_STATE = 1
-
-# CGEventFlags bits (CGEventTypes.h). Modifier-held flags are shared between left and right keys,
-# so a side-specific trigger is read via CGEventSourceKeyState on the virtual keycode instead.
-FLAG_SHIFT = 1 << 17
-FLAG_CONTROL = 1 << 18
-FLAG_OPTION = 1 << 19
-FLAG_COMMAND = 1 << 20
-FLAG_FN = 1 << 23
-
-# Virtual keycodes (Events.h / HIToolbox). Side-specific, unlike the flag bits above.
-LEFT_CONTROL = 0x3B
-LEFT_SHIFT = 0x38
-LEFT_OPTION = 0x3A
-LEFT_COMMAND = 0x37
-RIGHT_OPTION = 0x3D
-RIGHT_COMMAND = 0x36
-RIGHT_SHIFT = 0x3C
-RIGHT_CONTROL = 0x3E
-F13 = 0x69
-
-#: Side-AGNOSTIC trigger names -> the modifier FLAG bit they poll (``CGEventSourceFlagsState``).
-#:
-#: These exist because side-specific detection is a hardware promise this Mac does not keep. On the
-#: MacBooks, ``CGEventSourceKeyState`` reports the RIGHT Command key as the LEFT one and
-#: the right Option as the left — the right-side virtual keycodes simply never go true, so a
-#: trigger bound to ``right_command`` can never fire, which is exactly the "doesn't work in any way
-#: whatsoever" report. The flag bits are shared between both sides BY DEFINITION, so they are read
-#: from the state that is actually maintained rather than from one we hoped was.
-#:
-#: The cost is honest and small: ``command`` means EITHER Command key. That is the correct trade —
-#: a trigger that works on both sides beats a trigger that works on neither.
-FLAG_TRIGGERS: dict[str, int] = {
-    "command": FLAG_COMMAND,
-    "option": FLAG_OPTION,
-    "control": FLAG_CONTROL,
-    "shift": FLAG_SHIFT,
-    "fn": FLAG_FN,
-}
+from . import platforms
 
 #: COMBINATION triggers: every one of these flags must be held at once, and nothing types.
 #:
@@ -94,25 +41,26 @@ FLAG_TRIGGERS: dict[str, int] = {
 #: cue plays for a keystroke that was never dictation. Two modifiers together are bound to nothing
 #: in macOS, are typed by nobody in the course of ordinary work, and need no setting turned off
 #: first — unlike Fn (the emoji picker) or double-tap Control (Apple's own dictation).
-COMBO_TRIGGERS: dict[str, tuple[int, ...]] = {
-    "control_option": (FLAG_CONTROL, FLAG_OPTION),
-    "control_command": (FLAG_CONTROL, FLAG_COMMAND),
-    "command_option": (FLAG_COMMAND, FLAG_OPTION),
-    "control_shift": (FLAG_CONTROL, FLAG_SHIFT),
-}
+COMBO_TRIGGERS: tuple[str, ...] = (
+    "control_option",
+    "control_command",
+    "command_option",
+    "control_shift",
+)
 
-#: Trigger names accepted in config (``trigger``) -> the keycode they poll.
-TRIGGERS: dict[str, int] = {
-    "left_control": LEFT_CONTROL,
-    "left_shift": LEFT_SHIFT,
-    "left_option": LEFT_OPTION,
-    "left_command": LEFT_COMMAND,
-    "right_option": RIGHT_OPTION,
-    "right_command": RIGHT_COMMAND,
-    "right_shift": RIGHT_SHIFT,
-    "right_control": RIGHT_CONTROL,
-    "f13": F13,
-}
+
+def trigger_names() -> frozenset[str]:
+    """Every trigger this machine can actually poll — the platform's own answer, never a guess.
+
+    macOS and Windows share the vocabulary but not the whole set: ``fn`` exists only on the Mac
+    (Windows keyboards handle it in firmware and it never reaches the OS), and ``right_command``
+    only works on Windows (the MacBooks report the right-side virtual keycodes as the left ones,
+    so a trigger bound to one there can never fire). A config naming a key this platform cannot
+    read is a trigger that silently does nothing, which is why the set is asked for rather than
+    assumed.
+    """
+    return platforms.trigger_names()
+
 
 # Control+Option held together. It used to be bare left Control, "where macOS itself puts
 # dictation, so the hand already knows where it lives" — which is true, and was still the wrong
@@ -225,124 +173,54 @@ _CHORD_EPSILON = 0.02
 
 # 60 Hz. Fast enough that press/release feels instant (16ms granularity is below the ~100ms a human
 # perceives as lag) and cheap enough to be invisible: two C calls per tick is well under 1% of one
-# core. Polling faster buys nothing a person can feel.
+# core. Polling faster buys nothing a person can feel. (Windows scans a few dozen keys per tick
+# for the chord guard instead of one call; still well under a percent.)
 POLL_HZ = 60
 
 
-class Unavailable(RuntimeError):
-    """Raised when CoreGraphics cannot be reached — not macOS, or the framework is missing."""
-
-
-# kCGEventKeyDown — the event type we ask "how long since one of these?" to detect a chord.
-_EVENT_KEY_DOWN = 10
-# kCGEventLeftMouseDown / kCGEventRightMouseDown. A CLICK inside the press is a chord too: ⌘-click
-# opens a link in a new tab, and two of those in a row are otherwise indistinguishable from a
-# deliberate double-tap. Only a key-down was checked while the trigger was a Control key, where
-# nobody chords with the mouse; on Command it is the common case.
-_EVENT_LEFT_MOUSE_DOWN = 1
-_EVENT_RIGHT_MOUSE_DOWN = 3
-
-
-def _load() -> ctypes.CDLL:
-    """Bind CoreGraphics' key-state functions; raise :class:`Unavailable` if impossible."""
-    path = ctypes.util.find_library("ApplicationServices")
-    if not path:
-        raise Unavailable("ApplicationServices framework not found (is this macOS?)")
-    try:
-        lib = ctypes.CDLL(path)
-        lib.CGEventSourceKeyState.argtypes = [ctypes.c_int32, ctypes.c_uint16]
-        lib.CGEventSourceKeyState.restype = ctypes.c_bool
-        lib.CGEventSourceFlagsState.argtypes = [ctypes.c_int32]
-        lib.CGEventSourceFlagsState.restype = ctypes.c_uint64
-        lib.CGEventSourceSecondsSinceLastEventType.argtypes = [ctypes.c_int32, ctypes.c_uint32]
-        lib.CGEventSourceSecondsSinceLastEventType.restype = ctypes.c_double
-    except (OSError, AttributeError) as exc:
-        raise Unavailable(f"CoreGraphics key-state API unavailable: {exc}") from exc
-    return lib
-
-
 def accessibility_trusted() -> bool:
-    """Has THIS binary been granted Accessibility — the grant that lets the text be typed?
+    """Has this binary been granted whatever permission typing into another app needs.
 
-    ``AXIsProcessTrusted`` and never ``AXIsProcessTrustedWithOptions``: the options form is the one
-    that raises a system dialog, and a diagnostic that puts up a modal every time it runs is worse
-    than the question it answers. The grant attaches to the EXECUTABLE, and the daemon and this CLI
-    run the same interpreter, so asking on our own behalf also answers for the daemon.
+    On macOS that is the Accessibility TCC grant, and it is the one permission dictation genuinely
+    cannot avoid. On Windows there is no such concept, so the answer is ``True`` — "not required"
+    and "granted" are the same answer to a caller deciding whether to warn somebody, and a
+    diagnostic that says BLOCKED on a machine with nothing to block is worse than no diagnostic.
     """
-    path = ctypes.util.find_library("ApplicationServices")
-    if not path:
-        return False
-    try:
-        lib = ctypes.CDLL(path)
-        lib.AXIsProcessTrusted.restype = ctypes.c_bool
-        return bool(lib.AXIsProcessTrusted())
-    except (OSError, AttributeError):
-        return False
+    return platforms.input_permitted()
 
 
-def seconds_since_keydown(lib: ctypes.CDLL | None = None) -> float:
+def seconds_since_keydown() -> float:
     """Seconds since the last real key-down OR mouse click anywhere on the system.
 
     The whole chord guard: if this is smaller than how long the trigger has been held, the user
     acted WHILE holding it — they are typing ⌘S or ⌘-clicking a link, not dictating. Clicks count
     as well as keys, because on a Command trigger the mouse is half of the shortcuts.
     """
-    lib = lib or _load()
-    return min(
-        float(lib.CGEventSourceSecondsSinceLastEventType(_HID_STATE, event))
-        for event in (_EVENT_KEY_DOWN, _EVENT_LEFT_MOUSE_DOWN, _EVENT_RIGHT_MOUSE_DOWN)
-    )
+    return platforms.seconds_since_input()
 
 
-def is_trigger_down(name: str, lib: ctypes.CDLL | None = None) -> bool:
-    """Is the trigger called ``name`` down right now — flag-based or keycode-based.
+def is_trigger_down(name: str) -> bool:
+    """Is the trigger called ``name`` down right now.
 
-    ONE seam, so a listener never has to know which kind of trigger it was given. A side-agnostic
-    name (``command``) reads the modifier flag; a side-specific one (``left_control``) reads the
-    virtual keycode, which is the only way to tell the two Controls apart — where the hardware
-    reports them apart at all.
+    ONE seam, so a listener never has to know whether the platform answered from a modifier flag,
+    a side-specific keycode or a pair of them held together.
     """
-    lib = lib or _load()
-    key = canonical_trigger(name)
-    combo = COMBO_TRIGGERS.get(key)
-    if combo is not None:
-        state = flags(lib)
-        return all(state & bit for bit in combo)
-    flag = FLAG_TRIGGERS.get(key)
-    if flag is not None:
-        return bool(flags(lib) & flag)
-    return is_held(keycode(name), lib)
+    return platforms.is_down(canonical_trigger(name))
 
 
 def available() -> bool:
     """True if global key state can be read on this machine."""
-    try:
-        _load()
-    except Unavailable:
-        return False
-    return True
+    return not platforms.keys_unavailable()
 
 
-def keycode(name: str) -> int:
-    """The virtual keycode for a configured trigger name.
-
-    The fallback is LEFT_CONTROL and not ``TRIGGERS[DEFAULT_TRIGGER]``: the default is a combo now,
-    and a combo has no single keycode. Nothing reaches here with a combo name — `is_trigger_down`
-    handles those first — so this is only the answer for a name nobody recognises.
-    """
-    return TRIGGERS.get(canonical_trigger(name), LEFT_CONTROL)
+def unavailable_reason() -> str:
+    """Why it cannot be, or ``""``. A listener that reads no keys must be able to say why."""
+    return platforms.keys_unavailable()
 
 
-def is_held(code: int, lib: ctypes.CDLL | None = None) -> bool:
-    """Whether the key with virtual keycode ``code`` is physically held right now."""
-    lib = lib or _load()
-    return bool(lib.CGEventSourceKeyState(_HID_STATE, ctypes.c_uint16(code)))
-
-
-def flags(lib: ctypes.CDLL | None = None) -> int:
-    """The raw modifier-flags bitmask currently held (for diagnostics)."""
-    lib = lib or _load()
-    return int(lib.CGEventSourceFlagsState(_HID_STATE))
+def flags() -> int:
+    """The raw modifier-state word currently held, for ``murmurflow keytest``'s live readout."""
+    return platforms.flags()
 
 
 def listen(
@@ -377,7 +255,6 @@ def listen(
     never allowed to kill the loop: the listener is the one process standing between the user
     and the dictation, so it keeps going rather than dying silently at 3am.
     """
-    lib = _load()
     interval = 1.0 / max(1, poll_hz)
     held = False  # the trigger is physically down and on_press has fired
     aborted = False
@@ -387,7 +264,7 @@ def listen(
             if held and not aborted:  # never leave a recording running on shutdown
                 _safe(on_release)
             return
-        now_held = is_trigger_down(trigger, lib)
+        now_held = is_trigger_down(trigger)
         elapsed = time.monotonic() - pressed_at
         # A key-down MORE RECENT than the trigger press is a shortcut, not speech. Bounded by
         # chord_grace so that typing in another window a minute into a long dictation cannot
@@ -397,7 +274,7 @@ def listen(
             and held
             and not aborted
             and elapsed <= chord_grace
-            and seconds_since_keydown(lib) < elapsed
+            and seconds_since_keydown() < elapsed
         )
         if now_held and not held:
             held, aborted = True, False
@@ -450,7 +327,6 @@ def listen_double_tap(
     arriving "out of nowhere" mid-work. A press with a real keystroke inside it is now
     discarded as the shortcut it was.
     """
-    lib = _load()
     interval = 1.0 / max(1, poll_hz)
     held = False
     pressed_at = 0.0
@@ -467,7 +343,7 @@ def listen_double_tap(
                 _safe(on_stop)
             return
         now = time.monotonic()
-        now_held = is_trigger_down(trigger, lib)
+        now_held = is_trigger_down(trigger)
         if now_held and not held:
             held, pressed_at = True, now
         elif not now_held and held:
@@ -482,7 +358,7 @@ def listen_double_tap(
             # unnoticed and the next stray tap ended it as a too-short clip, so what arrived was failure
             # cues "out of nowhere, maybe every 30 seconds". If a real key went down while the
             # trigger was held, this press belonged to a shortcut.
-            if seconds_since_keydown(lib) <= (now - pressed_at) + _CHORD_EPSILON:
+            if seconds_since_keydown() <= (now - pressed_at) + _CHORD_EPSILON:
                 last_tap = -999.0
                 saw("chord")
                 continue

@@ -313,11 +313,13 @@ def test_the_default_trigger_is_two_modifiers_so_no_shortcut_can_fire_it():
     from murmurflow import hotkey
 
     assert hotkey.DEFAULT_TRIGGER in hotkey.COMBO_TRIGGERS
-    assert len(hotkey.COMBO_TRIGGERS[hotkey.DEFAULT_TRIGGER]) == 2
+    assert len(hotkey.DEFAULT_TRIGGER.split("_")) == 2
 
 
-def test_a_combo_is_down_only_when_every_one_of_its_flags_is():
-    from murmurflow import hotkey
+def test_a_combo_is_down_only_when_every_one_of_its_flags_is(monkeypatch):
+    # Platform-specific by nature, so it is asserted against the platform module and not the
+    # gesture layer above it — which is the whole point of the seam.
+    from murmurflow.platforms import macos
 
     class _Lib:
         state = 0
@@ -325,11 +327,45 @@ def test_a_combo_is_down_only_when_every_one_of_its_flags_is():
         def CGEventSourceFlagsState(self, _which):
             return self.state
 
+        def CGEventSourceKeyState(self, _which, _code):
+            return False
+
     lib = _Lib()
-    lib.state = hotkey.FLAG_CONTROL
-    assert not hotkey.is_trigger_down("control_option", lib)  # half of it is not it
-    lib.state = hotkey.FLAG_CONTROL | hotkey.FLAG_OPTION
-    assert hotkey.is_trigger_down("control_option", lib)
+    monkeypatch.setattr(macos, "_load", lambda: lib)
+    lib.state = macos.FLAG_CONTROL
+    assert not macos.is_down("control_option")  # half of it is not it
+    lib.state = macos.FLAG_CONTROL | macos.FLAG_OPTION
+    assert macos.is_down("control_option")
+
+
+def test_every_trigger_name_the_gesture_knows_is_one_the_platform_can_poll():
+    # A config naming a key this platform cannot read is a trigger that silently does nothing.
+    from murmurflow import hotkey
+
+    names = hotkey.trigger_names()
+    assert hotkey.DEFAULT_TRIGGER in names
+    assert hotkey.DEFAULT_TAP_TRIGGER in names
+    for alias, canonical in hotkey.TRIGGER_ALIASES.items():
+        assert canonical in names, f"{alias} aliases to {canonical}, which cannot be polled"
+
+
+def test_both_backends_answer_the_whole_contract():
+    # The seam is only a seam if every backend implements all of it. A missing name is an
+    # AttributeError on somebody else's machine, at the moment they press the key.
+    import types
+
+    from murmurflow import platforms
+    from murmurflow.platforms import macos, unsupported, windows
+
+    contract = [
+        name
+        for name, value in vars(platforms).items()
+        if not name.startswith("_") and not isinstance(value, types.ModuleType)
+    ]
+    assert len(contract) > 15, "the contract got smaller — did a seam name go missing?"
+    for backend in (macos, windows, unsupported):
+        missing = [n for n in contract if not hasattr(backend, n)]
+        assert not missing, f"{backend.__name__} is missing {missing}"
 
 
 def test_every_combo_has_a_label_a_person_could_read():
@@ -363,7 +399,7 @@ def test_hold_defaults_to_a_combo_and_double_tap_to_one_ordinary_key():
     assert dictate.trigger_key() in hotkey.COMBO_TRIGGERS
     config.set_value("doubleTap", True)
     assert dictate.trigger_key() == "left_control"
-    assert dictate.trigger_key() in hotkey.TRIGGERS
+    assert dictate.trigger_key() in hotkey.trigger_names()
 
 
 def test_an_explicit_trigger_wins_over_the_gesture_default():
@@ -514,7 +550,9 @@ def test_a_long_paste_waits_longer_before_the_clipboard_comes_back():
 def test_the_wait_is_inlined_into_the_script_and_stays_a_number():
     # The delay is formatted into AppleScript source. A locale-formatted or exponent-formatted
     # float there is a syntax error, and the whole paste is lost with it.
-    script = dictate._INJECT_SCRIPT.format(settle=f"{dictate.paste_settle('x' * 500):.2f}")
+    from murmurflow.platforms import macos
+
+    script = macos._INJECT_SCRIPT.format(settle=f"{dictate.paste_settle('x' * 500):.2f}")
     assert "delay 0.85" in script
     assert "{settle}" not in script
 
@@ -547,3 +585,180 @@ def test_the_server_language_is_read_off_the_body_beside_the_score():
     assert dictate._confidence(body) == ("hallo", 0.99, "de")
     # An older server, or the cold path: no opinion, and no opinion is never a refusal.
     assert dictate._confidence("just text") == ("just text", 1.0, "")
+
+
+# --- the platform seam ------------------------------------------------------------------------
+#
+# Everything below runs on ANY machine, which is the point: the Windows backend was written on a
+# Mac, so the parts that can be checked without Windows are checked here rather than discovered by
+# a client. What genuinely needs Windows — that keybd_event reaches the foreground app, that
+# schtasks accepts the XML — is exercised by `murmurflow doctor` there, and is named as untested
+# in the PR rather than implied to work.
+
+
+def test_the_two_backends_shape_ffmpeg_for_their_own_input():
+    from murmurflow.platforms import macos, windows
+
+    assert macos.capture_args("1") == ["-f", "avfoundation", "-i", ":1"]
+    assert macos.capture_args("") == ["-f", "avfoundation", "-i", ":default"]
+    # dshow addresses a microphone by NAME and has no "default" token at all, which is why the id
+    # is opaque above the seam and why an empty one is nothing to record rather than a default.
+    assert windows.capture_args("Mikrofon (Realtek)") == [
+        "-f",
+        "dshow",
+        "-i",
+        "audio=Mikrofon (Realtek)",
+    ]
+    assert windows.capture_args("") == []
+
+
+def test_dshow_devices_are_read_out_of_what_ffmpeg_actually_prints(monkeypatch):
+    # Real ffmpeg output, both shapes: the modern `(audio)` suffix and the older header split.
+    stderr = (
+        '[dshow @ 0x1] "Integrated Camera" (video)\n'
+        '[dshow @ 0x1]   Alternative name "@device_pnp_\\\\?\\usb#vid_04f2"\n'
+        '[dshow @ 0x1] "Mikrofon (Realtek(R) Audio)" (audio)\n'
+        '[dshow @ 0x1]   Alternative name "@device_cm_{33D9A762}"\n'
+        '[dshow @ 0x1] "Headset (WH-1000XM4)" (audio)\n'
+    )
+
+    class _Proc:
+        pass
+
+    proc = _Proc()
+    proc.stderr = stderr
+    from murmurflow.platforms import windows
+
+    monkeypatch.setattr(windows.shutil, "which", lambda _n: "ffmpeg")
+    monkeypatch.setattr(windows.subprocess, "run", lambda *a, **k: proc)
+    assert windows.list_inputs() == [
+        ("Mikrofon (Realtek(R) Audio)", "Mikrofon (Realtek(R) Audio)"),
+        ("Headset (WH-1000XM4)", "Headset (WH-1000XM4)"),
+    ]
+    assert windows.default_input() == "Mikrofon (Realtek(R) Audio)"
+
+
+def test_the_trigger_vocabulary_is_one_vocabulary_on_both_platforms():
+    from murmurflow import hotkey
+    from murmurflow.platforms import macos, windows
+
+    shared = macos.trigger_names() & windows.trigger_names()
+    assert hotkey.DEFAULT_TRIGGER in shared  # a config file moves between machines unchanged
+    assert hotkey.DEFAULT_TAP_TRIGGER in shared
+    # And the two honest differences, each of them hardware and neither of them a preference.
+    assert "fn" in macos.trigger_names() and "fn" not in windows.trigger_names()
+    assert "right_command" in windows.trigger_names()
+
+
+def test_the_logon_task_is_well_formed_and_asks_to_be_restarted():
+    import xml.etree.ElementTree as ET
+
+    from murmurflow.platforms import windows
+
+    xml = windows.task_xml(r"C:\Users\h\.murmurflow\listen.cmd", "DESK\\h")
+    root = ET.fromstring(xml)  # noqa: S314 — our own template, not input
+    namespace = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    assert root.find(".//t:Exec/t:Command", namespace).text.endswith("listen.cmd")
+    # `KeepAlive` is launchd's word for it. Plain schtasks flags cannot express it, which is the
+    # whole reason this is XML and not a command line.
+    assert root.find(".//t:RestartOnFailure/t:Count", namespace).text == "999"
+    assert root.find(".//t:Settings/t:Hidden", namespace).text == "true"
+
+
+def test_an_unported_platform_never_reports_that_input_just_happened():
+    # The chord guard aborts a recording when the user did something else DURING the press. A
+    # backend that answered "0 seconds ago" would abort every single one; "forever ago" fails open.
+    from murmurflow.platforms import unsupported
+
+    assert unsupported.seconds_since_input() == float("inf")
+    assert unsupported.keys_unavailable()  # and it says why
+
+
+# --- lending the key --------------------------------------------------------------------------
+
+
+def test_lending_the_key_expires_on_its_own():
+    # The whole design. A borrower that crashes holding the key would otherwise leave dictation
+    # silently dead with nothing on screen to explain it — the key is pressed, no cue plays, and
+    # there is nothing to read. An expiry makes the worst case a few minutes, not an outage.
+    assert dictate.paused() == (False, "")
+    dictate.pause(60, who="a Zyx huddle")
+    lent, holder = dictate.paused()
+    assert lent and "a Zyx huddle" in holder
+    dictate.pause(-5)  # clamped to the 1s floor, so this is the shortest pause there is
+    import time as _t
+
+    _t.sleep(1.1)
+    assert dictate.paused() == (False, "")
+    assert not dictate.pause_path().exists(), "an expired pause cleans itself up"
+
+
+def test_a_pause_is_capped_however_long_the_borrower_asks():
+    until = dictate.pause(999_999)
+    import time as _t
+
+    assert until - _t.time() <= dictate.MAX_PAUSE_SECONDS + 1
+    dictate.resume()
+
+
+def test_every_way_the_marker_can_be_broken_reads_as_yours():
+    # Fail OPEN, one-directionally: the failure on the other side is a microphone that never opens
+    # again, and nobody would ever guess that a file is why.
+    for junk in ("", "not json", '{"until": "soon"}', "[]"):
+        dictate.pause_path().write_text(junk, "utf-8")
+        assert dictate.paused() == (False, ""), junk
+    dictate.resume()
+
+
+def test_resume_is_idempotent_and_says_which_it_was():
+    dictate.pause(60)
+    assert dictate.resume() is True
+    assert dictate.resume() is False
+
+
+def test_the_trigger_verb_prints_one_parseable_name(capsys):
+    # The reader is a PROGRAM deciding whether its own hotkey collides with this one. Everything
+    # else that says which key this is on says it in a sentence, which is right for a person and
+    # unparseable for that. Borrowing the key when it does not collide stands dictation down across
+    # every other app for as long as the borrower runs, silently — so the answer has to be exact.
+    config.set_value("doubleTap", True)
+    assert cli.main(["trigger"]) == 0
+    assert capsys.readouterr().out.strip() == "left_control"
+    config.set_value("trigger", "ctrl_alt")
+    assert cli.main(["trigger"]) == 0
+    assert capsys.readouterr().out.strip() == "control_option"  # canonical, not as it was typed
+
+
+# --- the paste says what it did -----------------------------------------------------------------
+#
+# A dictation that lands in full and one that lands as its first eight words were the SAME `[OK]`
+# line, because `osascript` exiting 0 only means the keystroke was posted. These read the report
+# the inject script now hands back.
+
+
+def test_a_clean_paste_names_the_app_it_went_to():
+    from murmurflow.platforms import macos
+
+    assert macos._paste_note("566\t566\tiTerm2\n", 566) == "→ iTerm2"
+
+
+def test_a_truncated_copy_says_so_loudly():
+    from murmurflow.platforms import macos
+
+    note = macos._paste_note("120\t120\tiTerm2", 566)
+    assert "COPIED ONLY 120/566" in note and "iTerm2" in note
+
+
+def test_a_clipboard_taken_mid_paste_is_a_different_story_and_says_so():
+    from murmurflow.platforms import macos
+
+    note = macos._paste_note("566\t-1\tMail", 566)
+    assert "CLIPBOARD CHANGED UNDER THE PASTE (-1/566)" in note
+
+
+def test_an_unreadable_report_is_no_note_and_never_an_exception():
+    # The diagnostic must never be able to break the paste it is describing.
+    from murmurflow.platforms import macos
+
+    for junk in ("", "nonsense", "1\t2", "a\tb\tc", "566\t566\tiTerm2\textra"):
+        assert macos._paste_note(junk, 566) == "", junk

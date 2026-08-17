@@ -64,7 +64,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from . import config, whisper
+from . import config, platforms, whisper
 
 # Homebrew's bin dirs. launchd hands an agent a minimal PATH that excludes them, so a bare
 # shutil.which() finds nothing when the listener runs from a plist while working fine in a shell
@@ -114,10 +114,19 @@ def available() -> tuple[bool, str]:
     as an exception. Three things are genuinely required and there is no fourth: something to record
     with, something to transcribe with, and a model to transcribe against.
     """
-    if not resolve_bin("ffmpeg"):
-        return False, "Dictation needs ffmpeg to record. Install it: `brew install ffmpeg`"
+    ok, why = platforms.capture_available()
+    if not ok:
+        return False, f"Dictation needs a recorder. {why}"
     if not (resolve_bin("whisper-server") or whisper.available()):
-        return False, "Dictation needs a local transcriber. Install it: `brew install whisper-cpp`"
+        # The one-command fix is not the same command on both platforms, and a hint naming the
+        # wrong package manager is worse than no hint — it sends somebody off to install Homebrew
+        # on a machine that has never had it.
+        fix = (
+            "`brew install whisper-cpp`"
+            if sys.platform == "darwin"
+            else "re-run the installer — it fetches whisper.cpp's own Windows build"
+        )
+        return False, f"Dictation needs a local transcriber. Install it: {fix}"
     if not whisper.model():
         return False, ("No whisper model found. Download one: `murmurflow setup`")
     return True, ""
@@ -164,45 +173,15 @@ def _scratch_dir() -> Path:
 
 # --- microphone -------------------------------------------------------------------------------
 
-_DEVICE_LINE = re.compile(r"\[(\d+)\]\s+(.+?)\s*$")
 
+def list_inputs() -> list[tuple[str, str]]:
+    """Every audio input as ``(id, name)``, from the platform. ``[]`` if none can be enumerated.
 
-def list_inputs() -> list[tuple[int, str]]:
-    """Every avfoundation AUDIO input as ``(index, name)``; ``[]`` if ffmpeg is missing/errors.
-
-    ffmpeg prints its device list to stderr and exits non-zero by design (there is no input file),
-    so a non-zero return here is normal and is not treated as failure.
+    The id is opaque above this line: an avfoundation index on macOS, a dshow device name on
+    Windows. Only :func:`murmurflow.platforms.capture_args` ever reads it, which is what lets the
+    recorder below be written once.
     """
-    ffmpeg = resolve_bin("ffmpeg")
-    if not ffmpeg:
-        return []
-    try:
-        proc = subprocess.run(
-            [ffmpeg, "-f", "avfoundation", "-list_devices", "true", "-i", ""],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return []
-    devices: list[tuple[int, str]] = []
-    in_audio = False
-    for line in (proc.stderr or "").splitlines():
-        if "AVFoundation video devices" in line:
-            in_audio = False
-            continue
-        if "AVFoundation audio devices" in line:
-            in_audio = True
-            continue
-        if not in_audio:
-            continue
-        # Strip ffmpeg's "[AVFoundation indev @ 0x...] " prefix before matching the "[N] Name" pair.
-        stripped = re.sub(r"^\[AVFoundation indev @ [^\]]+\]\s*", "", line).strip()
-        match = _DEVICE_LINE.match(stripped)
-        if match:
-            devices.append((int(match.group(1)), match.group(2)))
-    return devices
+    return platforms.list_inputs()
 
 
 # The resolved mic, cached for the daemon's lifetime. Enumerating avfoundation devices costs a whole
@@ -220,27 +199,28 @@ def forget_input() -> None:
 
 
 def resolve_input() -> tuple[str, str]:
-    """``(avfoundation_index, resolved_name)`` for the configured mic.
+    """``(device_id, resolved_name)`` for the configured mic.
 
-    Matched by NAME (case-insensitive substring) against the live device list, because indices
-    shift the moment a USB interface is plugged in — pinning an index would silently start
-    recording the wrong device. Falls back to avfoundation's ``:default`` when the named device is
-    absent (unplugged headset, a client Mac with different hardware), so dictation degrades to
-    "wrong-ish mic" rather than "broken".
+    Matched by NAME (case-insensitive substring) against the live device list, because ids shift
+    the moment a USB interface is plugged in — pinning one would silently start recording the wrong
+    device. Falls back to whatever the platform calls "the system default" when the named device is
+    absent (unplugged headset, a client machine with different hardware), so dictation degrades to
+    "wrong-ish mic" rather than "broken". On Windows there is no default TOKEN — dshow has no
+    spelling for it — so the fallback there is the first audio input there is.
     """
     global _INPUT_CACHE
     if _INPUT_CACHE is not None:
         return _INPUT_CACHE
     want = input_name().lower()
     devices = list_inputs()
-    resolved = ("default", "system default")
+    resolved = (platforms.default_input(), "system default")
     for index, name in devices:
         if want and want in name.lower():
             resolved = (str(index), name)
             break
     else:
         for index, name in devices:  # name miss: prefer a real mic over an aggregate interface
-            if "microphone" in name.lower():
+            if "microphone" in name.lower() or "mikrofon" in name.lower():
                 resolved = (str(index), name)
                 break
     if devices:  # never cache a failed enumeration — ffmpeg may simply not have been ready
@@ -309,10 +289,7 @@ def start() -> Recording | None:
         # supervisor needed and nothing to remember.
         "-t",
         str(MAX_CLIP_SECONDS),
-        "-f",
-        "avfoundation",
-        "-i",
-        f":{index}",
+        *platforms.capture_args(index),
         # ffmpeg's avfoundation input keeps exactly ONE pending audio buffer and releases the
         # previous one whenever a new buffer arrives before its reader has taken it, so a little
         # scheduling jitter silently costs samples. Measured here: ~11% of every capture, on the
@@ -942,147 +919,69 @@ def paste_settle(text: str) -> float:
     return min(_PASTE_SETTLE_MAX, _PASTE_SETTLE + len(text) / 1000.0)
 
 
-# The whole injection, in ONE AppleScript. Paste is chosen over typing the string
-# character-by-character (`keystroke "<text>"`) because it is O(1) instead of O(chars) — a
-# 300-character dictation types visibly, one letter at a time, over several seconds — and because
-# it is immune to the keyboard-layout mangling that synthetic per-character events hit with German
-# umlauts. The text arrives through `argv`, so the AppleScript quoting traps of an inlined string
-# never apply either.
-#
-# Save and restore live INSIDE the script because `the clipboard as record` is the only thing that
-# can hold what was there. It carries EVERY flavour the pasteboard offers — a copied image, a
-# styled snippet, a file — where `pbpaste` sees text and nothing else. That gap was a real loss,
-# not a theoretical one: copy a screenshot while a dictation is in flight and the transcript ate
-# it, because a `pbpaste` that returned "" read as "nothing to put back".
-#
-# Order is the design: save, overwrite, paste, settle, restore. If the paste raises — Secure Input,
-# no Accessibility grant — the script aborts BEFORE the restore, leaving your words on the
-# clipboard for a manual Cmd-V, which is exactly what the error text promises. Both clipboard
-# steps are wrapped: an empty pasteboard cannot be read as a record, and neither failure is worth
-# losing an injected sentence over.
-#
-# Cost: restoring a 12 MB screenshot re-materializes ~9 derived flavours and takes ~2s. It runs
-# AFTER the paste is already on screen, so it delays nothing you are looking at. Saving is cheap
-# (the flavours are already resolved).
-_INJECT_SCRIPT = """
-on run argv
-	set saved to missing value
-	try
-		set saved to (the clipboard as record)
-	end try
-	set the clipboard to (item 1 of argv)
-	tell application "System Events" to keystroke "v" using command down
-	delay {settle}
-	if saved is not missing value then
-		try
-			set the clipboard to saved
-		end try
-	end if
-end run
-"""
+def permission_hint() -> str:
+    """How to grant whatever permission typing needs here, or ``""`` when there is nothing to grant.
+
+    Empty is a real answer and not a missing one: Windows has no TCC. The caller prints the row
+    either way — see the doctor.
+    """
+    return platforms.permission_hint()
 
 
 def secure_input_active() -> bool:
-    """True if some app has Secure Input enabled (a password field, some terminals).
+    """True if the OS is refusing synthetic keyboard events right now.
 
-    While it is on, the OS refuses ALL synthetic keyboard events, so a paste silently does nothing
-    — the single most confusing failure this feature can have ("it heard me but typed nothing").
-    Detecting it lets the caller say so instead of losing your words.
+    macOS has Secure Input (a password field, some terminals) and while it is on a paste silently
+    does nothing — the single most confusing failure this feature can have ("it heard me but typed
+    nothing"). Windows has no equivalent, so this is always False there and the message it guards
+    is never shown.
     """
-    try:
-        import ctypes
-        import ctypes.util
-
-        path = ctypes.util.find_library("Carbon")
-        if not path:
-            return False
-        carbon = ctypes.CDLL(path)
-        carbon.IsSecureEventInputEnabled.restype = ctypes.c_bool
-        return bool(carbon.IsSecureEventInputEnabled())
-    except Exception:  # noqa: BLE001 — a diagnostic; never block a paste because it failed
-        return False
+    return bool(platforms.input_blocked())
 
 
 def clipboard_set(text: str) -> bool:
     """Put ``text`` on the clipboard. ``True`` on success.
 
-    Only used when injection is refused before it starts. Everything on the happy path goes
-    through :data:`_INJECT_SCRIPT`, which has to hold the old clipboard anyway.
+    Only used when injection is refused before it starts. Everything on the happy path goes through
+    :func:`inject`, which has to hold the old clipboard anyway.
     """
-    binary = resolve_bin("pbcopy")
-    if not binary:
-        return False
-    try:
-        proc = subprocess.run(
-            binary, input=text, text=True, timeout=5, check=False, capture_output=True
-        )
-        return proc.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
+    return platforms.clipboard_set(text)
 
 
-def inject(text: str) -> tuple[bool, str]:
-    """Type ``text`` into whatever app has focus. ``(ok, problem)``; never raises.
+def inject(text: str) -> tuple[bool, str, str]:
+    """Type ``text`` into whatever app has focus. ``(ok, problem, note)``; never raises.
 
-    Clipboard-swap + synthetic Cmd-V, then whatever was on the clipboard — text, an image, a file
-    — is put back. The restore is the fiddly part: paste is asynchronous, so restoring immediately
-    races the target app and pastes the OLD clipboard instead. :data:`_PASTE_SETTLE` is the wait —
-    long enough for any app to have read the pasteboard, short enough that nobody beats it by hand.
+    ``note`` is a diagnostic for the daemon log and nothing else: which app the keystroke went to,
+    and whether the whole transcript was still on the clipboard when the target read it. A paste
+    that lands in full and one that lands as its first eight words returned the identical
+    ``(True, "")`` before this, which is why "when I talk longer, only a few words paste" could be
+    reported for weeks without the log holding a single fact about it.
 
-    Requires the **Accessibility** TCC grant for whichever process runs this (Terminal, or the
-    launchd-run python). That is the one permission dictation genuinely cannot avoid: it is what
-    "type into another app" *means* on macOS.
+    Both platforms do the same thing for the same reason — put the text on the clipboard, send the
+    paste chord, wait, put the old clipboard back — because pasting is O(1) where typing the string
+    character by character is O(chars), and because a synthetic per-character keystroke is re-mapped
+    through the TARGET's keyboard layout, which mangles every umlaut in a German dictation.
+
+    The wait before the restore is :func:`paste_settle` and it grows with the text: the restore is
+    what ENDS the window in which the target may read the clipboard, and a long transcript is still
+    being inserted when a fixed wait has already closed it.
     """
     text = (text or "").strip()
     if not text:
-        return False, "nothing to type"
-    if not resolve_bin("osascript"):
-        return False, "osascript missing — is this macOS?"
-    if secure_input_active():
-        # The copy has to happen HERE, not be assumed. This branch returns before the inject
-        # script runs, and it used to promise "the text is on your clipboard" over a clipboard
-        # nothing had ever been written to — so the recovery Cmd-V pasted whatever was there
-        # before, and the dictation was simply gone.
-        copied = clipboard_set(text)
-        return False, (
-            "Secure Input is active (a password field or terminal has keyboard entry locked), so "
-            "macOS is blocking synthetic paste. "
-            + ("The text is on your clipboard — press Cmd-V." if copied else "The text is lost.")
-        )
-    try:
-        proc = subprocess.run(
-            [
-                resolve_bin("osascript"),
-                "-e",
-                _INJECT_SCRIPT.format(settle=f"{paste_settle(text):.2f}"),
-                text,
-            ],
-            capture_output=True,
-            text=True,
-            # The restore re-materializes every pasteboard flavour, which on a large copied image
-            # is seconds of work — generous enough that a big screenshot is never dropped.
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, f"paste failed: {exc}"
-    if proc.returncode != 0:
-        detail = (proc.stderr or "").strip().splitlines()
-        hint = detail[-1] if detail else "unknown error"
-        if "not allowed" in hint.lower() or "1002" in hint:
-            # Naming the wrong process here wastes an afternoon: the grant belongs to
-            # whatever is RUNNING THE LISTENER, which under the launchd agent is the `murmurflow`
-            # binary and not the terminal you happen to be looking at. Granting Terminal makes
-            # `murmurflow listen` work by hand while the installed agent stays silently blocked — which is exactly the
-            # confusing half-working state this message exists to prevent.
-            hint = (
-                "not permitted to control this Mac. Accessibility must be granted to the process "
-                f"running the listener — this one is {Path(sys.executable).name} at "
-                f"{sys.executable}. Add it in System Settings > Privacy & Security > "
-                "Accessibility (the apps you dictate INTO never need permission)."
-            )
-        return False, f"paste failed: {hint}. The text is on your clipboard — press Cmd-V."
-    return True, ""
+        return False, "nothing to type", ""
+    blocked = platforms.input_blocked()
+    if blocked:
+        # The copy has to happen HERE, not be assumed. This branch returns before anything is
+        # pasted, and it used to promise "the text is on your clipboard" over a clipboard nothing
+        # had ever been written to — so the recovery paste gave back whatever was there before, and
+        # the dictation was simply gone.
+        copied = platforms.clipboard_set(text)
+        recovery = "The text is on your clipboard — press paste." if copied else "The text is lost."
+        return False, f"{blocked} {recovery}", ""
+    ok, problem, note = platforms.inject(text, paste_settle(text))
+    if ok:
+        return True, "", note
+    return False, f"{problem} The text is on your clipboard — press paste.", note
 
 
 # --- the flow ---------------------------------------------------------------------------------
@@ -1216,6 +1115,9 @@ class Result:
     #: How much audio actually landed in the file, against ``seconds`` of wall clock. See
     #: :func:`audio_seconds` — the two disagreeing is a capture fault, not a model fault.
     audio_seconds: float = 0.0
+    #: What the paste reported about itself: the app it went to, and whether the whole transcript
+    #: was still on the clipboard for it. Empty when nothing was pasted. See :func:`inject`.
+    paste_note: str = ""
 
 
 def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
@@ -1318,8 +1220,8 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     text = polish(text)  # a no-op unless `polishCommand` is configured
     if not paste:
         return Result(text, seconds, elapsed_ms, False, "", level, captured)
-    ok, problem = inject(text)
-    return Result(text, seconds, elapsed_ms, ok, problem, level, captured)
+    ok, problem, note = inject(text)
+    return Result(text, seconds, elapsed_ms, ok, problem, level, captured, note)
 
 
 def toggle(*, paste: bool = True) -> Result | None:
@@ -1352,11 +1254,10 @@ CUE_OFF = frozenset({"off", "none", "silent", "mute", "false", "0"})
 # The cue log's ceiling — see `_note_cue`. Trimmed to the last 200 plays, which is days of use.
 _CUE_LOG_MAX_BYTES = 200_000
 
-_SYSTEM_CUES = {
-    CUE_READY: "/System/Library/Sounds/Tink.aiff",
-    CUE_DONE: "/System/Library/Sounds/Pop.aiff",
-    CUE_FAIL: "/System/Library/Sounds/Basso.aiff",
-}
+#: The OS's own alert sounds, where it has any to borrow. Empty on a platform that does not name
+#: its sounds by PATH (Windows names them by event key), and the generated tones below are then the
+#: only cue — which is no loss, because every stock system sound is an ALERT, mixed to interrupt.
+_SYSTEM_CUES = platforms.system_cues()
 
 # The default cue is generated rather than borrowed, because every sound in /System/Library/Sounds
 # is an ALERT: designed to interrupt, mixed loud, and instantly recognisable as "a Mac just told
@@ -1652,50 +1553,28 @@ def cue(sound: str) -> None:
     that already has a sound file keeps working. Every play is recorded (:func:`_note_cue`) so a
     sound heard can be attributed instead of theorised about.
     """
-    player = resolve_bin("afplay")
-    if not player or os.environ.get("MURMURFLOW_NO_AUDIO") or cues_muted():
+    if os.environ.get("MURMURFLOW_NO_AUDIO") or cues_muted():
         return
     kind = sound
     sound = sound if Path(sound).is_file() else _cue_path(sound)
     if not Path(sound).is_file():
         return
-    try:
-        subprocess.Popen(
-            [player, sound],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return
+    platforms.play(sound)
     _note_cue(kind, sound)
 
 
 def apple_dictation_conflict(trigger: str = "") -> bool:
-    """True if macOS's OWN dictation shortcut would fire on the same gesture as ours.
+    """True if the OS's OWN dictation shortcut would fire on the same gesture as ours.
 
     Apple puts dictation on a double-tap of Control by default. If that is still enabled and the
     user's trigger is a bare Control, both fire: Apple's microphone panel appears on top of this
     one and neither transcript is what was wanted. It is the single most confusing collision this
     tool has, and it was documented in prose nobody reads — so it is a checked row instead.
 
-    Only a Control trigger can collide; a combo cannot, which is most of why the hold default is
-    one. Any failure to read the setting answers False: a diagnostic must not invent a problem.
+    Windows puts its own dictation on Win+H, a CHORD, which this tool cannot bind — so there is
+    nothing to collide with and the platform answers False. The row still prints.
     """
-    key = trigger_key(trigger)
-    if key not in {"left_control", "right_control", "control"}:
-        return False
-    try:
-        proc = subprocess.run(
-            ["defaults", "read", "com.apple.assistant.support", "Dictation Enabled"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return proc.stdout.strip() == "1"
+    return platforms.dictation_conflict(trigger_key(trigger))
 
 
 def trigger_key(trigger: str = "") -> str:
@@ -1745,7 +1624,7 @@ def start_and_cue() -> Recording | None:
     def _cue_when_live() -> None:
         # Generous timeout. The device normally opens in ~300ms everywhere — the "launchd takes
         # SECONDS" reading this cap was widened for turned out to be launchd THROTTLING the agent
-        # (fixed by `ProcessType: Interactive`, see `service.voice_service`), not a slow CoreAudio.
+        # (fixed by `ProcessType: Interactive`, see `platforms.macos.render_plist`), not a slow CoreAudio.
         # The wide cap stays as cheap insurance on unknown client hardware: this is a daemon thread
         # with the recording already running, so waiting longer costs nothing and giving up early
         # costs the user the cue, and with it the sentence.
@@ -1812,6 +1691,81 @@ def trigger_hint(trigger: str = "") -> str:
     """How to work the trigger right now, for a banner printed BEFORE the listener blocks."""
     key = trigger_label(trigger)
     return f"double-tap {key} to start, tap once to stop" if double_tap_mode() else f"hold {key}"
+
+
+# --- lending the key ---------------------------------------------------------------------------
+#
+# The listener LOCK above answers "may I start a second listener", and its answer is no. That is a
+# REFUSAL, and a refusal is the wrong shape for the thing people actually want, which is to borrow
+# the key for a moment: a voice assistant that wants the same double-tap for a conversation, a
+# screen recorder that must not have a microphone taken out from under it, a meeting.
+#
+# So there is a second, separate idea: a PAUSE. While one is held, the listener sees the trigger and
+# does not record. It is not a stop — the daemon stays up, the whisper server stays warm, and the
+# key comes back on its own.
+#
+# EVERY PAUSE EXPIRES, and that is the whole design rather than a safety net. A borrower that
+# crashes while holding the key would otherwise leave dictation silently dead with nothing on
+# screen to explain it, which is the worst failure this tool can have: the key is pressed, the cue
+# does not play, and there is nothing to read. A deadline means the worst case is a few minutes of
+# no dictation that fixes itself, and `murmurflow doctor` names the holder the whole time.
+
+#: How long a pause lasts when the borrower does not say. Long enough for a conversation, short
+#: enough that a crashed borrower is an annoyance rather than an outage.
+DEFAULT_PAUSE_SECONDS = 300.0
+
+#: And the ceiling on one, however long the borrower asks for. An hour of silently no dictation is
+#: already past the point where somebody would file a bug instead of waiting.
+MAX_PAUSE_SECONDS = 3600.0
+
+
+def pause_path() -> Path:
+    return config.home_root() / "paused"
+
+
+def pause(seconds: float = DEFAULT_PAUSE_SECONDS, *, who: str = "") -> float:
+    """Stand the listener down until a deadline, and return that deadline as a unix time.
+
+    ``who`` is whoever is borrowing the key, in words a person would recognise ("a Zyx huddle").
+    It costs nothing to pass and it is the entire difference between ``murmurflow doctor`` saying
+    "paused" and it saying "paused by a Zyx huddle for another 4 minutes" — one of those is a
+    diagnosis and the other is a new question.
+    """
+    until = time.time() + min(max(1.0, float(seconds)), MAX_PAUSE_SECONDS)
+    with contextlib.suppress(OSError):
+        pause_path().write_text(
+            json.dumps({"until": until, "pid": os.getpid(), "who": who.strip()}), "utf-8"
+        )
+    return until
+
+
+def resume() -> bool:
+    """Give the key back. ``True`` if it had been borrowed. Idempotent, and safe from anyone."""
+    existed = pause_path().is_file()
+    with contextlib.suppress(OSError):
+        pause_path().unlink(missing_ok=True)
+    return existed
+
+
+def paused() -> tuple[bool, str]:
+    """``(is the key lent out, who has it and for how long)``. Never raises.
+
+    An expired pause is NOT paused, and the marker is cleaned up on the way past — a borrower that
+    died holding the key must not need anybody to know that a file exists. Unreadable or malformed
+    is also not paused, for the same reason: every failure here resolves to "the key is yours",
+    because the failure mode on the other side is a microphone that never opens again.
+    """
+    try:
+        data = json.loads(pause_path().read_text("utf-8"))
+        until = float(data.get("until", 0.0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False, ""
+    remaining = until - time.time()
+    if remaining <= 0:
+        resume()
+        return False, ""
+    who = str(data.get("who", "") or "another program").strip()
+    return True, f"{who}, for another {int(remaining) // 60}m {int(remaining) % 60}s"
 
 
 def listener_lock_path() -> Path:
@@ -1966,6 +1920,19 @@ def listen_loop(
     mine: list[Recording] = []
 
     def on_press() -> None:
+        # THE LENT KEY IS CHECKED HERE AND NOT IN `start_and_cue`, and the difference is the whole
+        # rule: a pause stands the DAEMON down, it does not disable recording. Somebody who types
+        # `murmurflow toggle` while the key is lent is asking for a recording on purpose and gets
+        # one; only the trigger stands down.
+        #
+        # No cue, deliberately. The person pressing it knows they lent the key out — they are
+        # talking to whatever borrowed it — and a sound here would be this program interrupting the
+        # conversation it stood down for. The log says so once per press, because a daemon that
+        # does nothing still has to be explainable after the fact.
+        lent, holder = paused()
+        if lent:
+            emit(f"[--] the trigger is lent to {holder} — not recording")
+            return
         rec = start_and_cue()
         if rec is not None:
             mine.append(rec)
@@ -2001,9 +1968,14 @@ def listen_loop(
         captured = ""
         if result.audio_seconds and result.seconds - result.audio_seconds > 1.0:
             captured = f" (captured {result.audio_seconds:.1f}s)"
+        # And WHERE it went, plus whether the words were still on the clipboard when it got there.
+        # Every fact before this clause is about the audio and the model; a paste that silently
+        # delivers half a sentence is invisible in all of them, and it is the failure people
+        # actually report.
+        went = f" · {result.paste_note}" if result.paste_note else ""
         emit(
             f"[OK] {result.seconds:.1f}s{captured} · {result.peak_dbfs:.0f}dBFS · "
-            f'{result.transcribe_ms}ms · {len(result.text)} chars · "{result.text}"'
+            f'{result.transcribe_ms}ms · {len(result.text)} chars{went} · "{result.text}"'
         )
 
     def on_abort() -> None:

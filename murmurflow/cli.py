@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import config, dictate, hotkey, service, whisper
+from . import config, dictate, hotkey, platforms, service, whisper
 
 
 def _out(line: str = "") -> None:
@@ -81,13 +81,14 @@ def _install() -> int:
     if not ready:
         _out(hint)
         return 2
-    if not service.is_macos():
-        _out("murmurflow is macOS-only")
+    if not service.supported():
+        _out(f"murmurflow has no always-on listener for {sys.platform} yet — see the README")
         return 2
 
     # The FIRST ever CoreAudio access on a Mac takes ~10 seconds. Paying it here, explicitly, means
-    # the user's first real sentence is fast instead of looking broken.
-    _out("warming the microphone (the first CoreAudio access takes ~10s, once)...")
+    # the user's first real sentence is fast instead of looking broken. Windows has no such tax,
+    # and the warm-up is harmless there.
+    _out("warming the microphone (the first access can take ~10s, once)...")
     rec = dictate.start()
     if rec is not None:
         dictate.ready(rec, timeout=15.0)
@@ -99,7 +100,7 @@ def _install() -> int:
         _out("[!] could not open the microphone — grant Microphone access and re-run")
 
     ok, detail = service.install()
-    _out(f"[OK] installed {service.LABEL}" if ok else f"[!] launchctl: {detail}")
+    _out(f"[OK] installed {service.LABEL}" if ok else f"[!] could not install it: {detail}")
     _out("")
     # Installing is the exact moment a second daemon joins the key, so it is the moment to say so.
     # Silence here costs the user a session of "it worked yesterday" before anyone runs the health
@@ -122,16 +123,19 @@ def _install() -> int:
     # between "one switch is highlighted for you" and a person who has never opened Privacy &
     # Security hunting for it. Best-effort: a Mac that refuses the URL still has the sentence above.
     _out("")
-    _out("Opening the Accessibility pane now — switch that entry ON.")
-    with contextlib.suppress(OSError, subprocess.SubprocessError):
-        subprocess.run(
-            [
-                "open",
-                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-            ],
-            timeout=10,
-            check=False,
-        )
+    # Only where there is something to grant. On Windows there is no such pane, and sending
+    # somebody to look for one is worse than saying nothing.
+    if service.is_macos():
+        _out("Opening the Accessibility pane now — switch that entry ON.")
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(
+                [
+                    "open",
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+                ],
+                timeout=10,
+                check=False,
+            )
     return 0 if ok else 1
 
 
@@ -143,12 +147,12 @@ def _uninstall() -> int:
     # And the .app, or `uninstall` leaves an application in ~/Applications forever. Recreating it
     # later at the same path from the same interpreter reproduces the cdhash, so the Privacy grant
     # is not spent by removing it.
-    removed = service.remove_app()
+    removed = service.remove_identity()
     _out("[OK] dictation stopped and removed from login." if ok else f"[!] {detail}")
     if freed:
         _out("[OK] stopped the warm whisper-server")
     if removed:
-        _out(f"[OK] removed {service.app_path()}")
+        _out("[OK] removed the MurmurFlow.app bundle")
     return 0 if ok else 1
 
 
@@ -158,13 +162,14 @@ def _uninstall() -> int:
 def _tcc_entry() -> str:
     """What System Settings CALLS this program in its permission lists, and where that file is.
 
-    macOS names a permission row after the EXECUTABLE that asked. ``service.build_app`` exists so
-    that executable is the bundle and the row reads MurmurFlow — but an install that could not
-    write the bundle still has to tell the truth, and the truth there is the interpreter's own
-    name, ``python3.13``, which nobody scrolling for ``murmurflow`` would ever find.
+    macOS names a permission row after the EXECUTABLE that asked, so the listener is installed
+    inside its own bundle and the row reads MurmurFlow — but an install that could not write the
+    bundle still has to tell the truth, and the truth there is the interpreter's own name,
+    ``python3.13``, which nobody scrolling for ``murmurflow`` would ever find.
     """
-    if service.app_path().is_dir():
-        return f"{service.APP_NAME}  ({service.app_path()})"
+    named = service.identity()
+    if named:
+        return named
     real = Path(sys.executable).resolve()
     return f"{real.name}  ({real})"
 
@@ -193,32 +198,44 @@ def _doctor(*, verbs: bool = False) -> int:
         (
             hotkey.available(),
             "key polling: " + ("available" if hotkey.available() else "BLOCKED"),
-            "grant Input Monitoring, then run: murmurflow keytest",
+            hotkey.unavailable_reason() or "run: murmurflow keytest",
         )
     )
-    # The daemon is the bundle, so the bundle is who this has to be asked about — this CLI having
-    # the grant says nothing about whether the thing that types your words does.
-    trusted = service.app_accessibility_trusted()
+    # THE ROW PRINTS ON EVERY PLATFORM, INCLUDING THE ONE WITH NOTHING TO GRANT. Windows has no
+    # TCC: no Accessibility entry, no identity to defend, no grant to lose to a reinstall. The
+    # tempting thing is to drop the row there, and it is wrong — a check that is present on one
+    # machine and absent on another reads as a check somebody forgot to write, and the person
+    # reading it is a client wondering what else is missing. It says "not required" instead.
+    #
+    # On macOS the daemon is the .app bundle, so the BUNDLE is who this has to be asked about:
+    # this CLI having the grant says nothing about whether the thing that types your words does.
+    needed = bool(dictate.permission_hint())
+    trusted = service.permission_trusted()
     if trusted is None:
         trusted = hotkey.accessibility_trusted()
-    rows.append(
-        (
-            trusted,
-            "accessibility: " + ("granted" if trusted else "NOT granted — nothing can be typed"),
-            f"switch on '{_tcc_entry()}' in System Settings > Privacy & Security > Accessibility",
+    if not needed:
+        rows.append((True, f"typing permission: not required on {platforms.NAME}", ""))
+    else:
+        rows.append(
+            (
+                trusted,
+                "accessibility: "
+                + ("granted" if trusted else "NOT granted — nothing can be typed"),
+                f"switch on '{_tcc_entry()}' in System Settings > Privacy & Security > "
+                "Accessibility",
+            )
         )
-    )
     clash = dictate.apple_dictation_conflict()
     rows.append(
         (
             not clash,
-            "apple dictation: "
+            "system dictation: "
             + (
                 "not competing"
                 if not clash
                 else "ON — it fires on the same key and will fight this"
             ),
-            "System Settings > Keyboard > Dictation > Shortcut > Off",
+            "System Settings > Keyboard > Dictation > Shortcut > Off" if clash else "",
         )
     )
     _, device = dictate.resolve_input()
@@ -266,7 +283,18 @@ def _doctor(*, verbs: bool = False) -> int:
             "quit whatever has a password field focused",
         )
     )
-    installed = service.plist_path().is_file()
+    # A LENT KEY MUST NEVER BE AN INVISIBLE SILENCE. This is the one state where everything above
+    # is green and the trigger still does nothing, so it is the one state a health check exists for.
+    # It reads as OK rather than as a fault: somebody asked for it, and it expires by itself.
+    lent, holder = dictate.paused()
+    rows.append(
+        (
+            True,
+            "trigger: " + (f"LENT to {holder}" if lent else "yours"),
+            "murmurflow resume" if lent else "",
+        )
+    )
+    installed = service.installed()
     rows.append(
         (
             installed,
@@ -306,6 +334,7 @@ _VERBS = (
     ("config", "every setting, with what it does"),
     ("keytest", "does this Mac see your key, and does it read your gesture the way you think"),
     ("devices", "list microphones (then: config set inputName <part of a name>)"),
+    ("pause / resume", "lend the trigger key to another program, and take it back"),
     ("install / uninstall", "turn dictation on or off for every login"),
     ("--help", "everything else"),
 )
@@ -347,14 +376,11 @@ def _keytest(*, trigger: str = "", seconds: float = 20.0) -> int:
     if not hotkey.available():
         _out("cannot read key state on this machine (is this macOS?)")
         return 1
-    watching = (
-        [trigger] if trigger else [*hotkey.COMBO_TRIGGERS, *hotkey.FLAG_TRIGGERS, *hotkey.TRIGGERS]
-    )
+    watching = [trigger] if trigger else sorted(hotkey.trigger_names())
     gesture = "double-tap" if dictate.double_tap_mode() else "hold"
     _out(f"press any of these now — watching {len(watching)} key(s) for {seconds:.0f}s.")
     _out(f"your trigger is {dictate.trigger_key()}, your gesture is {gesture}. ctrl-c to stop.")
     _out("  (a 'command'/'option' hit means EITHER side; 'left_*'/'right_*' means that side)")
-    lib = hotkey._load()
     held: dict[str, float] = {}
     presses: dict[str, list[float]] = {name: [] for name in watching}
     deadline = time.monotonic() + seconds
@@ -362,7 +388,7 @@ def _keytest(*, trigger: str = "", seconds: float = 20.0) -> int:
         while time.monotonic() < deadline:
             now = time.monotonic()
             for name in watching:
-                down = hotkey.is_trigger_down(name, lib)
+                down = hotkey.is_trigger_down(name)
                 if down and name not in held:
                     held[name] = now
                 elif not down and name in held:
@@ -415,6 +441,29 @@ def _cues(name: str = "") -> int:
 
 
 # --- settings ---------------------------------------------------------------------------------
+
+
+def _pause(seconds: float, who: str) -> int:
+    """Lend the trigger key. Prints the deadline, because a pause with no visible end is a bug.
+
+    This exists for the program that wants the SAME double-tap for something else — a voice
+    assistant taking a turn, a screen recorder that must not have the microphone pulled out from
+    under it. The listener stays up and the whisper server stays warm; only the trigger stands down.
+    """
+    until = dictate.pause(seconds, who=who)
+    stamp = time.strftime("%H:%M:%S", time.localtime(until))
+    _out(
+        f"[OK] the trigger is lent out until {stamp}. It comes back on its own; `resume` is sooner."
+    )
+    return 0
+
+
+def _resume() -> int:
+    if dictate.resume():
+        _out("[OK] the trigger is yours again.")
+        return 0
+    _out("the trigger was not lent out.")
+    return 0
 
 
 def _config(action: str = "", key: str = "", value: str = "") -> int:
@@ -507,6 +556,12 @@ def main(argv: list[str] | None = None) -> int:
     p_cues = sub.add_parser("cues", help="play the three tones, or switch preset")
     p_cues.add_argument("preset", nargs="?", default="")
 
+    p_pause = sub.add_parser("pause", help="lend the trigger key to another program for a while")
+    p_pause.add_argument("--seconds", type=float, default=dictate.DEFAULT_PAUSE_SECONDS)
+    p_pause.add_argument("--who", default="", help="what is borrowing it, in words")
+    sub.add_parser("resume", help="take the trigger key back")
+    sub.add_parser("trigger", help="print the trigger key this install is on, and nothing else")
+
     p_cfg = sub.add_parser("config", help="show or change settings")
     p_cfg.add_argument("action", nargs="?", default="", choices=["", "set"])
     p_cfg.add_argument("key", nargs="?", default="")
@@ -547,6 +602,19 @@ def main(argv: list[str] | None = None) -> int:
             return _keytest(trigger=args.trigger, seconds=args.seconds)
         if command == "cues":
             return _cues(args.preset)
+        if command == "pause":
+            return _pause(args.seconds, args.who)
+        if command == "resume":
+            return _resume()
+        if command == "trigger":
+            # ONE canonical name on stdout and nothing else, because the reader is a program.
+            # Everything else that says which key this is on says it in a sentence ("double-tap
+            # left Control to start, tap once to stop"), which is right for a person and unparseable
+            # for the tool deciding whether its own hotkey COLLIDES with this one. Borrowing the key
+            # when it does not collide is not a small mistake: it stands dictation down across every
+            # other app for as long as the borrower runs, silently.
+            _out(dictate.trigger_key())
+            return 0
         if command == "config":
             return _config(args.action, args.key, args.value)
         if command == "toggle":

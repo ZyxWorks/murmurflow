@@ -762,3 +762,60 @@ def test_an_unreadable_report_is_no_note_and_never_an_exception():
 
     for junk in ("", "nonsense", "1\t2", "a\tb\tc", "566\t566\tiTerm2\textra"):
         assert macos._paste_note(junk, 566) == "", junk
+
+
+def test_the_language_gate_reads_a_code_even_when_the_server_says_a_name(monkeypatch):
+    """whisper-server answers `"language": "english"`; a person writes `["de", "en"]`.
+
+    Compared as-is, the gate rejects EVERY sentence the moment the warm server is healthy — and
+    today it silently rejects none, because the same mismatch made it inert. `language_probabilities`
+    is keyed by the codes themselves, so the top key is the answer with no table to maintain.
+    """
+    payload = json.dumps(
+        {
+            "text": "hello there",
+            "language": "english",
+            "detected_language_probability": 0.99,
+            "language_probabilities": {"en": 0.99, "de": 0.004},
+        }
+    )
+    text, confidence, spoken = dictate._confidence(payload)
+    assert (text, spoken) == ("hello there", "en")
+    assert confidence == 0.99
+    # An older server with no probabilities still resolves through the name table.
+    _, _, older = dictate._confidence(json.dumps({"text": "hallo", "language": "german"}))
+    assert older == "de"
+
+
+def test_the_config_may_name_a_language_or_code_it(monkeypatch, tmp_path):
+    config.set_value("languages", ["english", "de"])
+    assert dictate.spoken_languages() == frozenset({"en", "de"})
+
+
+def test_the_cold_path_reports_its_language_so_the_gate_still_applies(monkeypatch, tmp_path):
+    """The gate was warm-only, and a wedged warm server is exactly when it is needed.
+
+    Live (2026-08-17): MurmurFlow's own whisper-server answered every request "FFmpeg conversion
+    failed", every clip fell through to the cold CLI, and a 1.8s desk bump came back as Japanese
+    and was typed into a terminal. Both guards that would have caught it read fields the cold path
+    did not produce.
+    """
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"")
+    monkeypatch.setattr(dictate, "transcribe_warm", lambda *a, **k: dictate.Heard(""))
+    monkeypatch.setattr(
+        whisper, "transcribe_heard", lambda *a, **k: ("ご視聴ありがとうございました", "ja")
+    )
+    heard = dictate.transcribe(wav)
+    assert heard.language == "ja"
+    assert heard.warm is False  # ...and the log says so, so a dead warm server is visible
+
+    config.set_value("languages", ["de", "en"])
+    monkeypatch.setattr(dictate, "peak_dbfs", lambda _p: -1.0)  # a loud bump clears the level gate
+    monkeypatch.setattr(dictate, "transcribe", lambda *a, **k: heard)
+    monkeypatch.setattr(dictate, "stop", lambda rec=None: wav)
+    monkeypatch.setattr(dictate, "cue", lambda _kind: None)
+    result = dictate.finish(dictate.Recording(pid=1, wav=wav, started_at=0.0), paste=False)
+    assert result.text == ""
+    assert "ja" in result.problem
+    assert result.warm is False

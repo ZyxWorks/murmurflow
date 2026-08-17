@@ -9,6 +9,7 @@ come back as ``''`` and never as an exception, because the caller is a keyboard 
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -169,8 +170,36 @@ def _first_txt(directory: Path) -> str:
     return ""
 
 
+def _json_language(sidecar: Path) -> str:
+    """The language code whisper.cpp wrote beside the transcript (``result.language``); ``''``.
+
+    Never raises: a missing, truncated or unparsable sidecar is "no opinion", which the caller
+    treats as "do not judge" rather than as a rejection.
+    """
+    try:
+        data = json.loads(sidecar.read_text("utf-8", errors="ignore"))
+    except (OSError, ValueError):
+        return ""
+    result = data.get("result") if isinstance(data, dict) else None
+    if not isinstance(result, dict):
+        return ""
+    return str(result.get("language") or "").strip().lower()
+
+
 def transcribe(audio: Path, *, timeout: float = 180.0) -> str:
-    """Transcribe a local audio file with the first available whisper binary. ``''`` on failure.
+    """The transcript alone, for callers that do not judge the language. See :func:`transcribe_heard`."""
+    return transcribe_heard(audio, timeout=timeout)[0]
+
+
+def transcribe_heard(audio: Path, *, timeout: float = 180.0) -> tuple[str, str]:
+    """Transcribe a local file; ``(text, language code)``, ``("", "")`` on failure.
+
+    THE LANGUAGE IS HALF THE POINT. The cold path used to report only text, so
+    :func:`dictate.finish`'s "is that one of the languages you speak" gate was inert on it — and
+    the cold path is exactly where a wedged warm server silently leaves you. Live (2026-08-17):
+    MurmurFlow's own whisper-server answered every request "FFmpeg conversion failed", every clip
+    fell through to here, and a bump on the desk came back as two sentences of Japanese and was
+    typed into the terminal. Both gates that exist to stop that were warm-only.
 
     The COLD path — it loads the model on every call. Work happens in a private temp dir that is
     deleted before returning, so the binary's scratch output never lingers next to the caller's
@@ -180,7 +209,7 @@ def transcribe(audio: Path, *, timeout: float = 180.0) -> str:
     binary = found_binary()
     source = Path(audio)
     if not binary or not source.is_file():
-        return ""
+        return "", ""
     prompt = vocabulary()
     with tempfile.TemporaryDirectory(prefix="murmurflow-") as tmp:
         work = Path(tmp)
@@ -190,7 +219,10 @@ def transcribe(audio: Path, *, timeout: float = 180.0) -> str:
             # after the first ~30s window and a long clip drifts back to guessing. -np keeps the
             # stdout fallback free of progress noise.
             stem = work / "transcript"
-            cmd = [binary, "-f", str(source), "-otxt", "-of", str(stem), "-np"]
+            # `-oj` ALONGSIDE `-otxt`: the JSON sidecar carries `result.language`, the one thing
+            # the cold path could never report — see :func:`transcribe_heard`. It costs a small
+            # file write, not a second decode.
+            cmd = [binary, "-f", str(source), "-otxt", "-oj", "-of", str(stem), "-np"]
             cmd += ["-l", language(), "-t", threads()]
             if prompt:
                 cmd += ["--prompt", prompt, "--carry-initial-prompt"]
@@ -198,6 +230,7 @@ def transcribe(audio: Path, *, timeout: float = 180.0) -> str:
             if found:
                 cmd += ["-m", found]
             proc = _run(cmd, cwd=work, timeout=timeout)
+            spoken_code = _json_language(stem.with_suffix(".json"))
             txt = stem.with_suffix(".txt")
             if txt.is_file():
                 try:
@@ -205,8 +238,8 @@ def transcribe(audio: Path, *, timeout: float = 180.0) -> str:
                 except OSError:
                     produced = ""
                 if produced:
-                    return produced
-            return proc.stdout.strip() if proc and proc.stdout else ""
+                    return produced, spoken_code
+            return (proc.stdout.strip() if proc and proc.stdout else ""), spoken_code
         # openai-whisper / whisper-ctranslate2: positional file + --output_dir writes <stem>.txt.
         cmd = [binary, str(source), "--model", openai_model_name(), "--output_format", "txt"]
         cmd += ["--output_dir", str(work)]
@@ -216,4 +249,6 @@ def transcribe(audio: Path, *, timeout: float = 180.0) -> str:
         if spoken != "auto":  # these CLIs auto-detect when --language is omitted
             cmd += ["--language", spoken]
         _run(cmd, cwd=work, timeout=timeout)
-        return _first_txt(work).strip()
+        # These CLIs write no language sidecar in txt mode, so this path still reports none —
+        # and reporting none is a "no opinion", never a rejection (`dictate.finish`).
+        return _first_txt(work).strip(), ""

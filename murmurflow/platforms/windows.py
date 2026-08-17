@@ -50,6 +50,8 @@ import sys
 import time
 from pathlib import Path
 
+from .. import config
+
 NAME = "Windows"
 
 # Loaded at import and only where they exist, so this module can be IMPORTED on a Mac — which is
@@ -441,11 +443,11 @@ TASK_NAME = "MurmurFlow"
 
 def service_path() -> Path:
     """Task Scheduler keeps its own store, so the on-disk artefact is the launcher we write."""
-    return Path.home() / ".murmurflow" / "listen.cmd"
+    return config.home_root() / "listen.cmd"
 
 
 def _log_path() -> Path:
-    return Path.home() / ".murmurflow" / "listen.log"
+    return config.log_path()
 
 
 def _pythonw() -> str:

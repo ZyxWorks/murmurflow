@@ -23,6 +23,8 @@ import sys
 import sysconfig
 from pathlib import Path
 
+from .. import config
+
 NAME = "macOS"
 
 # --- capture --------------------------------------------------------------------------------
@@ -633,8 +635,8 @@ def render_plist(args: list[str], extra_env: dict[str, str]) -> bytes:
         "ThrottleInterval": 10,
         "ProcessType": "Interactive",
         "EnvironmentVariables": env,
-        "StandardOutPath": str(Path.home() / ".murmurflow" / "listen.log"),
-        "StandardErrorPath": str(Path.home() / ".murmurflow" / "listen.log"),
+        "StandardOutPath": str(config.log_path()),
+        "StandardErrorPath": str(config.log_path()),
     }
     return plistlib.dumps(job)
 
@@ -662,7 +664,7 @@ def service_install(args: list[str], env: dict[str, str]) -> tuple[bool, str]:
     """
     path = service_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    (Path.home() / ".murmurflow").mkdir(parents=True, exist_ok=True)
+    config.log_path().parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(render_plist(args, env))
     _launchctl("bootout", f"{_domain()}/{LABEL}")  # ignore: not-loaded is the normal first case
     ok, detail = _launchctl("bootstrap", _domain(), str(path))

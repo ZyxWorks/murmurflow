@@ -184,18 +184,28 @@ def list_inputs() -> list[tuple[str, str]]:
     return platforms.list_inputs()
 
 
-# The resolved mic, cached for the daemon's lifetime. Enumerating avfoundation devices costs a whole
-# ffmpeg subprocess (~160ms measured) and `start()` did it on EVERY key press — a third of the dead
-# time between the key going down and the first audio sample, spent re-learning something that only
-# changes when hardware is plugged in. Cleared by `forget_input()` so a device change is still
-# recoverable without restarting the daemon.
+# The resolved mic, cached because enumerating avfoundation devices costs a whole ffmpeg subprocess
+# (~160ms measured) and `start()` did it on EVERY key press — a third of the dead time between the
+# key going down and the first audio sample, spent re-learning something that only changes when
+# hardware is plugged in.
 _INPUT_CACHE: tuple[str, str] | None = None
+_INPUT_CACHED_AT = 0.0
 
-
-def forget_input() -> None:
-    """Drop the cached microphone so the next recording re-enumerates devices."""
-    global _INPUT_CACHE
-    _INPUT_CACHE = None
+# How long that answer is trusted before the devices are listed again.
+#
+# CACHING IT FOR THE DAEMON'S LIFETIME WAS THE BUG, and the lifetime is the reason: the agent is
+# installed with `KeepAlive`, so "for this run" means until the next logout, which is weeks. A
+# Bluetooth headset that is still connecting when the agent starts at login is simply absent from
+# the first enumeration, the fallback picks the built-in microphone, and every sentence for the
+# next fortnight is recorded on the wrong device — while `murmurflow doctor`, a fresh process with
+# an empty cache of its own, cheerfully reports the right one. Nothing on screen can be told from a
+# working setup.
+#
+# Ten minutes bounds that to one coffee break, and the cost is the ~160ms enumeration paid at most
+# once in every ten, which is far below the ~300ms the microphone itself takes to open. Monotonic
+# and not wall clock: a laptop that sleeps, wakes and syncs its clock backwards would otherwise
+# hold a stale device for however far back the correction went.
+INPUT_CACHE_SECONDS = 600.0
 
 
 def resolve_input() -> tuple[str, str]:
@@ -208,8 +218,8 @@ def resolve_input() -> tuple[str, str]:
     "wrong-ish mic" rather than "broken". On Windows there is no default TOKEN — dshow has no
     spelling for it — so the fallback there is the first audio input there is.
     """
-    global _INPUT_CACHE
-    if _INPUT_CACHE is not None:
+    global _INPUT_CACHE, _INPUT_CACHED_AT
+    if _INPUT_CACHE is not None and time.monotonic() - _INPUT_CACHED_AT < INPUT_CACHE_SECONDS:
         return _INPUT_CACHE
     want = input_name().lower()
     devices = list_inputs()
@@ -224,7 +234,7 @@ def resolve_input() -> tuple[str, str]:
                 resolved = (str(index), name)
                 break
     if devices:  # never cache a failed enumeration — ffmpeg may simply not have been ready
-        _INPUT_CACHE = resolved
+        _INPUT_CACHE, _INPUT_CACHED_AT = resolved, time.monotonic()
     return resolved
 
 
@@ -1047,6 +1057,20 @@ def paste_settle(text: str) -> float:
     return min(_PASTE_SETTLE_MAX, _PASTE_SETTLE + len(text) / 1000.0)
 
 
+#: What somebody is told when their words could not be typed for them.
+#:
+#: It names the COST as well as the recovery, and that is the whole point of it being one string.
+#: Both ways a paste can fail put the transcript on the clipboard, which means both of them
+#: DESTROY whatever was on it — and the message used to stop at "press paste", which reads as free.
+#: It is not free, and it is least free exactly when it fires: Secure Input is macOS's own signal
+#: that a password field has focus this second, so the thing being overwritten is more likely than
+#: usual to be a password somebody had just copied out of their manager. Putting it back is not
+#: available to us (there is no lossless clipboard read here, and no event that says "they have
+#: pasted now, it is safe"), so the honest move is to say what happened rather than to be quiet
+#: about it.
+PASTE_YOURSELF = "Your words are on the clipboard now, in place of what was there. Press paste."
+
+
 def permission_hint() -> str:
     """How to grant whatever permission typing needs here, or ``""`` when there is nothing to grant.
 
@@ -1141,12 +1165,14 @@ def inject(text: str) -> tuple[bool, str, str]:
         # had ever been written to — so the recovery paste gave back whatever was there before, and
         # the dictation was simply gone.
         copied = platforms.clipboard_set(text)
-        recovery = "The text is on your clipboard — press paste." if copied else "The text is lost."
-        return False, f"{blocked} {recovery}", ""
+        return False, f"{blocked} {PASTE_YOURSELF if copied else 'The text is lost.'}", ""
     ok, problem, note = platforms.inject(text, paste_settle(text))
     if ok:
         return True, "", note
-    return False, f"{problem} The text is on your clipboard — press paste.", note
+    # The same sentence, because it is the same event: the injection script writes the clipboard
+    # before it sends the chord and aborts before the restore, so a refused paste leaves the
+    # transcript there over whatever the user had copied — exactly as the blocked branch does.
+    return False, f"{problem} {PASTE_YOURSELF}", note
 
 
 # --- the flow ---------------------------------------------------------------------------------
@@ -1291,6 +1317,48 @@ class Result:
     paste_note: str = ""
     #: Which transcriber answered — see :attr:`Heard.warm`. ``None`` when none was asked.
     warm: bool | None = None
+
+
+def log_line(result: Result) -> str:
+    """The one line the daemon writes per clip: everything about the clip, and NOT what you said.
+
+    **The transcript itself is deliberately not in it, and that is a privacy fix rather than a
+    tidy-up.** It used to be, quoted in full at the end of the line — and under the installed agent
+    that line does not scroll past, it is appended to ``~/.murmurflow/listen.log``, which nothing
+    ever rotates or trims. So every sentence dictated since the day of install sat in plaintext on
+    disk forever: the password read aloud into a form, the medical detail, the message deleted
+    before sending. A tool whose whole promise is that your voice never leaves the machine cannot
+    also keep a permanent written record of everything said into it, and the README promised in one
+    section that the transcript is never logged while admitting in another that it is.
+
+    Everything a person actually debugs with survives, because none of it is the words:
+
+    * the hold, and separately how much audio really landed — the two disagreeing is a CAPTURE
+      fault, not a model fault, and printing only the first made every such report unanswerable.
+      Shown only when they differ by more than the ~0.6s of device start-up and stop.
+    * the peak level. "3.1s at -52 dBFS came back as four words" says the microphone was barely
+      picking anything up; "3.1s at -14 dBFS" says it was loud and clear and the model is at fault.
+    * whether the COLD path answered. A wedged warm server answers every request with an error and
+      every clip silently takes the slower path, where the silence gates are weaker — which is how
+      a bump on the desk was transcribed as Japanese and typed.
+    * how many characters came back, and which app the paste went to and whether the whole
+      transcript was still on the clipboard when it got there. A paste that quietly delivers half a
+      sentence is invisible in every other fact on the line, and it is the failure people report.
+
+    ``keepAudio`` brings the words back, because it is already the switch that means "I am
+    debugging this one, keep the evidence" — it is what keeps the clip itself. Somebody comparing a
+    bad transcription against the audio that produced it needs both, and they have opted in to both.
+    """
+    captured = ""
+    if result.audio_seconds and result.seconds - result.audio_seconds > 1.0:
+        captured = f" (captured {result.audio_seconds:.1f}s)"
+    went = f" · {result.paste_note}" if result.paste_note else ""
+    how = " · cold" if result.warm is False else ""
+    said = f' · "{result.text}"' if config.flag("keepAudio", False, cfg=_cfg()) else ""
+    return (
+        f"[OK] {result.seconds:.1f}s{captured} · {result.peak_dbfs:.0f}dBFS · "
+        f"{result.transcribe_ms}ms{how} · {len(result.text)} chars{went}{said}"
+    )
 
 
 def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
@@ -2183,33 +2251,7 @@ def listen_loop(
             return
         # No cue here: `finish` already played it when the microphone closed, and the text landing
         # at the cursor is a better confirmation than any second tone.
-        # Clip length AND peak level belong in this line. A transcript that reads as a truncated
-        # thought is ambiguous on its own — bad audio and a bad model look identical — but "3.1s at
-        # -52 dBFS came back as four words" says the microphone was barely picking anything up, and
-        # "3.1s at -14 dBFS" says it was loud and clear and the model is the problem.
-        #
-        # And the clip length is the WALL CLOCK, so when the audio that reached the file is
-        # shorter it is named separately. Printing only the wall clock made a capture fault read
-        # as a transcription fault: "21.0s came back as one sentence" and "we captured 15 of the
-        # 21 seconds you spoke" are the same line, and only the second one is about the recorder.
-        # Shown only when they disagree by more than the ~0.6s of device start-up and stop, so
-        # the ordinary line stays as short as it was.
-        captured = ""
-        if result.audio_seconds and result.seconds - result.audio_seconds > 1.0:
-            captured = f" (captured {result.audio_seconds:.1f}s)"
-        # And WHERE it went, plus whether the words were still on the clipboard when it got there.
-        # Every fact before this clause is about the audio and the model; a paste that silently
-        # delivers half a sentence is invisible in all of them, and it is the failure people
-        # actually report.
-        went = f" · {result.paste_note}" if result.paste_note else ""
-        # COLD, SAID OUT LOUD. A wedged warm server answers every request with an error and every
-        # clip silently takes the slower path where the silence gates are weaker — which is how a
-        # desk bump was transcribed as Japanese and typed. One word in the line he already reads.
-        how = " · cold" if result.warm is False else ""
-        emit(
-            f"[OK] {result.seconds:.1f}s{captured} · {result.peak_dbfs:.0f}dBFS · "
-            f'{result.transcribe_ms}ms{how} · {len(result.text)} chars{went} · "{result.text}"'
-        )
+        emit(log_line(result))
 
     def on_abort() -> None:
         """A keyboard shortcut, not speech: throw the audio away without transcribing it."""

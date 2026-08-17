@@ -36,7 +36,9 @@ KEYS: dict[str, str] = {
     "said. OFF by default: a dictation tool types what you said, and a word removed is invisible",
     "quietFloor": "peak dBFS below which a clip is a room, not a sentence. Default -30. Lower it "
     "(e.g. -40) if a soft voice gets dropped — every clip's level is printed in the daemon log",
-    "keepAudio": "true = keep the last clip at ~/.murmurflow/audio/last.wav for debugging",
+    "keepAudio": "true = keep the evidence for ONE bad dictation: the last clip at "
+    "~/.murmurflow/audio/last.wav, and the transcript in the daemon log. Off by default, so what "
+    "you said is not written down anywhere",
     "port": "loopback port for the warm whisper-server. Default 8479",
 }
 

@@ -300,7 +300,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `polishCommand` | see below |
 | `stripFillers` | `true` = delete `um`, `you know`, and a leading `hey`/`so`/`well`. **Off** — you get verbatim |
 | `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |
-| `keepAudio` | keep the last clip for debugging a bad transcription |
+| `keepAudio` | keep the evidence for one bad transcription: the last clip, and the transcript in the log. Off, so your sentences are not written down |
 
 **Right Option is deliberately not offered as a default.** On a German layout it's AltGr — the dead
 key for `@ € \ | ~ [ ] { }` — so binding dictation there fires the microphone on every email
@@ -347,8 +347,11 @@ murmurflow uninstall    stop dictation and remove it from login
 ```
 
 Every clip the daemon handles is logged — how long you held the key, how much audio actually
-landed, the peak level, the transcribe time, the app the paste went to, and the transcript itself.
-That file is `~/.murmurflow/listen.log`, and `murmurflow doctor` prints the path.
+landed, the peak level, the transcribe time, how many characters came back and the app the paste
+went to. **Not what you said.** That file is `~/.murmurflow/listen.log`, `murmurflow doctor` prints
+the path, and nothing rotates it — which is exactly why your sentences are not in it. Debugging one
+bad dictation and want them? `keepAudio` keeps the clip and the transcript together, for as long as
+you leave it on.
 
 `config set` refuses a setting it does not recognise and a value that cannot work — a trigger name
 this machine cannot poll, a cue that is not a preset, a model path that is not there. All of those
@@ -366,10 +369,15 @@ indistinguishable. One run of each separates them.
 - The recorder bounds its own life at 10 minutes, so a daemon killed mid-clip can't leave the
   microphone hot. (This is not hypothetical: it was found in development as three orphaned
   recorders, 4.5 hours each, 1.4 GB of audio, microphone open the whole time.)
-- The transcript is never inspected, logged or filtered. It goes to your clipboard, then your
-  cursor, and your previous clipboard contents are put back — all of them, not just text. Copy a
-  screenshot while a dictation is in flight and the screenshot is still on your clipboard
-  afterwards.
+- The transcript is never inspected, filtered, or written down. It goes to your clipboard, then
+  your cursor, and your previous clipboard contents are put back — all of them, not just text. Copy
+  a screenshot while a dictation is in flight and the screenshot is still on your clipboard
+  afterwards. The one exception is `keepAudio`, which you turn on yourself to debug a bad
+  dictation, and which then keeps that clip and its transcript until you turn it off.
+- If a paste **cannot** land — Secure Input is on, or Accessibility was never granted — your words
+  go to the clipboard so you can paste them by hand, and that replaces what was on it. The daemon
+  says so rather than leaving you to find out: there is no way to put the old contents back once
+  the recovery paste is the only copy of what you just said.
 - Nothing in this repo makes a network request except `murmurflow setup`, which downloads the model
   from Hugging Face.
 

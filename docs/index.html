@@ -102,10 +102,12 @@
 
   /* --- the backdrop: night-sky marks, fixed, never over text --- */
   #backdrop { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: -1; }
-  /* A phone has no margin for the field to drift in, so every mark lands on top of a headline
-     instead of beside it. The rule the zyx backdrop keeps is that it never competes with text, and
-     on a narrow screen the only way to keep it is not to draw it. */
-  @media (max-width: 900px) { #backdrop { display: none; } }
+  /* A phone has no margin for the field to drift in: the desktop placement puts a 116px mark
+     straight through a headline. The rule the zyx backdrop keeps is that it never COMPETES with
+     text, and the answer is a field built for the width rather than no field at all - the same
+     move the constellation makes with a per-mark phone slot. Below 900px the script swaps in
+     fewer, smaller marks pinned to the margins, and the depth grade drops a step so they read as
+     sky instead of as content. */
   #backdrop span { position: absolute; }
   #backdrop span > span { display: block; height: 100%; width: 100%; will-change: transform; transform-style: preserve-3d; }
 
@@ -376,12 +378,27 @@
   // field variant. Positions, sizes and the depth grade are the ratified ones. The cursor never
   // changes the motion; hovering a glyph makes its strokes vanish from the tips into the joint.
   (function () {
-    var FIELD = [
+    // The ratified desktop field, and the narrow one beside it. Same glyph, same motion, same
+    // depth vocabulary; only the placement and the grade differ, because a 375px column has no
+    // beside for a mark to sit in.
+    var WIDE = [
       ["5%", "14%", 84, "ghost-near"], ["22%", "70%", 116, "ghost-near"], ["44%", "7%", 32, "ghost-far"],
       ["68%", "18%", 68, "ghost"],     ["88%", "52%", 26, "ghost-far"],  ["74%", "84%", 96, "ghost-near"],
       ["9%", "46%", 44, "ghost-far"],  ["54%", "58%", 56, "ghost"],      ["34%", "32%", 30, "ghost-far"]
     ];
+    // Every narrow mark hangs off an edge, and every one is graded to the far step. Measured on a
+    // 375px viewport: at left 6% or right 80% a mark sits INSIDE the 24px text gutter and reads as
+    // a smudge behind a letter, which is the one thing this field may not do. With AMP at 0.45 the
+    // horizontal wander is +-17px, so the anchors are biased past the edge to absorb it.
+    var NARROW = [
+      ["-5%", "11%", 46, "ghost-far"], ["88%", "27%", 34, "ghost-far"], ["-7%", "57%", 62, "ghost-far"],
+      ["90%", "73%", 40, "ghost-far"], ["-4%", "88%", 28, "ghost-far"]
+    ];
+    var FIELD = matchMedia("(max-width: 900px)").matches ? NARROW : WIDE;
     var BASE = [0.058, 0.086, 0.046, 0.069, 0.035, 0.052];
+    // Half the drift on a narrow screen: the desktop amplitude is 38px of travel, which is a
+    // margin mark stepping into the text column and back out of it.
+    var AMP = matchMedia("(max-width: 900px)").matches ? 0.45 : 1;
     var RAD = Math.PI / 180;
     var wrap = document.getElementById("backdrop");
     var marks = FIELD.map(function (f, i) {
@@ -418,8 +435,8 @@
       marks.forEach(function (m) {
         var r = m.rect || (m.rect = m.el.getBoundingClientRect());
         var p = m.p, f = m.f;
-        var x = Math.sin(s * f[0] + p[0]) * 26 + Math.sin(s * f[1] + p[1]) * 12;
-        var y = Math.cos(s * f[2] + p[2]) * 22 + Math.sin(s * f[3] + p[3]) * 10;
+        var x = (Math.sin(s * f[0] + p[0]) * 26 + Math.sin(s * f[1] + p[1]) * 12) * AMP;
+        var y = (Math.cos(s * f[2] + p[2]) * 22 + Math.sin(s * f[3] + p[3]) * 10) * AMP;
         m.inner.style.transform =
           "translate(" + x.toFixed(1) + "px," + y.toFixed(1) + "px) " +
           "rotateX(" + (Math.sin(s * f[4] + p[4]) * 20).toFixed(2) + "deg) " +

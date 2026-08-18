@@ -9,6 +9,8 @@ because a mock of CoreAudio would only ever test the mock.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sys
@@ -979,6 +981,43 @@ def test_a_warm_server_that_stopped_answering_is_restarted(monkeypatch):
     starts, stops = _drive_listener(monkeypatch, [_clip(False), _clip(False), _clip(False)])
     assert stops == [1]  # bounced once, at the second cold clip
     assert len(starts) == 2  # the one at daemon start, and the one that brought it back
+
+
+def test_a_wedged_server_is_not_a_healthy_one(monkeypatch):
+    """`server_up` opens a socket; a wedged server accepts sockets all day and transcribes nothing.
+
+    That gap is why the FFmpeg-conversion failure ran for a full day with `murmurflow doctor`
+    reporting the warm server green. The 500 body names the cause, so it is carried out.
+    """
+    import urllib.error
+
+    monkeypatch.setattr(dictate, "server_up", lambda: True)
+
+    def _wedged(*_a, **_k):
+        raise urllib.error.HTTPError(
+            "http://127.0.0.1/inference", 500, "Internal Server Error", {},  # type: ignore[arg-type]
+            io.BytesIO(b'{"error":"FFmpeg conversion failed."}'),
+        )
+
+    monkeypatch.setattr(dictate.urllib.request, "urlopen", _wedged)
+    ok, why = dictate.server_answers()
+    assert ok is False
+    assert "FFmpeg conversion failed" in why
+
+
+def test_a_server_that_answers_an_inference_is_healthy(monkeypatch):
+    monkeypatch.setattr(dictate, "server_up", lambda: True)
+    monkeypatch.setattr(
+        dictate.urllib.request, "urlopen", lambda *_a, **_k: contextlib.nullcontext(object())
+    )
+    assert dictate.server_answers() == (True, "")
+
+
+def test_a_missing_server_is_reported_without_asking_it_anything(monkeypatch):
+    monkeypatch.setattr(dictate, "server_up", lambda: False)
+    ok, why = dictate.server_answers()
+    assert ok is False
+    assert str(dictate.port()) in why
 
 
 def test_the_warm_server_is_started_in_a_writable_directory(monkeypatch, tmp_path):

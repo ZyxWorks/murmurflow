@@ -54,6 +54,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -561,6 +562,47 @@ def server_up() -> bool:
             return True
     except (urllib.error.URLError, OSError):
         return False
+
+
+def server_answers() -> tuple[bool, str]:
+    """Does the warm server actually TRANSCRIBE — ``(ok, what went wrong)``. Never raises.
+
+    :func:`server_up` opens a socket to ``/``, and that is the check the health report trusted while
+    every single clip took the cold path for a day. A wedged server accepts the connection happily
+    and answers ``/inference`` with a 500; from the outside the two are identical, and the only
+    place the difference showed was a ``· cold ·`` in the daemon log that nobody reads until
+    something is already wrong.
+
+    So this asks the question that matters, with the smallest possible clip: a fifth of a second of
+    silence, through the same multipart path a real dictation uses. Not free — a wedged server
+    answers in milliseconds but a healthy one decodes, so budget a moment — which is why it lives in
+    ``doctor`` and never on the hot path.
+    """
+    if not server_up():
+        return False, f"nothing on :{port()}"
+    try:
+        with tempfile.TemporaryDirectory(prefix="murmurflow-probe-") as tmp:
+            probe = Path(tmp) / "probe.wav"
+            with wave.open(str(probe), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(16000)
+                handle.writeframes(b"\x00" * 6400)  # 0.2s of digital silence
+            body, content_type = _multipart(probe, {"response_format": "json", "temperature": "0"})
+            request = urllib.request.Request(
+                f"{server_url()}/inference", data=body, headers={"Content-Type": content_type}
+            )
+            with urllib.request.urlopen(request, timeout=30):
+                return True, ""
+    except urllib.error.HTTPError as error:
+        # The 500 body names the cause in one sentence ("FFmpeg conversion failed."), and that
+        # sentence is the entire difference between a fixable setup and a mystery.
+        detail = ""
+        with contextlib.suppress(Exception):
+            detail = error.read().decode("utf-8", errors="ignore").strip()[:120]
+        return False, detail or f"HTTP {error.code}"
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        return False, str(error)[:120]
 
 
 def serve_command() -> list[str] | None:

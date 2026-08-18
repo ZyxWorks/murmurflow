@@ -1013,6 +1013,16 @@ def tidy(transcript: str) -> str:
     """
     stripping = config.flag("stripFillers", False, cfg=_cfg())
     text = strip_fillers(transcript) if stripping else transcript.strip()
+    # WHISPER SEGMENTS ARE NOT LINE BREAKS, and this line is the whole fix for "it puts line breaks
+    # in random places". whisper-server returns one `\n` per SEGMENT, and it segments on decoder
+    # budget and pauses — never on sentences — so a single dictated sentence comes back as
+    # "...than in the\n other, you know,\n" and the paste lands with a hard break mid-clause.
+    # Nobody can speak a newline, so collapsing them is not an edit to what was said: it is undoing
+    # a transport artefact, and it belongs OUTSIDE the `stripping` branch. It used to be inside
+    # `strip_fillers`, which is exactly how it went missing — defaulting filler-stripping off (the
+    # right call) silently took the flattening with it, and the two have nothing to do with each
+    # other.
+    text = " ".join(text.split())
     text = _SPACE_BEFORE_PUNCT.sub(r"\1", text)
     text = _DOUBLED_PUNCT.sub(r"\2", text)
     if stripping:

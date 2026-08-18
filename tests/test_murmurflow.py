@@ -981,6 +981,31 @@ def test_a_warm_server_that_stopped_answering_is_restarted(monkeypatch):
     assert len(starts) == 2  # the one at daemon start, and the one that brought it back
 
 
+def test_the_warm_server_is_started_in_a_writable_directory(monkeypatch, tmp_path):
+    """The cause behind the test above, found 2026-08-18 — and it is one keyword argument.
+
+    `--convert` makes whisper-server shell out to ffmpeg, which writes its converted copy into the
+    server's WORKING DIRECTORY. Started from a shell that is the repo, so every manual test passed;
+    under the installed agent the daemon inherits `/`, which is not writable, and the server answers
+    every request `500 {"error":"FFmpeg conversion failed."}`. Proven live with two servers, same
+    binary and flags and model and request: `/` failed in 0.03s, a writable dir answered in 2.17s.
+    """
+    seen: dict[str, object] = {}
+
+    def _popen(cmd, **kwargs):
+        seen["cmd"], seen["kwargs"] = cmd, kwargs
+        raise OSError("not really spawning anything in a test")
+
+    monkeypatch.setattr(dictate, "server_up", lambda: False)
+    monkeypatch.setattr(dictate, "serve_command", lambda: ["whisper-server", "--convert"])
+    monkeypatch.setattr(dictate.subprocess, "Popen", _popen)
+    assert dictate.start_server() is False
+    cwd = Path(str(seen["kwargs"]["cwd"]))
+    assert cwd.is_dir(), "the server must not be spawned into a directory that does not exist"
+    assert os.access(cwd, os.W_OK), "ffmpeg's converted copy is written HERE — it must be writable"
+    assert cwd != Path("/")
+
+
 def test_one_cold_clip_is_not_enough_to_bounce_a_loading_server(monkeypatch):
     # A single cold clip is what a server still loading its 1.6 GB model looks like, and bouncing
     # it for that restarts the load it was in the middle of.

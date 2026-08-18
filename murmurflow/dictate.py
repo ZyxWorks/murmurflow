@@ -592,6 +592,25 @@ def start_server(*, wait: float = 60.0) -> bool:
 
     Loading large-v3-turbo takes a few seconds, which is exactly the cost we are paying ONCE here
     so that every subsequent dictation does not. Returns True if a server is answering.
+
+    **The ``cwd`` is the whole warm path**, and leaving it out is how MurmurFlow quietly lost it.
+    ``--convert`` (see :func:`serve_command`) makes whisper-server shell out to ffmpeg, and ffmpeg
+    writes its converted copy into the server's WORKING DIRECTORY. Started from a shell that
+    directory is the repo and everything works, which is why this survived every manual test. Under
+    the installed agent the daemon inherits ``/`` — not writable — so the conversion fails, the
+    server answers **every single request** with ``500 {"error":"FFmpeg conversion failed."}``, and
+    every clip silently falls through to the cold CLI. Measured live 2026-08-18 with one server on
+    ``/`` and one on a writable dir, same binary, same flags, same model, same request: 500 in 0.03s
+    against a clean transcript in 2.17s.
+
+    Nothing on screen says so. The transcripts still arrive, just slower and — because the cold path
+    carries no server-side prompt and reports no confidence — measurably worse, with the two silence
+    gates weakened to boot. `watch_warm` in :func:`listen_loop` faithfully bounced the server after
+    every second cold clip, all day, into the same broken working directory.
+
+    So the server is started in :func:`_scratch_dir`, which is ours, writable, and already the one
+    place recorded voice lives — whisper-server deletes its converted copy when it is done, so the
+    "empty between sentences" promise there still holds.
     """
     if server_up():
         return True
@@ -605,6 +624,7 @@ def start_server(*, wait: float = 60.0) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            cwd=str(_scratch_dir()),
         )
     except (OSError, subprocess.SubprocessError):
         return False

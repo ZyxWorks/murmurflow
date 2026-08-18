@@ -1,12 +1,22 @@
 # MurmurFlow
 
-[![CI](https://github.com/hannesreinsch/murmurflow/actions/workflows/ci.yml/badge.svg)](https://github.com/hannesreinsch/murmurflow/actions/workflows/ci.yml)
+### Write at the speed you talk.
 
-**Hold a key, talk, let go. The text appears at your cursor.** In Slack, in your terminal, in a
-browser, in your notes app — anywhere. Nothing you say ever leaves your machine.
+Hold a key, say it, let go. The words land at your cursor in whatever app you are already in:
+Slack, your terminal, a browser, your notes. It transcribes on your own machine, so nothing you
+say ever leaves it.
+
+[![CI](https://github.com/hannesreinsch/murmurflow/actions/workflows/ci.yml/badge.svg)](https://github.com/hannesreinsch/murmurflow/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-c9903f)](LICENSE)
+![Platform: macOS and Windows](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-6a6c77)
+![Dependencies: none](https://img.shields.io/badge/python%20dependencies-none-6a6c77)
 
 A free, local alternative to the paid cloud dictation apps. No account, no subscription, no server,
 no telemetry, and no Python dependencies at all. **macOS and Windows.**
+
+[**The product page**](https://hannesreinsch.github.io/murmurflow/) ·
+[Our other tools](https://hannesreinsch.github.io/) ·
+[What we do for companies](https://runzyx.xyz)
 
 **macOS** — paste into Terminal:
 
@@ -28,6 +38,20 @@ permission switch the OS will not let a script flip for you; Windows has no such
 Then hold **Control+Option** (Windows: **Control+Alt**) together, say something, let go. That's the
 whole product. (Prefer hands-free? `murmurflow config set doubleTap true` — then it is a double-tap
 of **Control**, the way macOS does it.)
+
+### Why bother
+
+| 150 wpm | 40 wpm | 0 € / mo |
+|---|---|---|
+| how fast you speak, without trying | how fast an average person types | MIT licensed, with no paid tier above it |
+
+A 200-word message is five minutes of typing. Say it instead and you are done in eighty seconds,
+hands still on the desk. Ten of those a day is most of an hour back, every day.
+
+Averages, not promises: conversational speech runs about 130 to 150 words a minute, and an average
+typist about 40. Your own numbers are yours to check, and [the product
+page](https://hannesreinsch.github.io/murmurflow/) shows the same figures with the measured speed
+table beside them.
 
 <details>
 <summary>Rather do it by hand?</summary>
@@ -186,7 +210,7 @@ Option keys as the left ones, so a `right_*` trigger can never fire there.
 
 ---
 
-## Why it exists
+## Why this one is local
 
 Dictation is the fastest input method most people never use, and the good implementations are all
 cloud products: your microphone streams to someone else's servers, behind a subscription, under a
@@ -398,6 +422,29 @@ only ever tests the mock. `murmurflow doctor` and `murmurflow keytest` are how t
 MIT. See [LICENSE](LICENSE).
 
 ---
+
+## Where this comes from
+
+MurmurFlow is one of the tools **[exwyezed](https://runzyx.xyz)**, a product studio and forward
+deployed engineering practice, built for itself and gave away. It was extracted from
+[Zyx](https://runzyx.xyz#zyx), the runtime the studio runs on, which is also why a Mac running both
+hears every cue twice until you turn one off.
+
+The other one is **[Agent Office](https://hannesreinsch.github.io/agent-office/)**: several coding
+agents in one tmux window, each in its own git worktree, and the one that has stopped and is waiting
+on you says so on its border.
+
+**Product:** [page](https://hannesreinsch.github.io/murmurflow/) ·
+[all our tools](https://hannesreinsch.github.io/) ·
+[issues](https://github.com/hannesreinsch/murmurflow/issues)
+
+**Studio:** [what we do for companies](https://runzyx.xyz) ·
+[Zyx](https://runzyx.xyz#zyx) ·
+[GitHub](https://github.com/hannesreinsch)
+
+**Legal:** [MIT licence](LICENSE) ·
+[privacy](https://runzyx.xyz/legal#privacy) ·
+[imprint](https://runzyx.xyz/legal#imprint)
 
 *MurmurFlow is not affiliated with, endorsed by, or connected to Wispr AI, Inc. or any other
 dictation product. Product names mentioned are the trademarks of their respective owners.*

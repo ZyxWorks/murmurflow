@@ -233,7 +233,10 @@ def _doctor(*, verbs: bool = False) -> int:
     # are weaker. The daemon bounces one now (see `dictate.COLD_CLIPS_BEFORE_RESTART`); this is
     # where you see whether it is currently there at all.
     if server:
-        warm = dictate.server_up()
+        # It has to be ASKED TO TRANSCRIBE, not just pinged. A wedged server accepts the socket and
+        # answers every real request with a 500, and this row said "answering" through a whole day
+        # of that — every clip on the cold path, slower and with weaker gates, health report green.
+        warm, why = dictate.server_answers()
         rows.append(
             (
                 warm,
@@ -241,7 +244,7 @@ def _doctor(*, verbs: bool = False) -> int:
                 + (
                     f"answering on :{dictate.port()}"
                     if warm
-                    else f"nothing on :{dictate.port()} — every clip pays the model load again"
+                    else f"{why} — every clip pays the model load again, on the weaker cold path"
                 ),
                 "murmurflow install   (the listener starts and keeps it warm)",
             )

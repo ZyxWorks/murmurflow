@@ -54,6 +54,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -563,6 +564,47 @@ def server_up() -> bool:
         return False
 
 
+def server_answers() -> tuple[bool, str]:
+    """Does the warm server actually TRANSCRIBE — ``(ok, what went wrong)``. Never raises.
+
+    :func:`server_up` opens a socket to ``/``, and that is the check the health report trusted while
+    every single clip took the cold path for a day. A wedged server accepts the connection happily
+    and answers ``/inference`` with a 500; from the outside the two are identical, and the only
+    place the difference showed was a ``· cold ·`` in the daemon log that nobody reads until
+    something is already wrong.
+
+    So this asks the question that matters, with the smallest possible clip: a fifth of a second of
+    silence, through the same multipart path a real dictation uses. Not free — a wedged server
+    answers in milliseconds but a healthy one decodes, so budget a moment — which is why it lives in
+    ``doctor`` and never on the hot path.
+    """
+    if not server_up():
+        return False, f"nothing on :{port()}"
+    try:
+        with tempfile.TemporaryDirectory(prefix="murmurflow-probe-") as tmp:
+            probe = Path(tmp) / "probe.wav"
+            with wave.open(str(probe), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(16000)
+                handle.writeframes(b"\x00" * 6400)  # 0.2s of digital silence
+            body, content_type = _multipart(probe, {"response_format": "json", "temperature": "0"})
+            request = urllib.request.Request(
+                f"{server_url()}/inference", data=body, headers={"Content-Type": content_type}
+            )
+            with urllib.request.urlopen(request, timeout=30):
+                return True, ""
+    except urllib.error.HTTPError as error:
+        # The 500 body names the cause in one sentence ("FFmpeg conversion failed."), and that
+        # sentence is the entire difference between a fixable setup and a mystery.
+        detail = ""
+        with contextlib.suppress(Exception):
+            detail = error.read().decode("utf-8", errors="ignore").strip()[:120]
+        return False, detail or f"HTTP {error.code}"
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        return False, str(error)[:120]
+
+
 def serve_command() -> list[str] | None:
     """The argv that starts the warm whisper-server, or ``None`` if it cannot be built."""
     binary = resolve_bin("whisper-server")
@@ -592,6 +634,25 @@ def start_server(*, wait: float = 60.0) -> bool:
 
     Loading large-v3-turbo takes a few seconds, which is exactly the cost we are paying ONCE here
     so that every subsequent dictation does not. Returns True if a server is answering.
+
+    **The ``cwd`` is the whole warm path**, and leaving it out is how MurmurFlow quietly lost it.
+    ``--convert`` (see :func:`serve_command`) makes whisper-server shell out to ffmpeg, and ffmpeg
+    writes its converted copy into the server's WORKING DIRECTORY. Started from a shell that
+    directory is the repo and everything works, which is why this survived every manual test. Under
+    the installed agent the daemon inherits ``/`` — not writable — so the conversion fails, the
+    server answers **every single request** with ``500 {"error":"FFmpeg conversion failed."}``, and
+    every clip silently falls through to the cold CLI. Measured live 2026-08-18 with one server on
+    ``/`` and one on a writable dir, same binary, same flags, same model, same request: 500 in 0.03s
+    against a clean transcript in 2.17s.
+
+    Nothing on screen says so. The transcripts still arrive, just slower and — because the cold path
+    carries no server-side prompt and reports no confidence — measurably worse, with the two silence
+    gates weakened to boot. `watch_warm` in :func:`listen_loop` faithfully bounced the server after
+    every second cold clip, all day, into the same broken working directory.
+
+    So the server is started in :func:`_scratch_dir`, which is ours, writable, and already the one
+    place recorded voice lives — whisper-server deletes its converted copy when it is done, so the
+    "empty between sentences" promise there still holds.
     """
     if server_up():
         return True
@@ -605,6 +666,7 @@ def start_server(*, wait: float = 60.0) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            cwd=str(_scratch_dir()),
         )
     except (OSError, subprocess.SubprocessError):
         return False

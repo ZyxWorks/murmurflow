@@ -493,6 +493,20 @@ def test_tidy_is_verbatim_by_default_including_the_word_hey():
     assert dictate.tidy("this is, you know, basically fine") == "this is, you know, basically fine"
 
 
+def test_a_whisper_segment_break_never_reaches_the_paste():
+    # The report: "it makes a lot of line breaks, in random places." This string is a VERBATIM
+    # `/inference` response from the operator's own whisper-server (large-v3-turbo, one clip,
+    # 2026-08-19) - whisper puts a `\n` at every segment boundary and segments mid-clause, so the
+    # break lands between "the" and "other". The paste is clipboard + cmd-V, which means every one
+    # of these arrives in the target app as a real Return.
+    raw = " It seems like it's way better working here than in the\n other, you know,\n"
+    flat = "It seems like it's way better working here than in the other, you know,"
+    assert dictate.tidy(raw) == flat
+    # And with the strip on, where the flattening used to hide inside `strip_fillers`.
+    config.set_value("stripFillers", True)
+    assert "\n" not in dictate.tidy(raw)
+
+
 def test_filler_stripping_still_works_when_it_is_asked_for():
     config.set_value("stripFillers", True)
     assert dictate.tidy("So, um, ship it on Friday") == "ship it on Friday"

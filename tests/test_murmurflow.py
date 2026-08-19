@@ -14,6 +14,7 @@ import io
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -402,6 +403,26 @@ def test_hold_defaults_to_a_combo_and_double_tap_to_one_ordinary_key():
     config.set_value("doubleTap", True)
     assert dictate.trigger_key() == "left_control"
     assert dictate.trigger_key() in hotkey.trigger_names()
+
+
+def test_a_fresh_install_taps_and_says_so(tmp_path, monkeypatch):
+    # NOTHING pinned the default gesture before this, which is how it could ship as hold: every
+    # other gesture test sets `doubleTap` explicitly first. An empty config is what a new user has,
+    # so an empty config is what has to be asserted.
+    config.config_path().write_text("{}", "utf-8")
+    assert dictate.double_tap_mode() is True
+    assert dictate.trigger_key() == "left_control"  # one ordinary key, same on every OS
+
+    # And the advice on a brushed key has to match the gesture. Telling somebody in tap mode to
+    # "hold the key while you talk" instructs them to do the one thing that is wrong for them.
+    wav = tmp_path / "brushed.wav"
+    wav.write_bytes(b"")
+    monkeypatch.setattr(dictate, "stop", lambda rec=None: wav)
+    brushed = dictate.Recording(pid=1, wav=wav, started_at=time.time())
+
+    assert "hold" not in dictate.finish(brushed, paste=False).problem
+    config.set_value("doubleTap", False)
+    assert "hold the key while you talk" in dictate.finish(brushed, paste=False).problem
 
 
 def test_an_explicit_trigger_wins_over_the_gesture_default():

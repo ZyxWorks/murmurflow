@@ -1493,7 +1493,15 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
         return Result("", seconds, 0, False, "no audio was captured")
     if seconds < MIN_CLIP_SECONDS:
         wav.unlink(missing_ok=True)
-        return Result("", seconds, 0, False, f"{TOO_SHORT} — hold the key while you talk")
+        # The advice has to match the GESTURE. "hold the key while you talk" is actively wrong
+        # in tap mode - which is now the default - and being told to do the thing you are not
+        # supposed to do is worse than being told nothing.
+        advice = (
+            "tap again to stop, not straight away"
+            if double_tap_mode()
+            else "hold the key while you talk"
+        )
+        return Result("", seconds, 0, False, f"{TOO_SHORT} — {advice}")
     # After the two ways this can still be a non-event, so a failure cues once rather than being
     # contradicted by a "got it" a moment earlier — and before peak_dbfs and the ~600ms transcribe,
     # which is the whole point: the tone marks the microphone closing, not the text arriving.
@@ -1953,11 +1961,19 @@ def trigger_key(trigger: str = "") -> str:
 def double_tap_mode() -> bool:
     """True when ``doubleTap`` is set: tap the trigger twice to start, twice again to stop.
 
-    The alternative to holding, and it exists for two real cases: a key that a Mac reports
-    unreliably while held, and dictating something long enough that holding a key for it is
-    genuinely uncomfortable.
+    **This is the DEFAULT, and holding is the opt-out.** It shipped the other way round and the
+    other way round is wrong for a first run: a Mac reports some keys unreliably while they are
+    held, so the very first thing a new user experiences is a clip that records and then reports
+    `too short` — which reads as "I can start it but I cannot stop it", i.e. broken. A tap has no
+    such failure: the key is down for a normal keypress and the OS reports that reliably. It is
+    also the only gesture that survives a long sentence, and dictating a long sentence is the
+    thing this tool is for.
+
+    The trigger follows the gesture (see :func:`trigger_key`), so flipping this also moves the
+    default key onto ONE ordinary key that is the same on every OS, instead of a two-modifier
+    combo a hold is forced to use.
     """
-    return config.flag("doubleTap", False, cfg=_cfg())
+    return config.flag("doubleTap", True, cfg=_cfg())
 
 
 def start_and_cue() -> Recording | None:

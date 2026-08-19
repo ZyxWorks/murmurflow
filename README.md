@@ -137,11 +137,13 @@ speak catches the rest, and costs nothing (it does not pin the decoder):
 murmurflow config set languages '["de", "en"]'
 ```
 
-**Hold, or double-tap.** Holding is the default and it is faster for one short sentence. Double-tap
-is easier on the hand for long ones, and it is what macOS's own dictation does:
+**Double-tap, or hold.** Double-tap is the default: tap `left Control` twice to start, tap again
+to stop. It is what macOS's own dictation does, it is the only gesture that survives a long
+sentence, and it is the safer of the two for the reason in *The trigger* below. Holding is there
+for one short sentence at a time:
 
 ```sh
-murmurflow config set doubleTap true   # tap twice to start, once to stop
+murmurflow config set doubleTap false   # hold the key while you talk instead
 ```
 
 Both take effect immediately — `config set` restarts the listener for you.
@@ -167,10 +169,10 @@ down, it does not disable dictation.
 
 ### The trigger: the gesture picks the key
 
-| gesture | default | why |
+| gesture | its key | why |
 |---|---|---|
-| **hold** (default) | **⌃⌥ together** | a hold starts on the same key-down a shortcut does |
-| **double-tap** | **left Control** | two deliberate taps is a shape no shortcut has |
+| **double-tap** (default) | **left Control** | two deliberate taps is a shape no shortcut has |
+| **hold** | **⌃⌥ together** | a hold starts on the same key-down a shortcut does, so it needs a combo |
 
 That is one rule, and it is worth understanding before you rebind.
 
@@ -316,8 +318,8 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 
 | key | what it does |
 |---|---|
-| `trigger` | the key. Default follows the gesture: `control_option` for hold, `left_control` for double-tap |
-| `doubleTap` | `true` = tap twice to start, twice to stop, instead of holding |
+| `trigger` | the key. Default follows the gesture: `left_control` for double-tap, `control_option` for hold |
+| `doubleTap` | tap twice to start, tap again to stop. **On by default.** `false` = hold the key while you talk |
 | `language` | `en`, `de`, … Default `auto`. Pinning saves ~0.7s per sentence, so pin it if you can |
 | `languages` | the languages you actually speak, e.g. `["de","en"]`. A clip whisper reads as any other one is dropped. Empty = accept all |
 | `inputName` | part of a microphone name. Default: system default. `murmurflow devices` lists them |

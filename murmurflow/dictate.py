@@ -808,8 +808,8 @@ def _confidence(payload: str) -> tuple[str, float, str]:
 def transcribe_warm(wav: Path, *, timeout: float = 60.0) -> Heard:
     """Transcribe via the warm server; empty text if it is not up or errors. Never raises.
 
-    Reuses ``core.voice``'s language and proper-noun vocabulary decisions so a Slack memo and a
-    dictated sentence hear "exwyezed" and "datagate" the same way.
+    Reuses :mod:`whisper`'s language and vocabulary decisions, so every surface that transcribes
+    hears your own proper nouns the same way.
 
     Asks for ``verbose_json`` rather than ``text`` purely to get the language score back; the
     transcript is identical either way.

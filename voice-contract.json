@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "what_this_is": "The measured, physical facts that core.dictate (zyx) and murmurflow/dictate.py (MurmurFlow) must agree on, because MurmurFlow was extracted from core.dictate and the two now ship separately. Each repo holds an identical copy of this file and a test asserting ITS OWN code still matches it. A change that silently diverges from a measurement fails in the repo that made it, on the day it is made.",
+  "why_it_exists": "One bug - start_server spawning whisper-server with no cwd, so --convert could not write and the server 500'd on every request - sat in BOTH copies and had to be found once and fixed twice. A second (whisper's per-segment newlines reaching the paste) lived in one copy for weeks because nothing compared them. Deleting one copy was measured and rejected: the two tools do different jobs (see docs/guides/voice.md). So the code stays forked and the MEASUREMENTS do not.",
+  "its_honest_limit": "This detects a CODE change that diverges from the contract. It does not detect somebody editing this file in one repo only - the other repo's test would keep passing against its stale copy. Bumping `version` means bumping it in both, deliberately. A cross-repo sync check would need one repo to depend on the other, which invariant 1 forbids and which is a worse trade than a version integer somebody has to move on purpose.",
+  "thresholds": {
+    "MIN_CLIP_SECONDS": {
+      "value": 0.4,
+      "why": "shorter than any word: a brushed key or an aborted chord, never a sentence"
+    },
+    "SILENT_DBFS": {
+      "value": -70.0,
+      "why": "a DENIED microphone, not a quiet room. macOS does not fail a denied mic - CoreAudio hands back digital silence - so this separates 'no grant' from 'nobody spoke'. Room tone from a real mic sits near -46 dBFS; true silence is -90 or below."
+    },
+    "SPEECH_CONFIDENCE": {
+      "value": 0.75,
+      "why": "whisper's own detected_language_probability. Measured on large-v3-turbo: every real utterance scored >= 0.969, every silent or noisy clip <= 0.453. 0.75 sits in the empty middle with ~0.22 of margin either side. It is the only gate that catches a fluent invented sentence in an invented language, which no word-list can grow fast enough for."
+    }
+  },
+  "whisper_warm_request": {
+    "endpoint": "/inference",
+    "required_fields": [
+      "response_format",
+      "language",
+      "prompt",
+      "temperature"
+    ],
+    "response_format": "verbose_json",
+    "temperature": "0",
+    "why": "verbose_json is asked for ONLY to get the language score back - the transcript is identical either way. temperature 0 because a dictation is a transcription, not a sample. `prompt` is the proper-noun glossary; dropping it is the difference between 'exwyezed' and 'ex-wise-ed'."
+  },
+  "whisper_server_flags": {
+    "must_contain": [
+      "--convert",
+      "-sns"
+    ],
+    "must_run_with_cwd": true,
+    "why": "--convert makes whisper-server shell out to ffmpeg, and ffmpeg writes its temp file into the process CWD. Started with no cwd (which is what launchd does - it runs agents at /), the server answers every request with a 500. THIS IS THE BUG THAT SHIPPED IN BOTH COPIES."
+  },
+  "ffmpeg_capture": {
+    "must_contain": [
+      "-af",
+      "aresample=async=1",
+      "-ar",
+      "16000",
+      "-ac",
+      "1",
+      "-flush_packets",
+      "1"
+    ],
+    "why": "aresample=async=1 FILLS dropped avfoundation buffers instead of splicing them out - without it speech plays ~11% fast and whisper transcribes the wrong words. 16k mono is what whisper consumes natively. -flush_packets stops ffmpeg holding ~2s of audio in its buffer."
+  },
+  "deliberately_divergent": {
+    "tidy": "zyx strips spoken fillers unconditionally; MurmurFlow made it `stripFillers`, default OFF, after it deleted a leading 'hey' from a real sentence. DIFFERENT ON PURPOSE: zyx's reader is a language model that wants the signal, MurmurFlow's is a human who said those words. Whitespace collapse is NOT in this category - both must flatten whisper's per-segment newlines, because nobody can speak a newline.",
+    "hallucination_list": "MurmurFlow deliberately narrowed the blocklist. A false positive deletes a sentence somebody did say, which reads as broken hardware; the confidence gate above subsumes most of it.",
+    "quiet_floor": "MurmurFlow has QUIET_DBFS (-30.0) and zyx has no equivalent. Correct for both: MurmurFlow pastes into a document, where transcribing a room is worse than dropping a quiet clip; zyx hands text to a model that can simply decline to answer. Measured -38 dBFS for a loud silent room and -15 for the quietest real speech, so -30 sits between them. Do NOT lower it to -40."
+  }
+}

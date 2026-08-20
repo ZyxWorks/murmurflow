@@ -528,6 +528,31 @@ def test_a_whisper_segment_break_never_reaches_the_paste():
     assert "\n" not in dictate.tidy(raw)
 
 
+def test_a_segment_seam_inside_a_word_does_not_become_a_space():
+    # The report, and his own dictated message is the evidence: "zyxworks.gith ub.io",
+    # "z yxworks.com", "murmur flow". whisper segments on the DECODER's budget, so the seam lands
+    # between two tokens of one word - and that segment starts with no leading space, because
+    # whisper carries a word's space inside its first token. Joining every seam with " " split the
+    # word. No whitespace on either side of the seam = the word was cut in half.
+    assert dictate.tidy("go to zyxworks.gith\nub.io") == "go to zyxworks.github.io"
+    assert dictate.tidy("Mail me at z\nyxworks.com.") == "Mail me at zyxworks.com."
+    # ...and a seam at a REAL word boundary still gets its space, from either side of the newline.
+    assert dictate.tidy("in the\n other") == "in the other"
+    assert dictate.tidy("in the \nother") == "in the other"
+
+
+def test_boilerplate_appended_to_a_real_sentence_is_not_typed():
+    # The report: "it adds a thank you in the end". The whole-transcript trap cannot see this one -
+    # the line is mostly a real sentence, so it scores as confident speech and every word is typed.
+    assert dictate.tidy("Make it public. Thanks for watching!") == "Make it public."
+    assert dictate.tidy("Ship it. [BLANK_AUDIO]") == "Ship it."
+    assert dictate.tidy("Fertig. Untertitel von Stephanie Geiges") == "Fertig."
+    # Never the last sentence standing: a clip that is ONLY boilerplate is `finish`'s call, and a
+    # real sentence that merely looks polite is never touched.
+    assert dictate.tidy("Thanks for watching!") == "Thanks for watching!"
+    assert dictate.tidy("Ship it. Thank you.") == "Ship it. Thank you."
+
+
 def test_filler_stripping_still_works_when_it_is_asked_for():
     config.set_value("stripFillers", True)
     assert dictate.tidy("So, um, ship it on Friday") == "ship it on Friday"

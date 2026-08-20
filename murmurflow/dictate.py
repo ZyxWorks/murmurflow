@@ -995,6 +995,44 @@ _DOUBLED_PUNCT = re.compile(r"([,;:])\s*([.!?])")
 # know." -> "...fixed,"). Invisible on a Slack echo; sloppy when it is typed into a document.
 _DANGLING_TAIL = re.compile(r"[,;:]+\s*$")
 
+# whisper puts a `\n` at every SEGMENT boundary, and a segment ends where the decoder's budget ran
+# out — a TOKEN boundary, which is not a word boundary. When the seam lands inside a word the next
+# segment starts with NO leading space ("...zyxworks.gith" + "ub.io"), and flattening every seam to
+# a space is what typed "zyxworks.gith ub.io" and "z yxworks.com" into a real dictation.
+#
+# Whisper's own spacing is the signal, and reading it costs nothing: whisper carries a word's
+# leading space inside the token, so a genuine word boundary always has whitespace on one side of
+# the seam. None on either side means the word was cut in half — close that seam with nothing.
+_SEGMENT_SEAM = re.compile(r"([^\S\n]*)\n+([^\S\n]*)")
+
+# Sentence end, for the trailing-boilerplate trap below. Deliberately crude: it only has to find
+# the seam between "...make it public." and an appended "Thanks for watching!".
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def join_segments(transcript: str) -> str:
+    """Flatten whisper's per-segment newlines WITHOUT inventing a space in the middle of a word."""
+    return _SEGMENT_SEAM.sub(lambda seam: " " if seam.group(1) or seam.group(2) else "", transcript)
+
+
+def strip_trailing_hallucination(text: str) -> str:
+    """Drop whisper's boilerplate when it is APPENDED to a real sentence.
+
+    :func:`is_hallucination` judges the WHOLE line, which is the right shape for a clip that was
+    nothing but silence. It is the wrong shape for the other half of the same failure: a real
+    sentence followed by trailing silence comes back as the sentence *plus* the credit line
+    ("...so only agent flow is public now. Thanks for watching!"), the whole thing scores as
+    confident speech in a language you speak, and every one of those words gets typed.
+
+    Only whole trailing SENTENCES that :func:`is_hallucination` already recognises are removed, and
+    never the last one standing — same one-directional bias as everything else here: an invented
+    line that slips through is visible and deletable, a real one swallowed is invisible.
+    """
+    parts = _SENTENCE_END.split(text)
+    while len(parts) > 1 and is_hallucination(parts[-1]):
+        parts.pop()
+    return " ".join(parts)
+
 
 def tidy(transcript: str) -> str:
     """Deterministic cleanup of a raw transcript. VERBATIM unless ``stripFillers`` is turned on.
@@ -1012,11 +1050,13 @@ def tidy(transcript: str) -> str:
     a word removed is invisible, and you only find it by re-reading your own sentence.
     """
     stripping = config.flag("stripFillers", False, cfg=_cfg())
+    transcript = join_segments(transcript)
     text = strip_fillers(transcript) if stripping else transcript.strip()
-    # WHISPER SEGMENTS ARE NOT LINE BREAKS, and this line is the whole fix for "it puts line breaks
-    # in random places". whisper-server returns one `\n` per SEGMENT, and it segments on decoder
-    # budget and pauses — never on sentences — so a single dictated sentence comes back as
+    # WHISPER SEGMENTS ARE NOT LINE BREAKS, and `join_segments` above is the whole fix for "it puts
+    # line breaks in random places". whisper-server returns one `\n` per SEGMENT, and it segments on
+    # decoder budget and pauses — never on sentences — so a single dictated sentence comes back as
     # "...than in the\n other, you know,\n" and the paste lands with a hard break mid-clause.
+    # This line only collapses what is left (doubled spaces, tabs, a stray non-breaking space).
     # Nobody can speak a newline, so collapsing them is not an edit to what was said: it is undoing
     # a transport artefact, and it belongs OUTSIDE the `stripping` branch. It used to be inside
     # `strip_fillers`, which is exactly how it went missing — defaulting filler-stripping off (the
@@ -1025,6 +1065,9 @@ def tidy(transcript: str) -> str:
     text = " ".join(text.split())
     text = _SPACE_BEFORE_PUNCT.sub(r"\1", text)
     text = _DOUBLED_PUNCT.sub(r"\2", text)
+    # The credit line whisper appends to trailing silence. `finish` traps the whole-transcript
+    # case; this is the same hallucination riding along behind a real sentence.
+    text = strip_trailing_hallucination(text)
     if stripping:
         # Seam repair, and ONLY meaningful after a strip: it exists to close the ", ," a removed
         # filler leaves behind. Run unconditionally it would quietly eat a trailing comma somebody

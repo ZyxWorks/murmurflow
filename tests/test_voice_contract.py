@@ -26,7 +26,7 @@ CONTRACT = json.loads(
 
 def test_the_contract_is_the_version_this_test_was_written_against() -> None:
     """Bumping it is a deliberate act in BOTH repos — see the file's own ``its_honest_limit``."""
-    assert CONTRACT["version"] == 1
+    assert CONTRACT["version"] == 2
 
 
 def test_every_threshold_still_holds_its_measured_value() -> None:
@@ -80,3 +80,21 @@ def test_a_whisper_segment_break_never_survives_tidy() -> None:
     """
     raw = " It seems like it's way better working here than in the\n other, you know,\n"
     assert "\n" not in dictate.tidy(raw)
+
+
+def test_a_segment_seam_inside_a_word_never_becomes_a_space() -> None:
+    """The seam whisper leaves between two tokens of ONE word must close with nothing.
+
+    Reported 2026-08-20 from a real dictation: "zyxworks.gith ub.io", "z yxworks.com". Both tools
+    flatten whisper's per-segment newlines, so both tools own this half of it too.
+    """
+    spec = CONTRACT["transcript_seams"]
+    for raw, expected in spec["must_hold"]:
+        assert expected in dictate.tidy(raw), spec["why"]
+
+
+def test_boilerplate_appended_to_a_real_sentence_never_survives_tidy() -> None:
+    """The report: it adds a thank you at the end. The whole-line trap cannot see this one."""
+    spec = CONTRACT["trailing_hallucination"]
+    for raw, expected in spec["must_hold"]:
+        assert dictate.tidy(raw) == expected, spec["why"]

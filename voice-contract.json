@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "what_this_is": "The measured, physical facts that core.dictate (zyx) and murmurflow/dictate.py (MurmurFlow) must agree on, because MurmurFlow was extracted from core.dictate and the two now ship separately. Each repo holds an identical copy of this file and a test asserting ITS OWN code still matches it. A change that silently diverges from a measurement fails in the repo that made it, on the day it is made.",
   "why_it_exists": "One bug - start_server spawning whisper-server with no cwd, so --convert could not write and the server 500'd on every request - sat in BOTH copies and had to be found once and fixed twice. A second (whisper's per-segment newlines reaching the paste) lived in one copy for weeks because nothing compared them. Deleting one copy was measured and rejected: the two tools do different jobs (see docs/guides/voice.md). So the code stays forked and the MEASUREMENTS do not.",
   "its_honest_limit": "This detects a CODE change that diverges from the contract. It does not detect somebody editing this file in one repo only - the other repo's test would keep passing against its stale copy. Bumping `version` means bumping it in both, deliberately. A cross-repo sync check would need one repo to depend on the other, which invariant 1 forbids and which is a worse trade than a version integer somebody has to move on purpose.",
@@ -16,6 +16,24 @@
       "value": 0.75,
       "why": "whisper's own detected_language_probability. Measured on large-v3-turbo: every real utterance scored >= 0.969, every silent or noisy clip <= 0.453. 0.75 sits in the empty middle with ~0.22 of margin either side. It is the only gate that catches a fluent invented sentence in an invented language, which no word-list can grow fast enough for."
     }
+  },
+  "transcript_seams": {
+    "rule": "A `\\n` in a transcript is a whisper SEGMENT boundary, never a line the speaker spoke, and it must be flattened. Flatten it to a SPACE only when there is whitespace on one side of the seam already; when there is none on either side, close it with NOTHING.",
+    "must_hold": [
+      ["Look at zyxworks.gith\nub.io today.", "Look at zyxworks.github.io today."],
+      ["Mail me at z\nyxworks.com.", "Mail me at zyxworks.com."],
+      [" It seems like it's way better working here than in the\n other, you know,\n", "in the other"]
+    ],
+    "why": "whisper segments on the DECODER's budget, which is a token boundary and not a word one, so a seam lands inside a word perhaps once every few sentences. Whisper carries a word's leading space inside its first token, so a segment that begins with no space is the SECOND HALF OF A WORD. Joining every seam with a space typed `zyxworks.gith ub.io` and `z yxworks.com` into a real dictation on 2026-08-20. The spacing whisper already emits is the whole signal - there is nothing to measure and nothing to guess."
+  },
+  "trailing_hallucination": {
+    "rule": "The boilerplate whisper invents for silence must also be trapped when it is APPENDED to a real sentence, not only when it is the whole transcript. Remove whole trailing sentences that the whole-line trap already recognises; never remove the last sentence standing.",
+    "must_hold": [
+      ["Make it public. Thanks for watching!", "Make it public."],
+      ["Ship it. [BLANK_AUDIO]", "Ship it."],
+      ["Thanks for watching!", "Thanks for watching!"]
+    ],
+    "why": "Reported 2026-08-20: `it adds a thank you in the end`. A clip of real speech followed by trailing silence comes back as the sentence PLUS the credit line. Every gate before this one reads the transcript as a whole - the confidence score, the language score and the blocklist all see a confident, real, in-language sentence - so the invented tail passes all three and gets typed."
   },
   "whisper_warm_request": {
     "endpoint": "/inference",

@@ -27,7 +27,7 @@
     ],
     "response_format": "verbose_json",
     "temperature": "0",
-    "why": "verbose_json is asked for ONLY to get the language score back - the transcript is identical either way. temperature 0 because a dictation is a transcription, not a sample. `prompt` is the proper-noun glossary; dropping it is the difference between 'exwyezed' and 'ex-wise-ed'."
+    "why": "verbose_json is asked for ONLY to get the language score back - the transcript is identical either way. temperature 0 because a dictation is a transcription, not a sample. `prompt` is the proper-noun glossary; dropping it is the difference between 'ZyxWorks' and 'Zicks Works'."
   },
   "whisper_server_flags": {
     "must_contain": [

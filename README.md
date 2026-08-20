@@ -15,8 +15,8 @@ A free, local alternative to the paid cloud dictation apps. No account, no subsc
 no telemetry, and no Python dependencies at all. **macOS and Windows.**
 
 [**The product page**](https://hannesreinsch.github.io/murmurflow/) ·
-[Our other tools](https://hannesreinsch.github.io/) ·
-[What we do for companies](https://runzyx.xyz)
+[Our other tools](https://hannesreinsch.github.io/zyxworks.github.io/) ·
+[What we do for companies](https://zyxworks.com)
 
 **macOS** — paste into Terminal:
 
@@ -427,9 +427,9 @@ MIT. See [LICENSE](LICENSE).
 
 ## Where this comes from
 
-MurmurFlow is one of the tools **[exwyezed](https://runzyx.xyz)**, a product studio and forward
+MurmurFlow is one of the tools **[ZyxWorks](https://zyxworks.com)**, a product studio and forward
 deployed engineering practice, built for itself and gave away. It was extracted from
-[Zyx](https://runzyx.xyz#zyx), the runtime the studio runs on, which is also why a Mac running both
+[Zyx](https://zyxworks.com#zyx), the runtime the studio runs on, which is also why a Mac running both
 hears every cue twice until you turn one off.
 
 The other one is **[Agent Office](https://hannesreinsch.github.io/agent-office/)**: several coding
@@ -437,16 +437,16 @@ agents in one tmux window, each in its own git worktree, and the one that has st
 on you says so on its border.
 
 **Product:** [page](https://hannesreinsch.github.io/murmurflow/) ·
-[all our tools](https://hannesreinsch.github.io/) ·
+[all our tools](https://hannesreinsch.github.io/zyxworks.github.io/) ·
 [issues](https://github.com/hannesreinsch/murmurflow/issues)
 
-**Studio:** [what we do for companies](https://runzyx.xyz) ·
-[Zyx](https://runzyx.xyz#zyx) ·
+**Studio:** [what we do for companies](https://zyxworks.com) ·
+[Zyx](https://zyxworks.com#zyx) ·
 [GitHub](https://github.com/hannesreinsch)
 
 **Legal:** [MIT licence](LICENSE) ·
-[privacy](https://runzyx.xyz/legal#privacy) ·
-[imprint](https://runzyx.xyz/legal#imprint)
+[privacy](https://zyxworks.com/legal#privacy) ·
+[imprint](https://zyxworks.com/legal#imprint)
 
 *MurmurFlow is not affiliated with, endorsed by, or connected to Wispr AI, Inc. or any other
 dictation product. Product names mentioned are the trademarks of their respective owners.*

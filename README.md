@@ -6,7 +6,7 @@ Hold a key, say it, let go. The words land at your cursor in whatever app you ar
 Slack, your terminal, a browser, your notes. It transcribes on your own machine, so nothing you
 say ever leaves it.
 
-[![CI](https://github.com/hannesreinsch/murmurflow/actions/workflows/ci.yml/badge.svg)](https://github.com/hannesreinsch/murmurflow/actions/workflows/ci.yml)
+[![CI](https://github.com/ZyxWorks/murmurflow/actions/workflows/ci.yml/badge.svg)](https://github.com/ZyxWorks/murmurflow/actions/workflows/ci.yml)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-c9903f)](LICENSE)
 ![Platform: macOS and Windows](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-6a6c77)
 ![Dependencies: none](https://img.shields.io/badge/python%20dependencies-none-6a6c77)
@@ -14,20 +14,20 @@ say ever leaves it.
 A free, local alternative to the paid cloud dictation apps. No account, no subscription, no server,
 no telemetry, and no Python dependencies at all. **macOS and Windows.**
 
-[**The product page**](https://hannesreinsch.github.io/murmurflow/) ·
+[**The product page**](https://zyxworks.github.io/murmurflow/) ·
 [Our other tools](https://zyxworks.com/) ·
 [What we do for companies](https://zyxworks.com)
 
 **macOS** — paste into Terminal:
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/hannesreinsch/murmurflow/main/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.sh)"
 ```
 
 **Windows** — paste into PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/hannesreinsch/murmurflow/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex
 ```
 
 Either one works on a machine with nothing on it: no package manager, no Python, no developer
@@ -50,7 +50,7 @@ hands still on the desk. Ten of those a day is most of an hour back, every day.
 
 Averages, not promises: conversational speech runs about 130 to 150 words a minute, and an average
 typist about 40. Your own numbers are yours to check, and [the product
-page](https://hannesreinsch.github.io/murmurflow/) shows the same figures with the measured speed
+page](https://zyxworks.github.io/murmurflow/) shows the same figures with the measured speed
 table beside them.
 
 <details>
@@ -61,7 +61,7 @@ the fewest ways to go wrong:
 
 ```sh
 brew install whisper-cpp ffmpeg uv
-uv tool install --python 3.13 git+https://github.com/hannesreinsch/murmurflow
+uv tool install --python 3.13 git+https://github.com/ZyxWorks/murmurflow
 murmurflow setup             # downloads the speech model (~1.6 GB, once)
 murmurflow install           # dictation is live now, and after every login
 ```
@@ -72,7 +72,7 @@ into `%LOCALAPPDATA%\MurmurFlow\bin`. Everything else is the same:
 
 ```powershell
 winget install Gyan.FFmpeg astral-sh.uv
-uv tool install --python 3.13 git+https://github.com/hannesreinsch/murmurflow
+uv tool install --python 3.13 git+https://github.com/ZyxWorks/murmurflow
 murmurflow setup
 murmurflow install
 ```
@@ -432,17 +432,17 @@ deployed engineering practice, built for itself and gave away. It was extracted 
 [Zyx](https://zyxworks.com#zyx), the runtime the studio runs on, which is also why a Mac running both
 hears every cue twice until you turn one off.
 
-The other one is **[Agent Office](https://hannesreinsch.github.io/agent-office/)**: several coding
+The other one is **[Agent Office](https://zyxworks.github.io/agent-office/)**: several coding
 agents in one tmux window, each in its own git worktree, and the one that has stopped and is waiting
 on you says so on its border.
 
-**Product:** [page](https://hannesreinsch.github.io/murmurflow/) ·
+**Product:** [page](https://zyxworks.github.io/murmurflow/) ·
 [all our tools](https://zyxworks.com/) ·
-[issues](https://github.com/hannesreinsch/murmurflow/issues)
+[issues](https://github.com/ZyxWorks/murmurflow/issues)
 
 **Studio:** [what we do for companies](https://zyxworks.com) ·
 [Zyx](https://zyxworks.com#zyx) ·
-[GitHub](https://github.com/hannesreinsch)
+[GitHub](https://github.com/ZyxWorks)
 
 **Legal:** [MIT licence](LICENSE) ·
 [privacy](https://zyxworks.com/legal#privacy) ·

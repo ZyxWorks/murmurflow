@@ -15,7 +15,7 @@ A free, local alternative to the paid cloud dictation apps. No account, no subsc
 no telemetry, and no Python dependencies at all. **macOS and Windows.**
 
 [**The product page**](https://hannesreinsch.github.io/murmurflow/) ·
-[Our other tools](https://hannesreinsch.github.io/zyxworks.github.io/) ·
+[Our other tools](https://zyxworks.com/) ·
 [What we do for companies](https://zyxworks.com)
 
 **macOS** — paste into Terminal:
@@ -437,7 +437,7 @@ agents in one tmux window, each in its own git worktree, and the one that has st
 on you says so on its border.
 
 **Product:** [page](https://hannesreinsch.github.io/murmurflow/) ·
-[all our tools](https://hannesreinsch.github.io/zyxworks.github.io/) ·
+[all our tools](https://zyxworks.com/) ·
 [issues](https://github.com/hannesreinsch/murmurflow/issues)
 
 **Studio:** [what we do for companies](https://zyxworks.com) ·

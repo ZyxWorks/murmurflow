@@ -116,7 +116,24 @@ def test_real_speech_survives_the_traps(text):
 
 
 def test_fillers_are_stripped_without_rewriting():
-    assert dictate.strip_fillers("So, um, ship it on Friday") == "ship it on Friday"
+    assert dictate.strip_fillers("So, um, ship it on Friday") == "So, ship it on Friday"
+    assert dictate.strip_fillers("Erm, ship it") == "ship it"
+    assert dictate.strip_fillers("It is, uh, fixed") == "It is, fixed"
+
+
+def test_the_strip_removes_sounds_and_never_words():
+    # Every one of these used to lose a real word: the list held `hey`, `so`, `well`, `right`,
+    # `you know`, `i mean` and `basically`, and each is also an ordinary English word. A missed
+    # filler costs one keystroke; a deleted word is invisible until you re-read your own sentence.
+    for said in (
+        "Do you know what time it is?",
+        "Let me know if you know a good restaurant.",
+        "I mean what I said.",
+        "Hey, ship it on Friday",
+        "Well, that is basically right.",
+        "So we ship on Friday.",
+    ):
+        assert dictate.strip_fillers(said) == said
 
 
 def test_a_clean_transcript_passes_through_byte_identical():
@@ -126,7 +143,7 @@ def test_a_clean_transcript_passes_through_byte_identical():
 
 def test_strip_never_empties_a_line_that_was_all_filler():
     # It removes what it can and keeps whatever survives ...
-    assert dictate.strip_fillers("so, um, yeah") == "yeah"
+    assert dictate.strip_fillers("um, uh, yeah") == "yeah"
     # ... but a line with nothing left after the strip falls back to the original rather than "".
     assert dictate.strip_fillers("um uh") == "um uh"
 
@@ -134,7 +151,7 @@ def test_strip_never_empties_a_line_that_was_all_filler():
 def test_punctuation_left_dangling_by_the_strip_is_repaired():
     # "...fixed, um, you know." -> the strip leaves "fixed," hanging at the end of the line.
     config.set_value("stripFillers", True)
-    assert dictate.tidy("It is fixed, um, you know.") == "It is fixed."
+    assert dictate.tidy("It is fixed, um.") == "It is fixed."
 
 
 def test_space_before_punctuation_is_closed_up():
@@ -555,7 +572,7 @@ def test_boilerplate_appended_to_a_real_sentence_is_not_typed():
 
 def test_filler_stripping_still_works_when_it_is_asked_for():
     config.set_value("stripFillers", True)
-    assert dictate.tidy("So, um, ship it on Friday") == "ship it on Friday"
+    assert dictate.tidy("Um, ship it on Friday") == "ship it on Friday"
 
 
 @pytest.mark.parametrize("said", ["thank you", "Thank you.", "you", "so", "bye", "Vielen Dank."])
@@ -982,9 +999,15 @@ def test_the_peak_is_the_loudest_sample_in_either_direction(tmp_path):
     # `max(max(s), -min(s))` replaced a per-sample Python loop on the hot path. It has to agree
     # with the obvious version everywhere, INCLUDING on the negative full-scale sample that has no
     # positive twin: -32768 negated does not fit in the sample type it came from.
-    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(0.0, abs=0.01)
-    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(0.0, abs=0.01)
-    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(-40, abs=0.5)
+    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(
+        0.0, abs=0.01
+    )
+    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(
+        0.0, abs=0.01
+    )
+    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(
+        -40, abs=0.5
+    )
     assert dictate.peak_dbfs(_wav(tmp_path / "silent.wav", [0, 0, 0])) == float("-inf")
     assert dictate.peak_dbfs(tmp_path / "not-a-file.wav") == 0.0  # no opinion, never a crash
 
@@ -1055,7 +1078,10 @@ def test_a_wedged_server_is_not_a_healthy_one(monkeypatch):
 
     def _wedged(*_a, **_k):
         raise urllib.error.HTTPError(
-            "http://127.0.0.1/inference", 500, "Internal Server Error", {},  # type: ignore[arg-type]
+            "http://127.0.0.1/inference",
+            500,
+            "Internal Server Error",
+            {},  # type: ignore[arg-type]
             io.BytesIO(b'{"error":"FFmpeg conversion failed."}'),
         )
 
@@ -1115,9 +1141,7 @@ def test_one_cold_clip_is_not_enough_to_bounce_a_loading_server(monkeypatch):
 def test_a_machine_with_no_warm_server_is_never_bounced(monkeypatch):
     # Cold on every clip is the DESIGN when whisper-server was never there. Restarting a server
     # that does not exist would hammer a missing binary after every sentence.
-    _starts, stops = _drive_listener(
-        monkeypatch, [_clip(False)] * 4, warm_starts=False
-    )
+    _starts, stops = _drive_listener(monkeypatch, [_clip(False)] * 4, warm_starts=False)
     assert stops == []
 
 

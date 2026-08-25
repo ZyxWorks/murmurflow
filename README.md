@@ -121,11 +121,13 @@ murmurflow config set cue pebble # system · pebble · glass · marimba · soft 
 `off` is a real answer: the text landing at your cursor already tells you it worked.
 
 **What you said is what you get.** Nothing is removed, reworded or reordered. If you say
-"hey, ship it on Friday", "hey" appears. There is an opt-in filler strip, and it is opt-in for a
-reason — a word deleted is invisible, while an "um" left in costs one keystroke:
+"hey, ship it on Friday", "hey" appears. There is an opt-in filler strip, and it removes **sounds
+only** — never a word. "hey", "so", "well" and "you know" were on that list once, and each of them
+is also an ordinary word: "Do you know what time it is?" came back as "Do what time it is?". A word
+deleted is invisible; an "um" left in costs one keystroke.
 
 ```sh
-murmurflow config set stripFillers true   # deletes um / you know / a leading hey, so, well
+murmurflow config set stripFillers true   # deletes um / uh / erm / hmm, and nothing else
 ```
 
 **And what you did NOT say never appears.** Handed a recording of a room, whisper does not answer
@@ -326,7 +328,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `vocabulary` | proper nouns to bias the transcriber toward |
 | `cue` | tone preset: `system` (default — the Mac's own Tink and Pop), `pebble` (near-subliminal), `glass`, `marimba`, `soft`, `off`. `murmurflow cues` plays them |
 | `polishCommand` | see below |
-| `stripFillers` | `true` = delete `um`, `you know`, and a leading `hey`/`so`/`well`. **Off** — you get verbatim |
+| `stripFillers` | `true` = delete the sounds `um` / `uh` / `erm` / `hmm`, and nothing else. **Off** — you get verbatim |
 | `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |
 | `keepAudio` | keep the evidence for one bad transcription: the last clip, and the transcript in the log. Off, so your sentences are not written down |
 

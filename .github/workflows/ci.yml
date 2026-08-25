@@ -33,3 +33,13 @@ jobs:
         run: uv run pytest -q
         env:
           MURMURFLOW_NO_AUDIO: "1"
+
+      # The two installers ARE the onboarding path - they are fetched raw from `main` and piped
+      # into a shell on a machine with nothing on it - and nothing above this line ever loads them.
+      # A typo in either one ships behind a green badge and breaks every new install at once.
+      # A parse is not a test; it is the difference between "broken for everybody" and "not broken
+      # for anybody". No OS matrix needed: both parsers run on this runner (pwsh ships with it).
+      - name: installers parse
+        run: |
+          bash -n install.sh
+          pwsh -NoProfile -Command '$e = $null; [System.Management.Automation.Language.Parser]::ParseInput((Get-Content -Raw install.ps1), [ref]$null, [ref]$e) | Out-Null; if ($e) { $e | ForEach-Object { Write-Host $_ }; exit 1 }; Write-Host "install.ps1 parses"'

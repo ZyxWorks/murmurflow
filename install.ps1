@@ -1,6 +1,6 @@
 # MurmurFlow - one-command install for a Windows PC with nothing on it.
 #
-#   irm https://raw.githubusercontent.com/hannesreinsch/murmurflow/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex
 #
 # The Windows twin of install.sh, and it does the same four things: get the two binaries, get the
 # package, download a model, register the listener at logon. It differs in exactly one place, and
@@ -17,7 +17,13 @@ $ErrorActionPreference = "Stop"
 function Say($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Die($msg) { Write-Host "!!  $msg" -ForegroundColor Red; exit 1 }
 
-$Source = if ($env:MURMURFLOW_SOURCE) { $env:MURMURFLOW_SOURCE } else { "git+https://github.com/hannesreinsch/murmurflow" }
+# `$ErrorActionPreference = "Stop"` governs PowerShell's OWN errors and says nothing about the exit
+# code of a native .exe. Without checking it, a network drop halfway through the 1.6 GB model
+# download still ends in a cheerful "Done." - install.sh gets this right, because `set -eu` aborts
+# on an external command by itself.
+function Check($what) { if ($LASTEXITCODE -ne 0) { Die "$what failed (exit $LASTEXITCODE)." } }
+
+$Source = if ($env:MURMURFLOW_SOURCE) { $env:MURMURFLOW_SOURCE } else { "git+https://github.com/ZyxWorks/murmurflow" }
 $BinDir = Join-Path $env:LOCALAPPDATA "MurmurFlow\bin"
 
 # --- 1. winget, which is how ffmpeg and uv arrive -----------------------------------------------
@@ -34,6 +40,15 @@ winget install --id astral-sh.uv --source winget --accept-package-agreements --a
 # winget puts new commands on the PATH of the NEXT shell only. Without this, every later step in
 # this same script cannot find what the step above it just installed.
 $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+
+# These two are checked by OUTCOME rather than by exit code, deliberately: winget returns a
+# non-zero code for "already installed", so a re-run of this script would abort on a machine where
+# nothing is wrong. What matters is whether the command is there afterwards.
+foreach ($tool in "ffmpeg", "uv") {
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+        Die "$tool is still missing after winget. Install it by hand, then re-run this."
+    }
+}
 
 # --- 2. whisper.cpp, which has no Windows package ------------------------------------------------
 # The plain x64 build, deliberately: `whisper-blas-bin` and the two `cublas` builds are faster on
@@ -64,6 +79,7 @@ if (-not (Get-Command whisper-server -ErrorAction SilentlyContinue)) {
 # --- 3. MurmurFlow itself ------------------------------------------------------------------------
 Say "Installing murmurflow"
 uv tool install --force --python 3.13 $Source
+Check "uv tool install"
 uv tool update-shell 2>&1 | Out-Null
 
 $mf = (Get-Command murmurflow -ErrorAction SilentlyContinue)
@@ -73,9 +89,11 @@ if (-not (Test-Path $mf)) { Die "murmurflow installed but could not be found. Op
 # --- 4. The model, then the listener --------------------------------------------------------------
 Say "Downloading the transcription model (~1.6 GB, once)"
 & $mf setup
+Check "murmurflow setup (the model download)"
 
 Say "Registering the listener to start at logon"
 & $mf install
+Check "murmurflow install"
 
 Write-Host ""
 Say "Done. Open a NEW terminal and run: murmurflow doctor"

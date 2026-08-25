@@ -1,30 +1,32 @@
 [project]
 name = "murmurflow"
 version = "0.1.0"
-description = "Press-to-talk dictation for macOS that never leaves your machine. A free, local alternative to cloud dictation apps."
+description = "Press-to-talk dictation for macOS and Windows that never leaves your machine. A free, local alternative to cloud dictation apps."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Hannes Reinsch" }]
 requires-python = ">=3.11"
-keywords = ["dictation", "speech-to-text", "whisper", "macos", "voice", "local", "privacy"]
+keywords = ["dictation", "speech-to-text", "whisper", "macos", "windows", "voice", "local", "privacy"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]
 
 # No runtime dependencies, and that is a feature rather than an accident: everything here is the
-# Python standard library talking to two Homebrew binaries (ffmpeg, whisper-cpp) and to macOS
-# itself through ctypes. Nothing to break on a Python upgrade, nothing to audit, no wheel to trust.
+# Python standard library talking to two binaries (ffmpeg, whisper-cpp) and to the OS itself
+# through ctypes. Nothing to break on a Python upgrade, nothing to audit, no wheel to trust.
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/hannesreinsch/murmurflow"
-Issues = "https://github.com/hannesreinsch/murmurflow/issues"
+Homepage = "https://github.com/ZyxWorks/murmurflow"
+Issues = "https://github.com/ZyxWorks/murmurflow/issues"
 
 [project.scripts]
 murmurflow = "murmurflow.cli:main"

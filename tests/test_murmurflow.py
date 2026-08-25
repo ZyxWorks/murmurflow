@@ -716,6 +716,37 @@ def test_dshow_devices_are_read_out_of_what_ffmpeg_actually_prints(monkeypatch):
     assert windows.default_input() == "Mikrofon (Realtek(R) Audio)"
 
 
+def test_every_windows_call_that_returns_a_pointer_says_so():
+    # ctypes guesses a 32-bit int for any undeclared return. On 64-bit Windows that cuts the top
+    # half off a HANDLE, and the truncated value goes into `ctypes.memmove` — a crash on the first
+    # paste. The real DLLs are not here, so the declaration is checked against a stand-in.
+    import ctypes
+    import types
+
+    from murmurflow.platforms import windows
+
+    class FakeDLL:
+        def __init__(self):
+            self._calls = {}
+
+        def __getattr__(self, name):
+            return self._calls.setdefault(name, types.SimpleNamespace(restype=ctypes.c_int))
+
+    user32, kernel32 = FakeDLL(), FakeDLL()
+    windows._declare_signatures(user32, kernel32)
+    for name in windows._POINTER_RETURNS["user32"]:
+        assert getattr(user32, name).restype is ctypes.c_void_p
+    for name in windows._POINTER_RETURNS["kernel32"]:
+        assert getattr(kernel32, name).restype is ctypes.c_void_p
+    assert user32.GetAsyncKeyState.restype is ctypes.c_short
+    # And every pointer-returning call the module actually makes is on the list, or the next one
+    # added is broken in exactly the way this test exists to catch.
+    source = (Path(windows.__file__)).read_text()
+    for name in ("GlobalAlloc", "GlobalLock", "GlobalFree", "GetClipboardData", "SetClipboardData"):
+        assert name in windows._POINTER_RETURNS["kernel32"] + windows._POINTER_RETURNS["user32"]
+        assert f".{name}(" in source  # still called; drop it from the list when it is not
+
+
 def test_the_trigger_vocabulary_is_one_vocabulary_on_both_platforms():
     from murmurflow import hotkey
     from murmurflow.platforms import macos, windows

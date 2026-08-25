@@ -49,6 +49,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from .. import config
 
@@ -61,6 +62,31 @@ NAME = "Windows"
 _windows = sys.platform.startswith("win")
 _user32 = ctypes.WinDLL("user32", use_last_error=True) if _windows else None  # type: ignore[attr-defined]
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True) if _windows else None  # type: ignore[attr-defined]
+
+#: Calls that hand back a POINTER or a HANDLE. ctypes cannot guess a return type and its guess is a
+#: 32-bit ``int``, so on 64-bit Windows — every Windows this ships to — the top half of the address
+#: is cut off before Python ever sees it. The truncated value then goes straight into
+#: ``ctypes.memmove`` in :func:`clipboard_set`: a crash on the first paste, and a clipboard restore
+#: that fails without saying so. macos.py declares a restype for every pointer-returning call it
+#: makes; this file declared none, which is why the whole paste path on Windows was broken.
+_POINTER_RETURNS = {
+    "kernel32": ("GlobalAlloc", "GlobalLock", "GlobalFree"),
+    "user32": ("GetClipboardData", "SetClipboardData"),
+}
+
+
+def _declare_signatures(user32: Any, kernel32: Any) -> None:
+    """Give ctypes the return types it cannot guess. Called once, at import, on Windows only."""
+    for lib, key in ((user32, "user32"), (kernel32, "kernel32")):
+        for name in _POINTER_RETURNS[key]:
+            getattr(lib, name).restype = ctypes.c_void_p
+    # A SHORT, not an int. Only bit 0x8000 is ever read, so this one was never wrong in practice —
+    # it is declared so the file has no undeclared return left to be wrong about later.
+    user32.GetAsyncKeyState.restype = ctypes.c_short
+
+
+if _user32 is not None and _kernel32 is not None:
+    _declare_signatures(_user32, _kernel32)
 
 # --- capture --------------------------------------------------------------------------------
 

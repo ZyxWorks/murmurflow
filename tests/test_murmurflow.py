@@ -1179,6 +1179,22 @@ def test_a_machine_with_no_warm_server_is_never_bounced(monkeypatch):
     assert stops == []
 
 
+def test_turning_keepaudio_off_deletes_the_clip_it_kept(monkeypatch):
+    # "until you turn it off" is the README's promise. Nothing else deletes this file - the orphan
+    # reaper only globs `dictate-*.wav` - so if the switch-off does not, the recording is forever.
+    monkeypatch.setattr(cli.service, "restart", lambda: False)
+    assert cli.main(["config", "set", "keepAudio", "true"]) == 0
+    kept = dictate.kept_audio()
+    kept.write_bytes(b"RIFF")
+    assert cli.main(["config", "set", "keepAudio", "false"]) == 0
+    assert not kept.exists()
+    # And unsetting it is the same "off", so it deletes too - and a missing file is not an error.
+    kept.write_bytes(b"RIFF")
+    assert cli.main(["config", "set", "keepAudio"]) == 0
+    assert not kept.exists()
+    assert cli.main(["config", "set", "keepAudio", "false"]) == 0
+
+
 def test_the_daemon_log_lives_with_the_rest_of_the_home(tmp_path, monkeypatch):
     """Both service backends redirect the daemon here, and both used to spell it out themselves —
     which split the log away from the home the moment `MURMURFLOW_HOME` was set."""

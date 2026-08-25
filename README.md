@@ -378,8 +378,8 @@ Every clip the daemon handles is logged — how long you held the key, how much 
 landed, the peak level, the transcribe time, how many characters came back and the app the paste
 went to. **Not what you said.** That file is `~/.murmurflow/listen.log`, `murmurflow doctor` prints
 the path, and nothing rotates it — which is exactly why your sentences are not in it. Debugging one
-bad dictation and want them? `keepAudio` keeps the clip and the transcript together, for as long as
-you leave it on.
+bad dictation and want them? `keepAudio` keeps the clip and the transcript together for as long as
+you leave it on, and deletes the clip when you turn it off.
 
 `config set` refuses a setting it does not recognise and a value that cannot work — a trigger name
 this machine cannot poll, a cue that is not a preset, a model path that is not there. All of those
@@ -401,7 +401,9 @@ indistinguishable. One run of each separates them.
   your cursor, and your previous clipboard contents are put back — all of them, not just text. Copy
   a screenshot while a dictation is in flight and the screenshot is still on your clipboard
   afterwards. The one exception is `keepAudio`, which you turn on yourself to debug a bad
-  dictation, and which then keeps that clip and its transcript until you turn it off.
+  dictation. It keeps that clip until you turn it off — switching it off deletes it. The transcript
+  it also writes into the daemon log is a line in a log, and turning the setting off does not go
+  back and remove it; delete the log yourself if you want it gone.
 - If a paste **cannot** land — Secure Input is on, or Accessibility was never granted — your words
   go to the clipboard so you can paste them by hand, and that replaces what was on it. The daemon
   says so rather than leaving you to find out: there is no way to put the old contents back once

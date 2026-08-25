@@ -675,6 +675,11 @@ def _config(action: str = "", key: str = "", value: str = "") -> int:
         # server with nothing left to restart it would trade a stale model for a slow one.
         bounce = key in _SERVER_SETTINGS and service.running() and dictate.stop_server()
         config.set_value(key, parsed)
+        # "until you turn it off" is what the README promises, and nothing else deletes this file —
+        # `reap_orphans` only globs `dictate-*.wav`. Without this the kept clip outlives the opt-out
+        # forever, which is the one privacy promise in the product that was not being kept.
+        if key == "keepAudio" and not parsed:
+            dictate.kept_audio().unlink(missing_ok=True)
         _out(f"{key} = {value or '(unset)'}")
         note = _warn(key, parsed) if parsed is not None else ""
         if note:

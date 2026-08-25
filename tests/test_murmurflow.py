@@ -982,9 +982,15 @@ def test_the_peak_is_the_loudest_sample_in_either_direction(tmp_path):
     # `max(max(s), -min(s))` replaced a per-sample Python loop on the hot path. It has to agree
     # with the obvious version everywhere, INCLUDING on the negative full-scale sample that has no
     # positive twin: -32768 negated does not fit in the sample type it came from.
-    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(0.0, abs=0.01)
-    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(0.0, abs=0.01)
-    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(-40, abs=0.5)
+    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(
+        0.0, abs=0.01
+    )
+    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(
+        0.0, abs=0.01
+    )
+    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(
+        -40, abs=0.5
+    )
     assert dictate.peak_dbfs(_wav(tmp_path / "silent.wav", [0, 0, 0])) == float("-inf")
     assert dictate.peak_dbfs(tmp_path / "not-a-file.wav") == 0.0  # no opinion, never a crash
 
@@ -1055,7 +1061,10 @@ def test_a_wedged_server_is_not_a_healthy_one(monkeypatch):
 
     def _wedged(*_a, **_k):
         raise urllib.error.HTTPError(
-            "http://127.0.0.1/inference", 500, "Internal Server Error", {},  # type: ignore[arg-type]
+            "http://127.0.0.1/inference",
+            500,
+            "Internal Server Error",
+            {},  # type: ignore[arg-type]
             io.BytesIO(b'{"error":"FFmpeg conversion failed."}'),
         )
 
@@ -1115,10 +1124,24 @@ def test_one_cold_clip_is_not_enough_to_bounce_a_loading_server(monkeypatch):
 def test_a_machine_with_no_warm_server_is_never_bounced(monkeypatch):
     # Cold on every clip is the DESIGN when whisper-server was never there. Restarting a server
     # that does not exist would hammer a missing binary after every sentence.
-    _starts, stops = _drive_listener(
-        monkeypatch, [_clip(False)] * 4, warm_starts=False
-    )
+    _starts, stops = _drive_listener(monkeypatch, [_clip(False)] * 4, warm_starts=False)
     assert stops == []
+
+
+def test_turning_keepaudio_off_deletes_the_clip_it_kept(monkeypatch):
+    # "until you turn it off" is the README's promise. Nothing else deletes this file - the orphan
+    # reaper only globs `dictate-*.wav` - so if the switch-off does not, the recording is forever.
+    monkeypatch.setattr(cli.service, "restart", lambda: False)
+    assert cli.main(["config", "set", "keepAudio", "true"]) == 0
+    kept = dictate.kept_audio()
+    kept.write_bytes(b"RIFF")
+    assert cli.main(["config", "set", "keepAudio", "false"]) == 0
+    assert not kept.exists()
+    # And unsetting it is the same "off", so it deletes too - and a missing file is not an error.
+    kept.write_bytes(b"RIFF")
+    assert cli.main(["config", "set", "keepAudio"]) == 0
+    assert not kept.exists()
+    assert cli.main(["config", "set", "keepAudio", "false"]) == 0
 
 
 def test_the_daemon_log_lives_with_the_rest_of_the_home(tmp_path, monkeypatch):

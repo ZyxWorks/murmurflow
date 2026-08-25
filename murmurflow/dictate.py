@@ -172,6 +172,16 @@ def _scratch_dir() -> Path:
     return root
 
 
+def kept_audio() -> Path:
+    """The one clip ``keepAudio`` holds on to. Named here so the switch-off can find it again.
+
+    ``reap_orphans`` only globs ``dictate-*.wav``, so nothing else in this module will ever delete
+    it — turning the setting off is the only thing that can, and that is the promise the README
+    makes.
+    """
+    return _scratch_dir() / "last.wav"
+
+
 # --- microphone -------------------------------------------------------------------------------
 
 
@@ -1569,7 +1579,7 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
         # default: your voice does not outlive its transcription unless you ask.
         if config.flag("keepAudio", False, cfg=_cfg()):
             with contextlib.suppress(OSError):
-                shutil.copyfile(wav, _scratch_dir() / "last.wav")
+                shutil.copyfile(wav, kept_audio())
         wav.unlink(missing_ok=True)
 
     # BOTH LEVEL CHECKS RUN BEFORE THE TRANSCRIBE, and that ordering is the fix rather than a

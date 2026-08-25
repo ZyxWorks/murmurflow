@@ -436,7 +436,7 @@ MIT. See [LICENSE](LICENSE).
 
 MurmurFlow is one of the tools **[ZyxWorks](https://zyxworks.com)**, a product studio and forward
 deployed engineering practice, built for itself and gave away. It was extracted from
-[Zyx](https://zyxworks.com#zyx), the runtime the studio runs on, which is also why a Mac running both
+[Zyx](https://zyxworks.com#zyx), the OS the studio runs on, which is also why a Mac running both
 hears every cue twice until you turn one off.
 
 The other one is **[Agent Office](https://zyxworks.github.io/agent-office/)**: several coding

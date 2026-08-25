@@ -101,14 +101,15 @@ DEFAULT_TAP_TRIGGER = "left_control"
 #: Names for the same physical keys on a keyboard that is not Apple's. The config vocabulary should
 #: not have to be relearned to move this to another OS, and `alt` is what the key is called
 #: everywhere else. Aliases only — the canonical names above are what gets stored and printed.
+#:
+#: Substituted WORD BY WORD, not whole-name. A hand-written list of whole names is the same list
+#: twice over — every alias times every side and every combo it appears in — and it shipped with
+#: holes: `left_ctrl`, `ctrl_win`, `win_alt` and `ctrl_shift` were all rejected while their
+#: canonical twins worked, against a README that promises the two spellings are interchangeable.
+#: No canonical trigger name contains any of these words, so the substitution cannot collide.
 TRIGGER_ALIASES: dict[str, str] = {
     "ctrl": "control",
     "alt": "option",
-    "left_alt": "left_option",
-    "right_alt": "right_option",
-    "control_alt": "control_option",
-    "ctrl_alt": "control_option",
-    "ctrl_option": "control_option",
     "win": "command",
     "super": "command",
     "meta": "command",
@@ -118,7 +119,7 @@ TRIGGER_ALIASES: dict[str, str] = {
 def canonical_trigger(name: str) -> str:
     """One spelling per key, so `ctrl_alt` and `control_option` cannot behave differently."""
     key = str(name).strip().lower().replace("-", "_").replace("+", "_")
-    return TRIGGER_ALIASES.get(key, key)
+    return "_".join(TRIGGER_ALIASES.get(word, word) for word in key.split("_"))
 
 
 # DEAD TIME IS LOST WORDS. The recorder now starts on key-DOWN, immediately, and the chord guard

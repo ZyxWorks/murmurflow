@@ -1931,23 +1931,6 @@ def _note_cue(kind: str, sound: str) -> None:
         pass
 
 
-def recent_cues(limit: int = 20) -> list[dict[str, str]]:
-    """The last cues this runtime played, oldest first. ``[]`` when it has played none."""
-    try:
-        lines = cue_log_path().read_text("utf-8").splitlines()
-    except OSError:
-        return []
-    rows: list[dict[str, str]] = []
-    for line in lines[-max(1, limit) :]:
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(row, dict):
-            rows.append({str(k): str(v) for k, v in row.items()})
-    return rows
-
-
 def cues_muted() -> bool:
     """True when ``cue`` is off — no cue sound is made at all.
 

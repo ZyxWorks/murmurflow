@@ -58,10 +58,6 @@ def seconds_since_input() -> float:
     return float("inf")
 
 
-def flags() -> int:
-    return 0
-
-
 def dictation_conflict(trigger: str) -> bool:
     return False
 

@@ -35,9 +35,10 @@ tools, and on Windows no Administrator either. It installs what is missing, down
 model (~1.6 GB, once), and turns dictation on for every login. On macOS it also opens the one
 permission switch the OS will not let a script flip for you; Windows has no such switch.
 
-Then hold **Control+Option** (Windows: **Control+Alt**) together, say something, let go. That's the
-whole product. (Prefer hands-free? `murmurflow config set doubleTap true` — then it is a double-tap
-of **Control**, the way macOS does it.)
+Then double-tap **Control**, say something, and tap it once more to stop. That's the whole product,
+and it is what macOS puts its own dictation on. (Rather hold a key while you talk?
+`murmurflow config set doubleTap false` — then it is **Control+Option** held together, Windows
+**Control+Alt**.)
 
 ### Why bother
 
@@ -220,7 +221,7 @@ privacy policy that can change. The local pieces to do it properly are all right
 [whisper.cpp](https://github.com/ggerganov/whisper.cpp) transcribes better than most cloud APIs, and
 macOS will tell you which keys are held and let you paste into the frontmost app.
 
-So this is roughly 2,000 lines of standard library gluing those together.
+So this is a few thousand lines of standard library gluing those together.
 
 ### Speed, honestly
 
@@ -328,6 +329,8 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `polishCommand` | see below |
 | `stripFillers` | `true` = delete `um`, `you know`, and a leading `hey`/`so`/`well`. **Off** — you get verbatim |
 | `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |
+| `model` | path to a ggml model file, overriding the best one found in `~/.murmurflow/models/` |
+| `port` | loopback port for the warm whisper-server. Default `8479` |
 | `keepAudio` | keep the evidence for one bad transcription: the last clip, and the transcript in the log. Off, so your sentences are not written down |
 
 **Right Option is deliberately not offered as a default.** On a German layout it's AltGr — the dead

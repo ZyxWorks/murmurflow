@@ -140,8 +140,9 @@ CHORD_GRACE = 0.18
 
 # DOUBLE-TAP (hands-free) mode. Two taps of the trigger within this window start recording; one tap
 # stops it. This is what macOS's own dictation does, and on a heavily-chorded key like Control it is
-# easier on the hand than holding. Hold stays the default because it is faster for one short
-# sentence — you are already holding the key you pressed.
+# easier on the hand than holding — which is why this, and not hold, is the default. Hold is the
+# opt-out (`config set doubleTap false`), and it is faster for one short sentence: you are already
+# holding the key you pressed.
 #
 # This used to claim a chord "can NEVER look like a double-tap". It can, and does: ⌃C then ⌃C in a
 # terminal is two short Control presses inside the window. The guard is in `listen_double_tap` — a
@@ -218,11 +219,6 @@ def unavailable_reason() -> str:
     return platforms.keys_unavailable()
 
 
-def flags() -> int:
-    """The raw modifier-state word currently held, for ``murmurflow keytest``'s live readout."""
-    return platforms.flags()
-
-
 def listen(
     on_press: Callable[[], None],
     on_release: Callable[[], None],
@@ -289,7 +285,9 @@ def listen(
                 aborted = False
                 continue  # a shortcut: already discarded, there is nothing to finish
             if elapsed < min_hold:
-                time.sleep(min_hold)  # let the mic collect something before we cut it
+                # The REMAINDER, not the floor again: a press of `min_hold - 1ms` used to wait a
+                # further full floor, so the shortest holds took nearly twice as long to answer.
+                time.sleep(min_hold - elapsed)  # let the mic collect something before we cut it
             _safe(on_release)
         time.sleep(interval)
 

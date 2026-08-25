@@ -392,6 +392,39 @@ def test_the_double_tap_window_is_measured_press_to_press():
 # --- the gesture picks the key -------------------------------------------------------------------
 
 
+def test_the_hold_floor_waits_only_the_remainder_of_itself(monkeypatch):
+    # `if elapsed < min_hold: sleep(min_hold)` waited a whole further floor on top of the press
+    # that had nearly finished it - so the SHORTEST holds, the ones already fighting for audio,
+    # took nearly twice the intended floor to answer. The wait is the remainder.
+    import types
+
+    from murmurflow import hotkey
+
+    clock, sleeps = [0.0], []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(
+        hotkey, "time", types.SimpleNamespace(monotonic=lambda: clock[0], sleep=fake_sleep)
+    )
+    monkeypatch.setattr(hotkey, "seconds_since_keydown", lambda: 99.0)  # never a chord
+    down = iter([True, False, False])
+    monkeypatch.setattr(hotkey, "is_trigger_down", lambda _t: next(down, False))
+    released = []
+    hotkey.listen(
+        lambda: None,
+        lambda: released.append(clock[0]),
+        min_hold=0.15,
+        poll_hz=100,  # one poll = 0.01s, so the press lasts 0.01s
+        should_stop=lambda: len(released) > 0,
+    )
+    assert released, "the release never fired"
+    floor = [s for s in sleeps if s > 0.01]
+    assert floor == [pytest.approx(0.14)], f"waited {floor}, not the 0.14 remaining of the floor"
+
+
 def test_hold_defaults_to_a_combo_and_double_tap_to_one_ordinary_key():
     # Two gestures, two problems. A hold starts on the same key-down a shortcut does, so it needs a
     # combo. A double-tap does not, so forcing it onto two keys at once bought nothing and cost the
@@ -982,9 +1015,15 @@ def test_the_peak_is_the_loudest_sample_in_either_direction(tmp_path):
     # `max(max(s), -min(s))` replaced a per-sample Python loop on the hot path. It has to agree
     # with the obvious version everywhere, INCLUDING on the negative full-scale sample that has no
     # positive twin: -32768 negated does not fit in the sample type it came from.
-    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(0.0, abs=0.01)
-    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(0.0, abs=0.01)
-    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(-40, abs=0.5)
+    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(
+        0.0, abs=0.01
+    )
+    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(
+        0.0, abs=0.01
+    )
+    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(
+        -40, abs=0.5
+    )
     assert dictate.peak_dbfs(_wav(tmp_path / "silent.wav", [0, 0, 0])) == float("-inf")
     assert dictate.peak_dbfs(tmp_path / "not-a-file.wav") == 0.0  # no opinion, never a crash
 
@@ -1055,7 +1094,10 @@ def test_a_wedged_server_is_not_a_healthy_one(monkeypatch):
 
     def _wedged(*_a, **_k):
         raise urllib.error.HTTPError(
-            "http://127.0.0.1/inference", 500, "Internal Server Error", {},  # type: ignore[arg-type]
+            "http://127.0.0.1/inference",
+            500,
+            "Internal Server Error",
+            {},  # type: ignore[arg-type]
             io.BytesIO(b'{"error":"FFmpeg conversion failed."}'),
         )
 
@@ -1115,9 +1157,7 @@ def test_one_cold_clip_is_not_enough_to_bounce_a_loading_server(monkeypatch):
 def test_a_machine_with_no_warm_server_is_never_bounced(monkeypatch):
     # Cold on every clip is the DESIGN when whisper-server was never there. Restarting a server
     # that does not exist would hammer a missing binary after every sentence.
-    _starts, stops = _drive_listener(
-        monkeypatch, [_clip(False)] * 4, warm_starts=False
-    )
+    _starts, stops = _drive_listener(monkeypatch, [_clip(False)] * 4, warm_starts=False)
     assert stops == []
 
 

@@ -64,8 +64,6 @@ trigger_names = impl.trigger_names
 is_down = impl.is_down
 #: Seconds since the last key press or mouse click ANYWHERE — the chord guard's whole input.
 seconds_since_input = impl.seconds_since_input
-#: A modifier-state word, for ``murmurflow keytest``'s live readout and nothing else.
-flags = impl.flags
 #: True if the OS's OWN dictation would fire on the same gesture as this trigger.
 dictation_conflict = impl.dictation_conflict
 

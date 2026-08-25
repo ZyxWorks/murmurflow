@@ -437,6 +437,22 @@ def test_the_windows_spelling_of_a_key_is_the_same_key():
     assert hotkey.canonical_trigger("ctrl_alt") == "control_option"
     assert hotkey.canonical_trigger("left_alt") == "left_option"
     assert hotkey.canonical_trigger("CONTROL-OPTION") == "control_option"
+    # The README promises ctrl/alt/win work EVERYWHERE control/option/command do. A hand-written
+    # list of whole names kept missing sides and combos; the matrix is the promise, written down.
+    for windows_name, canonical in {
+        "left_ctrl": "left_control",
+        "right_ctrl": "right_control",
+        "right_alt": "right_option",
+        "left_win": "left_command",
+        "right_win": "right_command",
+        "ctrl_win": "control_command",
+        "win_alt": "command_option",
+        "ctrl_shift": "control_shift",
+        "super": "command",
+        "meta_alt": "command_option",
+    }.items():
+        assert hotkey.canonical_trigger(windows_name) == canonical
+        assert canonical in hotkey.trigger_names()
     config.set_value("trigger", "ctrl_alt")
     assert dictate.trigger_key() == "control_option"  # stored loosely, resolved to one spelling
 
@@ -899,7 +915,8 @@ def test_a_misspelt_setting_is_refused_and_the_real_one_is_named(capsys):
 
 
 def test_a_trigger_this_machine_cannot_poll_is_never_bound(capsys):
-    assert cli.main(["config", "set", "trigger", "left_ctrl"]) == 2
+    # `left_ctrl` used to stand here, and it was the alias hole rather than an unpollable key.
+    assert cli.main(["config", "set", "trigger", "capslock"]) == 2
     assert "left_control" in capsys.readouterr().out  # the list of what does work
     assert "trigger" not in config.load()
 
@@ -916,6 +933,9 @@ def test_a_trigger_is_stored_under_one_spelling_however_it_was_typed(monkeypatch
         ("cue", "pebbel"),  # a near miss silently plays a DIFFERENT sound
         ("doubleTap", "yep"),  # anything but true/false reads as false
         ("quietFloor", "quiet"),  # the gate would fall back to -30 and never say so
+        ("quietFloor", "30"),  # peak dBFS is never above 0: a positive floor discards EVERY clip
+        ("quietFloor", "0"),  # and zero is the same gate, only harder to spot
+        ("languages", '["d3"]'),  # two characters, but not a language: every clip thrown away
         ("port", "99999"),
         ("language", "deutsch"),  # `de` is the code; a name pins nothing
         ("languages", '["de", "klingon"]'),  # a clip in a language not on the list is DISCARDED
@@ -982,9 +1002,15 @@ def test_the_peak_is_the_loudest_sample_in_either_direction(tmp_path):
     # `max(max(s), -min(s))` replaced a per-sample Python loop on the hot path. It has to agree
     # with the obvious version everywhere, INCLUDING on the negative full-scale sample that has no
     # positive twin: -32768 negated does not fit in the sample type it came from.
-    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(0.0, abs=0.01)
-    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(0.0, abs=0.01)
-    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(-40, abs=0.5)
+    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(
+        0.0, abs=0.01
+    )
+    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(
+        0.0, abs=0.01
+    )
+    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(
+        -40, abs=0.5
+    )
     assert dictate.peak_dbfs(_wav(tmp_path / "silent.wav", [0, 0, 0])) == float("-inf")
     assert dictate.peak_dbfs(tmp_path / "not-a-file.wav") == 0.0  # no opinion, never a crash
 
@@ -1055,7 +1081,10 @@ def test_a_wedged_server_is_not_a_healthy_one(monkeypatch):
 
     def _wedged(*_a, **_k):
         raise urllib.error.HTTPError(
-            "http://127.0.0.1/inference", 500, "Internal Server Error", {},  # type: ignore[arg-type]
+            "http://127.0.0.1/inference",
+            500,
+            "Internal Server Error",
+            {},  # type: ignore[arg-type]
             io.BytesIO(b'{"error":"FFmpeg conversion failed."}'),
         )
 
@@ -1115,9 +1144,7 @@ def test_one_cold_clip_is_not_enough_to_bounce_a_loading_server(monkeypatch):
 def test_a_machine_with_no_warm_server_is_never_bounced(monkeypatch):
     # Cold on every clip is the DESIGN when whisper-server was never there. Restarting a server
     # that does not exist would hammer a missing binary after every sentence.
-    _starts, stops = _drive_listener(
-        monkeypatch, [_clip(False)] * 4, warm_starts=False
-    )
+    _starts, stops = _drive_listener(monkeypatch, [_clip(False)] * 4, warm_starts=False)
     assert stops == []
 
 

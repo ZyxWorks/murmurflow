@@ -383,7 +383,7 @@ _VERBS = (
         "config set trigger control_option",
         "change the key: control_option · command_option · left_control · f13",
     ),
-    ("config set doubleTap true", "tap twice to start and once to stop, instead of holding"),
+    ("config set doubleTap false", "hold the key instead of tapping it twice"),
     ("config set language en", "pin the language — worth ~0.7s a sentence"),
     ("config set stripFillers true", "delete 'um' and a leading 'hey' — off, so you get verbatim"),
     ("config", "every setting, with what it does"),
@@ -569,7 +569,9 @@ def _reject(key: str, value: object) -> str:
         if not isinstance(value, bool):
             return f"`{key}` is true or false, not `{text}`."
     elif key == "quietFloor":
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        # The SIGN is the whole check. Peak dBFS is never above zero, so a positive floor is a gate
+        # nothing can pass: every clip is discarded, forever, and silently.
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value >= 0:
             return f"`{key}` is a peak level in dBFS below zero, e.g. -30 or -40, not `{text}`."
     elif key == "port":
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
@@ -583,7 +585,11 @@ def _reject(key: str, value: object) -> str:
             )
     elif key == "languages":
         entries = value if isinstance(value, list) else text.split(",")
-        bad = [str(v).strip() for v in entries if len(dictate.language_code(str(v))) != 2]
+        bad = [
+            str(v).strip()
+            for v in entries
+            if not (len(code := dictate.language_code(str(v))) == 2 and code.isalpha())
+        ]
         if bad:
             return (
                 f"`{', '.join(bad)}` is not a language code, and a clip in a language that is not "

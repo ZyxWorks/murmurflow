@@ -1,7 +1,7 @@
 #!/bin/sh
 # MurmurFlow — one-command install for a Mac with nothing on it.
 #
-#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/hannesreinsch/murmurflow/main/install.sh)"
+#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.sh)"
 #
 # That invocation, rather than `curl | sh`, is deliberate: `curl | sh` hands the pipe to the
 # script's stdin, and both Homebrew's installer and macOS's `sudo` need the real terminal to ask
@@ -16,7 +16,7 @@ die() { printf '\n\033[31m[!] %s\033[0m\n' "$1" >&2; exit 1; }
 
 # Where the package comes from. Overridable so the installer itself can be tested against a local
 # checkout before it is trusted against the internet.
-SOURCE="${MURMURFLOW_SOURCE:-git+https://github.com/hannesreinsch/murmurflow}"
+SOURCE="${MURMURFLOW_SOURCE:-git+https://github.com/ZyxWorks/murmurflow}"
 
 [ "$(uname -s)" = "Darwin" ] || die "MurmurFlow is macOS-only (this is $(uname -s))."
 

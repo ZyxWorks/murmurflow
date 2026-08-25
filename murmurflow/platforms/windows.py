@@ -306,15 +306,6 @@ def seconds_since_input() -> float:
     return time.monotonic() - _last_other_input
 
 
-def flags() -> int:
-    """A modifier-state word for ``murmurflow keytest``, in the same shape the Mac's readout has."""
-    state = 0
-    for bit, code in enumerate((VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN)):
-        if _held(code):
-            state |= 1 << bit
-    return state
-
-
 # --- inject ---------------------------------------------------------------------------------
 
 _CF_UNICODETEXT = 13

@@ -392,6 +392,39 @@ def test_the_double_tap_window_is_measured_press_to_press():
 # --- the gesture picks the key -------------------------------------------------------------------
 
 
+def test_the_hold_floor_waits_only_the_remainder_of_itself(monkeypatch):
+    # `if elapsed < min_hold: sleep(min_hold)` waited a whole further floor on top of the press
+    # that had nearly finished it - so the SHORTEST holds, the ones already fighting for audio,
+    # took nearly twice the intended floor to answer. The wait is the remainder.
+    import types
+
+    from murmurflow import hotkey
+
+    clock, sleeps = [0.0], []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(
+        hotkey, "time", types.SimpleNamespace(monotonic=lambda: clock[0], sleep=fake_sleep)
+    )
+    monkeypatch.setattr(hotkey, "seconds_since_keydown", lambda: 99.0)  # never a chord
+    down = iter([True, False, False])
+    monkeypatch.setattr(hotkey, "is_trigger_down", lambda _t: next(down, False))
+    released = []
+    hotkey.listen(
+        lambda: None,
+        lambda: released.append(clock[0]),
+        min_hold=0.15,
+        poll_hz=100,  # one poll = 0.01s, so the press lasts 0.01s
+        should_stop=lambda: len(released) > 0,
+    )
+    assert released, "the release never fired"
+    floor = [s for s in sleeps if s > 0.01]
+    assert floor == [pytest.approx(0.14)], f"waited {floor}, not the 0.14 remaining of the floor"
+
+
 def test_hold_defaults_to_a_combo_and_double_tap_to_one_ordinary_key():
     # Two gestures, two problems. A hold starts on the same key-down a shortcut does, so it needs a
     # combo. A double-tap does not, so forcing it onto two keys at once bought nothing and cost the

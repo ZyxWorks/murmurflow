@@ -247,14 +247,6 @@ def seconds_since_input() -> float:
     )
 
 
-def flags() -> int:
-    """The raw modifier-flag word, for ``murmurflow keytest``'s live readout."""
-    try:
-        return int(_load().CGEventSourceFlagsState(_HID_STATE))
-    except _Unavailable:
-        return 0
-
-
 # --- inject ---------------------------------------------------------------------------------
 
 

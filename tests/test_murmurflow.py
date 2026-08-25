@@ -700,6 +700,37 @@ def test_dshow_devices_are_read_out_of_what_ffmpeg_actually_prints(monkeypatch):
     assert windows.default_input() == "Mikrofon (Realtek(R) Audio)"
 
 
+def test_every_windows_call_that_returns_a_pointer_says_so():
+    # ctypes guesses a 32-bit int for any undeclared return. On 64-bit Windows that cuts the top
+    # half off a HANDLE, and the truncated value goes into `ctypes.memmove` — a crash on the first
+    # paste. The real DLLs are not here, so the declaration is checked against a stand-in.
+    import ctypes
+    import types
+
+    from murmurflow.platforms import windows
+
+    class FakeDLL:
+        def __init__(self):
+            self._calls = {}
+
+        def __getattr__(self, name):
+            return self._calls.setdefault(name, types.SimpleNamespace(restype=ctypes.c_int))
+
+    user32, kernel32 = FakeDLL(), FakeDLL()
+    windows._declare_signatures(user32, kernel32)
+    for name in windows._POINTER_RETURNS["user32"]:
+        assert getattr(user32, name).restype is ctypes.c_void_p
+    for name in windows._POINTER_RETURNS["kernel32"]:
+        assert getattr(kernel32, name).restype is ctypes.c_void_p
+    assert user32.GetAsyncKeyState.restype is ctypes.c_short
+    # And every pointer-returning call the module actually makes is on the list, or the next one
+    # added is broken in exactly the way this test exists to catch.
+    source = (Path(windows.__file__)).read_text()
+    for name in ("GlobalAlloc", "GlobalLock", "GlobalFree", "GetClipboardData", "SetClipboardData"):
+        assert name in windows._POINTER_RETURNS["kernel32"] + windows._POINTER_RETURNS["user32"]
+        assert f".{name}(" in source  # still called; drop it from the list when it is not
+
+
 def test_the_trigger_vocabulary_is_one_vocabulary_on_both_platforms():
     from murmurflow import hotkey
     from murmurflow.platforms import macos, windows
@@ -982,9 +1013,15 @@ def test_the_peak_is_the_loudest_sample_in_either_direction(tmp_path):
     # `max(max(s), -min(s))` replaced a per-sample Python loop on the hot path. It has to agree
     # with the obvious version everywhere, INCLUDING on the negative full-scale sample that has no
     # positive twin: -32768 negated does not fit in the sample type it came from.
-    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(0.0, abs=0.01)
-    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(0.0, abs=0.01)
-    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(-40, abs=0.5)
+    assert dictate.peak_dbfs(_wav(tmp_path / "loud.wav", [32767, -3, 5])) == pytest.approx(
+        0.0, abs=0.01
+    )
+    assert dictate.peak_dbfs(_wav(tmp_path / "neg.wav", [-32768, 1])) == pytest.approx(
+        0.0, abs=0.01
+    )
+    assert dictate.peak_dbfs(_wav(tmp_path / "quiet.wav", [328, -100])) == pytest.approx(
+        -40, abs=0.5
+    )
     assert dictate.peak_dbfs(_wav(tmp_path / "silent.wav", [0, 0, 0])) == float("-inf")
     assert dictate.peak_dbfs(tmp_path / "not-a-file.wav") == 0.0  # no opinion, never a crash
 
@@ -1055,7 +1092,10 @@ def test_a_wedged_server_is_not_a_healthy_one(monkeypatch):
 
     def _wedged(*_a, **_k):
         raise urllib.error.HTTPError(
-            "http://127.0.0.1/inference", 500, "Internal Server Error", {},  # type: ignore[arg-type]
+            "http://127.0.0.1/inference",
+            500,
+            "Internal Server Error",
+            {},  # type: ignore[arg-type]
             io.BytesIO(b'{"error":"FFmpeg conversion failed."}'),
         )
 
@@ -1115,9 +1155,7 @@ def test_one_cold_clip_is_not_enough_to_bounce_a_loading_server(monkeypatch):
 def test_a_machine_with_no_warm_server_is_never_bounced(monkeypatch):
     # Cold on every clip is the DESIGN when whisper-server was never there. Restarting a server
     # that does not exist would hammer a missing binary after every sentence.
-    _starts, stops = _drive_listener(
-        monkeypatch, [_clip(False)] * 4, warm_starts=False
-    )
+    _starts, stops = _drive_listener(monkeypatch, [_clip(False)] * 4, warm_starts=False)
     assert stops == []
 
 

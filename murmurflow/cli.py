@@ -385,7 +385,7 @@ _VERBS = (
     ),
     ("config set doubleTap false", "hold the key instead of tapping it twice"),
     ("config set language en", "pin the language — worth ~0.7s a sentence"),
-    ("config set stripFillers true", "delete 'um' and a leading 'hey' — off, so you get verbatim"),
+    ("config set stripFillers true", "delete 'um' and 'uh' — off, so you get verbatim"),
     ("config", "every setting, with what it does"),
     ("keytest", "does this Mac see your key, and does it read your gesture the way you think"),
     ("devices", "list microphones (then: config set inputName <part of a name>)"),

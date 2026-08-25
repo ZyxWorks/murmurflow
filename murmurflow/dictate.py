@@ -870,27 +870,36 @@ def transcribe(wav: Path, *, timeout: float = 60.0) -> Heard:
 
 # --- cleanup ----------------------------------------------------------------------------------
 
-# Leading throat-clearing ("so, um, okay so ...") and mid-sentence fillers. Whisper transcribes these
-# faithfully, because they were genuinely said; nobody wants them typed. Deliberately a word list
-# and not a rewrite: the ceiling of a deterministic strip is exactly this, and reaching past it means
-# reaching for a language model (`polishCommand`), which is a choice the user makes, not a default.
-_FILLER_LEAD = re.compile(
-    r"^(?:(?:yo|hey|okay so|ok so|so|well|alright|right|um+|uh+)[,.]?\s+)+", re.IGNORECASE
-)
-_FILLER_WORD = re.compile(
-    r"\b(?:um+|uh+|erm+|hmm+|basically|you know|i mean)\b[,.]?\s*", re.IGNORECASE
-)
+# SOUNDS ONLY, never words. This list used to hold `hey`, `so`, `well`, `right`, `alright`,
+# `you know`, `i mean` and `basically` as well, and every one of them is also an ordinary English
+# word: "Do you know what time it is?" came back as "Do what time it is?", "I mean what I said." as
+# "what I said.", and a leading "hey" was deleted from a real sentence in front of a real user —
+# the incident `tidy` documents below. No syntactic rule separates the two uses. Comma-bounding
+# does not: that "hey" HAD a comma.
+#
+# What is left is the non-lexical sounds, which are never a word in any sentence and so cannot eat
+# one. A missed filler costs the reader one keystroke; a deleted word is invisible until they
+# re-read their own sentence. Anything smarter than this needs a language model, which is
+# `polishCommand` and is the user's choice, not a default.
+#
+# One regex, not two: a leading filler is just a filler at the start of the line, and `\b` with
+# `\s*` already handles both positions.
+#
+# ponytail: `um` is also an ordinary GERMAN word ("um 5 Uhr"), and this list cannot see the clip's
+# language. Germans say "äh"/"ähm" rather than "um", so the entry earns little here and risks the
+# same word-eating in the other direction; gate the list on the clip language if that ever lands.
+_FILLER_WORD = re.compile(r"\b(?:um+|uh+|erm+|hmm+)\b[,.]?\s*", re.IGNORECASE)
 
 
 def strip_fillers(transcript: str) -> str:
-    """Remove spoken filler from a transcript. Removes only — it never rewrites or re-cases.
+    """Remove spoken filler SOUNDS from a transcript. Removes only — never rewrites or re-cases.
 
-    Falls back to the original when the strip would eat the whole line: "so, um, yeah" must not
-    become "". A filler-free transcript passes through byte-identical.
+    Sounds, not words: see :data:`_FILLER_WORD` for why "hey", "so" and "you know" are not on the
+    list and cannot be. Falls back to the original when the strip would eat the whole line:
+    "um, uh" must not become "". A filler-free transcript passes through byte-identical.
     """
     original = transcript.strip()
-    text = _FILLER_LEAD.sub("", original)
-    text = _FILLER_WORD.sub("", text)
+    text = _FILLER_WORD.sub("", original)
     text = " ".join(text.split())
     return text or original
 
@@ -1052,7 +1061,8 @@ def tidy(transcript: str) -> str:
     :func:`polish`, off by default.
 
     **Filler stripping is OFF by default, and that is a correction, not a preference.** It shipped
-    on, and it deleted a leading "hey" — exactly as designed, and still wrong. Somebody dictating
+    on, and it deleted a leading "hey" — exactly as designed, and still wrong. (The design has since
+    been corrected too: "hey" is no longer on the list at all. See :data:`_FILLER_WORD`.) Somebody dictating
     "hey, it seems like our murmurflow is still not working" watched the first word of their own
     sentence vanish, with no way to know why or that a setting existed. The contract of a dictation
     tool is that what you said is what appears. A tool that silently edits you is not a faster

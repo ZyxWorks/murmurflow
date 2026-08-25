@@ -116,7 +116,24 @@ def test_real_speech_survives_the_traps(text):
 
 
 def test_fillers_are_stripped_without_rewriting():
-    assert dictate.strip_fillers("So, um, ship it on Friday") == "ship it on Friday"
+    assert dictate.strip_fillers("So, um, ship it on Friday") == "So, ship it on Friday"
+    assert dictate.strip_fillers("Erm, ship it") == "ship it"
+    assert dictate.strip_fillers("It is, uh, fixed") == "It is, fixed"
+
+
+def test_the_strip_removes_sounds_and_never_words():
+    # Every one of these used to lose a real word: the list held `hey`, `so`, `well`, `right`,
+    # `you know`, `i mean` and `basically`, and each is also an ordinary English word. A missed
+    # filler costs one keystroke; a deleted word is invisible until you re-read your own sentence.
+    for said in (
+        "Do you know what time it is?",
+        "Let me know if you know a good restaurant.",
+        "I mean what I said.",
+        "Hey, ship it on Friday",
+        "Well, that is basically right.",
+        "So we ship on Friday.",
+    ):
+        assert dictate.strip_fillers(said) == said
 
 
 def test_a_clean_transcript_passes_through_byte_identical():
@@ -126,7 +143,7 @@ def test_a_clean_transcript_passes_through_byte_identical():
 
 def test_strip_never_empties_a_line_that_was_all_filler():
     # It removes what it can and keeps whatever survives ...
-    assert dictate.strip_fillers("so, um, yeah") == "yeah"
+    assert dictate.strip_fillers("um, uh, yeah") == "yeah"
     # ... but a line with nothing left after the strip falls back to the original rather than "".
     assert dictate.strip_fillers("um uh") == "um uh"
 
@@ -134,7 +151,7 @@ def test_strip_never_empties_a_line_that_was_all_filler():
 def test_punctuation_left_dangling_by_the_strip_is_repaired():
     # "...fixed, um, you know." -> the strip leaves "fixed," hanging at the end of the line.
     config.set_value("stripFillers", True)
-    assert dictate.tidy("It is fixed, um, you know.") == "It is fixed."
+    assert dictate.tidy("It is fixed, um.") == "It is fixed."
 
 
 def test_space_before_punctuation_is_closed_up():
@@ -604,7 +621,7 @@ def test_boilerplate_appended_to_a_real_sentence_is_not_typed():
 
 def test_filler_stripping_still_works_when_it_is_asked_for():
     config.set_value("stripFillers", True)
-    assert dictate.tidy("So, um, ship it on Friday") == "ship it on Friday"
+    assert dictate.tidy("Um, ship it on Friday") == "ship it on Friday"
 
 
 @pytest.mark.parametrize("said", ["thank you", "Thank you.", "you", "so", "bye", "Vielen Dank."])

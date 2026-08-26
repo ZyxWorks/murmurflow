@@ -421,9 +421,15 @@
   //
   // The NARROW field this page used to carry - five smaller marks pinned to the margins below
   // 900px, because "the desktop placement puts a 116px mark straight through a headline" - is gone
-  // and its lesson is not: the module's `nearSize` scales the nearest particle with the smaller
-  // viewport dimension, so a phone gets 64px instead of 118 without a second hand-placed array
-  // here. A second array is exactly what the shared module exists to delete.
+  // and its lesson is not. The module places on a jittered grid at CONSTANT DENSITY (one star per
+  // ~230px cell), so a phone earns ~8 stars and a laptop ~24 and both look like the same sky. A
+  // second hand-placed array is exactly what the shared module exists to delete.
+  //
+  // IT IS A NIGHT SKY AND NOT A SIMULATION (2026-08-27). It was a particle field with elastic
+  // collisions for one day, and the operator turned it down the same night: ~50 rotating marks up
+  // to 118px is a screensaver. Now: 15/21/29px stars that drift 7px over half a minute, twinkle,
+  // never rotate and never touch. Same budget guarantees - a background tab costs zero, a canvas
+  // scrolled out of view stops, reduced motion paints one frame.
 </script>
 
 <script type="module">

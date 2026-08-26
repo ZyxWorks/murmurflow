@@ -1,28 +1,37 @@
-// THE BACKDROP IS A REAL PARTICLE FIELD. One module, no dependency, no framework.
+// THE BACKDROP IS A NIGHT SKY. One module, no dependency, no framework.
 //
-// Part two of the sky's physics, and deliberately a SEPARATE feature from part one. The eight
-// marks carry TEXT, so they get leashes and a proof that no pair can ever touch (`geometry.js`).
-// A ghost back here carries nothing, is `aria-hidden`, sits behind everything and is read by
-// nobody — so it is the one layer where a collision costs zero, and therefore the one layer where
-// bouncing is free. Nothing in this file may ever reach into that one.
+// It was a particle simulation for one day (2026-08-26) and the operator turned it down the same
+// night: "the new backdrop is way too busy... I wanted it to be more like a night sky, sky of
+// stars, which move ever so slightly... not have them move with this physics like we have now."
 //
-// WHY IT IS NOT A REACT COMPONENT, AND NOT IN `ui-kit`. MurmurFlow's landing page is plain HTML
-// with no React at all, and a hook would force a framework on every consumer for a decorative
-// canvas. `@products/ui-kit` exists, has zero deps and React as a peer, and has no consumers —
-// making it the home means building a package chain before writing a line of physics. So: one
-// vanilla ES module. A React repo calls `mount` in a `useEffect`; a plain page calls it in a
-// `<script type="module">`.
+// What that measurement actually rejected, so the next pass does not rebuild it:
 //
-// IT IS ALREADY DUPLICATED, AND THE COPIES HAVE DIVERGED. That is the argument for this file, and
-// it is a measurement rather than a preference: `zyx`'s Sky.jsx and `zyxworks-site`'s Backdrop.jsx
-// hand-place nine marks each at DIFFERENT positions, share six drift frequencies by hand-copy, and
-// one of them seeds its phases from `Math.random()` — so the marketing site reshuffles its sky on
-// every reload, which the dashboard explicitly refuses to do. MurmurFlow's page is a third,
-// hand-ported copy of the same idea in vanilla JS.
+//   * ~50 marks at up to 118px on a 1440px screen. A mark that size is a MARK — it competes with
+//     the eight that carry text. A star is 15-29px and reads as distance, not as an object.
+//   * elastic collisions. Two ghosts knocking each other sideways is motion with INTENT in it, and
+//     the eye follows intent. A sky moves because you are on a planet that turns; nothing in it
+//     hits anything.
+//   * per-mark rotation. Brand law, and the loudest of the three: `brand/CLAUDE.md` fixes the
+//     geometry forever and says never rotated. Fifty tumbling logos is a screensaver.
 //
-// CANVAS, NOT NINE DOM NODES. Nine `<span>`s are fine for nine ghosts. A field wants 30-60, each
-// with position, velocity, depth and a collision pass — and a canvas also makes "never steals a
-// pointer event" true by construction rather than by remembering `pointer-events: none`.
+// SO: A JITTERED GRID, THREE SIZES, A SLOW DRIFT AND A TWINKLE. Placement is a grid because the
+// alternative is clusters and empty quadrants — the failure mode of every random field, and the
+// one thing a real star field never has. Jitter inside the cell is what stops it reading AS a
+// grid. Constant area per star, so a phone and a 5K display are the same sky at the same density
+// rather than the same COUNT at two densities.
+//
+// AND ONE LIGHT SOURCE. A sun by day, a moon by night, drawn by the consumer (they are two CSS
+// radial gradients, which is the one thing CSS does better than a canvas) and handed to `set()` as
+// a position. This file only uses it to LIGHT the field: stars near the body gain a little
+// brightness and a little glow, falling off with distance. That is the whole reason the night
+// version reads as a sky with a moon in it rather than as dots beside a circle.
+//
+// STILL ONE MODULE, STILL COPIED OUT. `zyx`'s dashboard, `zyxworks-site` and MurmurFlow's landing
+// page all run this file; `make brand-field` overwrites the other two from this one. A React repo
+// calls `mount` in a `useEffect`; a plain page calls it in a `<script type="module">`.
+//
+// CANVAS, NOT DOM NODES. It also makes "never steals a pointer event" true by construction rather
+// than by remembering `pointer-events: none`.
 
 /** A 5-line PRNG. NEVER `Math.random`: a reload must not reshuffle the sky, and the marketing
     site's version doing exactly that is the bug this file exists not to carry over. */
@@ -36,238 +45,280 @@ export function mulberry32(seed) {
   };
 }
 
-/** The depth ramp, near to far. Verbatim the tones the dashboard's own ghosts already use. */
-export const TONES = ["#3a3d47", "#343741", "#2a2d36", "#22242c", "#1f2127"];
+// THE MARK, AT 120 UNITS, AND IT IS THE IDENTITY'S OWN GEOMETRY.
+//
+// `brand/CLAUDE.md`: "origin (60,60) -> (60,30) (30,82) (94,74), width 9, round caps... never
+// rotated, stretched, filled, gradiented or recolored." The eight marks that carry text already
+// draw exactly this; a backdrop drawing a DIFFERENT three-stroke glyph was a second mark on one
+// screen, which is the thing brand law is for.
+const JOINT = [60, 60];
+const TIPS = [
+  [60, 30],
+  [30, 82],
+  [94, 74],
+];
 
-/** How many particles a viewport earns. Not a constant: this runs FOREVER behind everything, so
-    the budget is a property of the screen it is drawn on. ~12 on a 390px phone, ~50 at 1440x900. */
+/** Three sizes, and the stroke steps with them — the brand's small-mark rule (9 -> 12 -> 14 at
+    120 units). At a flat 9 the 15px star is a smudge and the 29px one is a logo. */
+export const STARS = [
+  { size: 29, stroke: 9 },
+  { size: 21, stroke: 12 },
+  { size: 15, stroke: 14 },
+];
+
+/** One star per this much screen. Density, not count: a phone gets ~8 and a 1440x900 display ~24,
+    and both look like the same sky. 230px is the handoff's cell. */
+export const CELL = 230;
+
+/** The most stars any screen gets. Above this the cell grows instead — a 5K display at constant
+    density would be 150 of them, and the paint is cheap but the SCREEN is not. */
+const MAX_STARS = 44;
+
+/** The grid a viewport earns: columns, rows and the cell they sit on. */
+export function gridFor(w, h) {
+  let cell = CELL;
+  let cols = Math.max(1, Math.round(w / cell));
+  let rows = Math.max(1, Math.round(h / cell));
+  if (cols * rows > MAX_STARS) {
+    cell = Math.sqrt((w * h) / MAX_STARS);
+    cols = Math.max(1, Math.round(w / cell));
+    rows = Math.max(1, Math.round(h / cell));
+  }
+  return { cols, rows, cell };
+}
+
+/** How many stars a viewport earns. Kept as its own export because it is the number anyone
+    reviewing "is the backdrop too busy" actually wants to read. */
 export function countFor(w, h) {
-  return Math.max(6, Math.min(60, Math.floor((w * h) / 26000)));
+  const { cols, rows } = gridFor(w, h);
+  return cols * rows;
 }
 
-const MIN_Z = 0.06; // never all the way to nothing: a particle at z=0 is a particle that vanished
-const BAND = 0.22; // two particles collide only if their depths are this close
+/** Night: warm-white. Day: ink. The only two colours in this file — the field is monochrome and
+    there is no brass in it. (The handoff asked for one brass star as "a mark that needs a human";
+    a backdrop ghost carries no meaning and cannot be pressed, so it would be a FOURTH use of the
+    one leashed colour rather than the third. Refused on purpose.) */
+export const INK = { dark: "246, 245, 241", light: "11, 12, 16" };
+
+/** Ink on warm-white needs far more alpha than white on near-black to read at all. The handoff
+    measured 1.85 and its first draft, which subtracted from the night value instead, made the day
+    field vanish completely. */
+const DAY_GAIN = 1.85;
+
+/** How far the body's light reaches, as a fraction of the frame's diagonal. */
+const HALO_REACH = 0.52;
+
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 /**
- * THE NEAREST PARTICLE'S SIZE IS A FRACTION OF THE SCREEN, not a constant.
+ * PLACE THE FIELD. Pure, seeded, and it never runs again after mount except on a resize.
  *
- * 118px is right on a desktop and is a third of a 390px phone — and MurmurFlow's own hand-ported
- * copy of this field had already learned that the hard way, carrying a whole SECOND array of
- * "fewer, smaller marks pinned to the margins" below 900px, because "the desktop placement puts a
- * 116px mark straight through a headline". A second hand-placed field is exactly what this module
- * exists to delete, so the lesson comes with it rather than the array: size follows the smaller
- * viewport dimension, and every consumer gets the phone case right without knowing about it.
- *
- * 64 at 390x844, 117 at 1440x900, 118 (the ceiling) on anything wider.
+ * `keepOut` is a list of `{x, y, w, h}` rects in CSS pixels that no star may sit in — the brief's
+ * sentence, the command bar, the eight labelled marks. A star at 6% opacity behind a word is not
+ * a legibility problem; it is a COMPOSITION one, and the difference between a sky somebody placed
+ * and a texture somebody generated. A cell whose jittered point lands in a rect walks out of it
+ * rather than being dropped, so the grid keeps its shape and no quadrant goes empty.
  */
-export const nearSize = (w, h) => Math.max(64, Math.min(118, Math.min(w, h) * 0.13));
-const FAR_RATIO = 0.22; // the farthest is about a fifth of the nearest, at any size
-
-/** A particle's drawn size, from its depth. The one place size and depth are tied together.
-    Squared, so it reads as perspective rather than as a straight ramp. */
-export const sizeAt = (z, near = 118) => near * (FAR_RATIO + (1 - FAR_RATIO) * z * z);
-
-/**
- * THE SIMULATION, WITHOUT A CANVAS. Exported on its own so the physics can be checked by a script
- * with no browser in it — which is the whole reason the drift solve in `geometry.js` is pure too.
- *
- * DEPTH IS REAL, AND DEPTH MOVES (operator, 2026-08-26: "make the marks in the backdrop grow and
- * go smaller so it seems like they go far into the backdrop or come near again... a little bit
- * like small shooting stars"). `z` drives size, tone AND speed together — far ones smaller, dimmer
- * and slower — and it has a velocity of its own, so a particle genuinely travels toward you and
- * away again. The plan had `z` as a fixed per-particle constant; a static ramp reads as a flat
- * sheet of dots at three greys, which is exactly what the field looked like before.
- *
- * COLLISIONS ONLY WITHIN A DEPTH BAND. Cheap, and it is also what a real depth field looks like:
- * things far away do not hit things near you. Elastic, equal mass, no rotation transfer.
- *
- * A UNIFORM GRID, not a pair loop. 60 particles is 1770 pair checks a frame, forever, behind
- * everything — and the grid makes it the handful of neighbours each particle actually has.
- */
-export function createField(w, h, { count = countFor(w, h), seed = 20260826 } = {}) {
+export function createField(w, h, { seed = 20260827, keepOut = [] } = {}) {
   const rand = mulberry32(seed);
-  const near = nearSize(w, h);
-  const parts = [];
-  for (let i = 0; i < count; i += 1) {
-    const z = MIN_Z + rand() * (1 - MIN_Z);
-    parts.push({
-      x: rand() * w,
-      y: rand() * h,
-      z,
-      // Speed scales with depth: a near particle crosses the screen, a far one barely moves. That
-      // is what makes the field read as distance rather than as a sheet of dots at three greys.
-      vx: (rand() - 0.5) * 14 * (0.25 + z),
-      vy: (rand() - 0.5) * 14 * (0.25 + z),
-      vz: (rand() - 0.5) * 0.035,
-      spin: rand() * Math.PI * 2,
-      spinRate: (rand() - 0.5) * 0.22,
-    });
+  const { cols, rows, cell } = gridFor(w, h);
+  const cw = w / cols;
+  const ch = h / rows;
+  const pad = 60; // grown by the keep-out walk below
+  const stars = [];
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      const kind = STARS[Math.floor(rand() * STARS.length)];
+      let x = cw * (c + 0.5) + (rand() - 0.5) * cw * 0.68;
+      let y = ch * (r + 0.5) + (rand() - 0.5) * ch * 0.68;
+      [x, y] = clear(x, y, kind.size / 2 + 8, keepOut, w, h);
+      stars.push({
+        x,
+        y,
+        size: kind.size,
+        stroke: kind.stroke,
+        // Base opacity, at night. 0.048 … 0.14, and the six brightest are what the moon's glow
+        // hangs on — a field where every star is equally bright is a texture.
+        a: 0.048 + rand() * 0.092,
+        // The drift. Two summed sines per axis at different periods, so the path never repeats
+        // visibly and never looks like an orbit. 24-70 second periods: "ever so slightly".
+        fx: [0.014 + rand() * 0.014, 0.026 + rand() * 0.016],
+        fy: [0.013 + rand() * 0.014, 0.023 + rand() * 0.018],
+        px: [rand() * Math.PI * 2, rand() * Math.PI * 2],
+        py: [rand() * Math.PI * 2, rand() * Math.PI * 2],
+        // The twinkle. A star that only translates reads as a sticker being slid around; the
+        // brightness wobble is what makes it a light. Slow, and never below 0.72 of its own base.
+        ft: 0.03 + rand() * 0.05,
+        pt: rand() * Math.PI * 2,
+      });
+    }
   }
-
-  /** One step. `dt` in seconds, clamped by the caller — a backgrounded tab hands back a huge one. */
-  function step(dt, width = w, height = h) {
-    for (const p of parts) {
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.z += p.vz * dt;
-      p.spin += p.spinRate * dt;
-      // The depth band is a wall like any other, so a particle coming toward you turns around and
-      // goes back rather than clipping to the front and sticking there.
-      if (p.z < MIN_Z) {
-        p.z = MIN_Z;
-        p.vz = Math.abs(p.vz);
-      } else if (p.z > 1) {
-        p.z = 1;
-        p.vz = -Math.abs(p.vz);
-      }
-      const r = sizeAt(p.z, near) / 2;
-      if (p.x < r) {
-        p.x = r;
-        p.vx = Math.abs(p.vx);
-      } else if (p.x > width - r) {
-        p.x = width - r;
-        p.vx = -Math.abs(p.vx);
-      }
-      if (p.y < r) {
-        p.y = r;
-        p.vy = Math.abs(p.vy);
-      } else if (p.y > height - r) {
-        p.y = height - r;
-        p.vy = -Math.abs(p.vy);
-      }
-    }
-
-    // --- broadphase: one uniform grid, cell = the largest particle ---------------------------
-    const cell = near;
-    const cols = Math.max(1, Math.ceil(width / cell));
-    const buckets = new Map();
-    for (let i = 0; i < parts.length; i += 1) {
-      const p = parts[i];
-      const key = Math.floor(p.y / cell) * cols + Math.floor(p.x / cell);
-      const at = buckets.get(key);
-      if (at) at.push(i);
-      else buckets.set(key, [i]);
-    }
-    const around = [];
-    for (const [key, ids] of buckets) {
-      const cx = key % cols;
-      const cy = (key - cx) / cols;
-      around.length = 0;
-      // Only forward neighbours, so every pair is visited exactly once.
-      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]) {
-        const other = buckets.get((cy + dy) * cols + (cx + dx));
-        if (other && !(dx === 0 && dy === 0)) around.push(...other);
-      }
-      for (let a = 0; a < ids.length; a += 1) {
-        for (let b = a + 1; b < ids.length; b += 1) hit(parts[ids[a]], parts[ids[b]]);
-        for (const id of around) hit(parts[ids[a]], parts[id]);
-      }
-    }
-    return parts;
+  // FAR-FIELD DUST, night only. Twelve 2px dots at the back of the room. They are what stops the
+  // gaps between stars reading as empty black, and on a light surface they only muddy it — the
+  // handoff's own finding, and the reason `paint` skips them by day.
+  const dust = [];
+  for (let i = 0; i < 12; i += 1) {
+    const [dx, dy] = clear(rand() * w, rand() * h, 6, keepOut, w, h);
+    dust.push({ x: dx, y: dy, a: 0.08 + rand() * 0.06, ft: 0.02 + rand() * 0.04, pt: rand() * 6.28 });
   }
+  return { stars, dust, cell, pad };
+}
 
-  function hit(p, q) {
-    if (Math.abs(p.z - q.z) > BAND) return; // different distances: it passes behind
-    const rp = sizeAt(p.z, near) / 2;
-    const rq = sizeAt(q.z, near) / 2;
-    const dx = q.x - p.x;
-    const dy = q.y - p.y;
-    const d2 = dx * dx + dy * dy;
-    const reach = rp + rq;
-    if (d2 >= reach * reach || d2 === 0) return;
-    const d = Math.sqrt(d2);
-    const nx = dx / d;
-    const ny = dy / d;
-    // Equal mass, elastic: they swap the component of their velocity along the line between them.
-    const along = (p.vx - q.vx) * nx + (p.vy - q.vy) * ny;
-    if (along > 0) {
-      p.vx -= along * nx;
-      p.vy -= along * ny;
-      q.vx += along * nx;
-      q.vy += along * ny;
+/** Walk a point out of whatever keep-out rect it landed in, then back inside the frame. A bounded
+    push along the shortest axis — four rects and one step each, so there is no loop to run away. */
+function clear(x, y, r, keepOut, w, h) {
+  for (let pass = 0; pass < 3; pass += 1) {
+    let moved = false;
+    for (const k of keepOut) {
+      const gap = 70; // the handoff's keep-out margin
+      const l = k.x - gap - r;
+      const t = k.y - gap - r;
+      const right = k.x + k.w + gap + r;
+      const bottom = k.y + k.h + gap + r;
+      if (x <= l || x >= right || y <= t || y >= bottom) continue;
+      const out = [x - l, right - x, y - t, bottom - y];
+      const min = Math.min(...out);
+      if (min === out[0]) x = l;
+      else if (min === out[1]) x = right;
+      else if (min === out[2]) y = t;
+      else y = bottom;
+      moved = true;
     }
-    // ...and are pushed apart, so a pair that arrives overlapping cannot stay stuck together.
-    const push = (reach - d) / 2;
-    p.x -= nx * push;
-    p.y -= ny * push;
-    q.x += nx * push;
-    q.y += ny * push;
+    if (!moved) break;
   }
+  return [clamp(x, r + 4, w - r - 4), clamp(y, r + 4, h - r - 4)];
+}
 
-  return { parts, step, near };
+/** Where a star is right now: its anchor plus the drift. Pure, so a check can walk it without a
+    canvas — and small on purpose. 7px of wander over half a minute is a sky, 40px is a lava lamp. */
+export function driftedAt(star, seconds, amp = 7) {
+  return [
+    star.x + amp * (Math.sin(seconds * star.fx[0] * 6.283 + star.px[0]) * 0.62 + Math.sin(seconds * star.fx[1] * 6.283 + star.px[1]) * 0.38),
+    star.y + amp * (Math.sin(seconds * star.fy[0] * 6.283 + star.py[0]) * 0.62 + Math.sin(seconds * star.fy[1] * 6.283 + star.py[1]) * 0.38),
+  ];
+}
+
+/** How much of the body's light reaches a point. 1 at the disc, 0 at `HALO_REACH` of the frame's
+    diagonal, linear in between — the handoff's own falloff. */
+function lightAt(x, y, body, w, h) {
+  if (!body) return 0;
+  const reach = Math.hypot(w, h) * HALO_REACH;
+  return clamp(1 - Math.hypot(x - body.x, y - body.y) / reach, 0, 1);
 }
 
 /**
- * Draw one frame. The mark is the UPRIGHT variant — three round-capped strokes from one joint,
- * symmetric — and that is brand law rather than taste: upright means "a place you can go", the
- * asymmetric one means zyx itself, and there is exactly ONE asymmetric mark on a screen (the
- * wordmark). `sky-physics-plan.md` quotes the identity's own stroke list here, which would have
- * put fifty logos in the background.
+ * DRAW ONE FRAME.
+ *
+ *   `theme` "dark" | "light"     which ink, and whether there is glow and dust at all
+ *   `body`  {x, y} | null        where the sun or moon is, in CSS pixels
+ *   `dusk`  0…1                  how far into civil twilight; fades the night field up
+ *
+ * Day and night are not the same picture with a colour swapped. At night the moon LIGHTS the
+ * field — every star carries a glow, and the ones near the disc carry more. By day the sun DIMS
+ * it: no glow at all (a white wash around a dark mark on a warm-white page reads as a printing
+ * fault), a much higher base alpha, and stars inside the sun's wash lose a little rather than
+ * being erased.
  */
-export function paint(ctx, parts, w, h, near = nearSize(w, h)) {
+export function paint(ctx, field, w, h, { seconds = 0, theme = "dark", body = null, dusk = 1 } = {}) {
+  const night = theme !== "light";
+  const rgb = night ? INK.dark : INK.light;
   ctx.clearRect(0, 0, w, h);
   ctx.lineCap = "round";
-  // Far first, so a near particle genuinely passes in front of a far one.
-  for (const p of [...parts].sort((a, b) => a.z - b.z)) {
-    const s = sizeAt(p.z, near) / 120;
+
+  if (night) {
+    for (const d of field.dust) {
+      const tw = 0.82 + 0.18 * Math.sin(seconds * d.ft * 6.283 + d.pt);
+      ctx.fillStyle = `rgba(${rgb}, ${(d.a * tw * dusk).toFixed(4)})`;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, 1, 0, 6.2832);
+      ctx.fill();
+    }
+  }
+
+  for (const s of field.stars) {
+    const [x, y] = driftedAt(s, seconds);
+    const lit = lightAt(x, y, body, w, h);
+    const twinkle = 0.86 + 0.14 * Math.sin(seconds * s.ft * 6.283 + s.pt);
+    let alpha;
+    if (night) {
+      alpha = (s.a + 0.035 * lit) * twinkle * dusk;
+    } else {
+      // Floor 0.09: the first draft subtracted a flat 0.05 off a 0.04 base and the whole day field
+      // disappeared. A mark must stay readable everywhere on a light surface.
+      alpha = Math.max(0.09, s.a * DAY_GAIN - 0.02 * lit) * twinkle;
+    }
+
+    if (night) {
+      // The wash. `radial-gradient(circle, currentColor 0%, transparent 52%)` blurred 6px, drawn
+      // as a gradient with a soft shoulder instead — a blur filter on a canvas is a per-frame
+      // readback on some drivers, and a gradient is already the shape a blur was there to make.
+      // Never above 0.11: at the ring it stops being light and becomes an outline.
+      const g = Math.min(0.075, (0.018 + (s.a - 0.048) * 0.34 + 0.022 * lit) * dusk);
+      const rad = s.size * 0.95;
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, rad);
+      grad.addColorStop(0, `rgba(${rgb}, ${g.toFixed(4)})`);
+      // The falloff is a SQUARE, not a shoulder. A stop partway out is a second edge, and the
+      // first version of this drew a visible 44px disc around every star - the exact "reads as a
+      // ring around each mark" the handoff warned about, arrived at from the other direction.
+      grad.addColorStop(0.45, `rgba(${rgb}, ${(g * 0.3).toFixed(4)})`);
+      grad.addColorStop(0.75, `rgba(${rgb}, ${(g * 0.07).toFixed(4)})`);
+      grad.addColorStop(1, `rgba(${rgb}, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, rad, 0, 6.2832);
+      ctx.fill();
+    }
+
+    const k = s.size / 120;
     ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate(p.spin);
-    ctx.scale(s, s);
-    ctx.translate(-60, -62);
-    ctx.strokeStyle = TONES[Math.min(TONES.length - 1, Math.floor((1 - p.z) * TONES.length))];
-    ctx.lineWidth = 9;
+    ctx.translate(x, y);
+    ctx.scale(k, k);
+    ctx.translate(-JOINT[0], -JOINT[1]);
+    ctx.strokeStyle = `rgba(${rgb}, ${alpha.toFixed(4)})`;
+    ctx.lineWidth = s.stroke;
     ctx.beginPath();
-    ctx.moveTo(60, 30);
-    ctx.lineTo(60, 62);
-    ctx.moveTo(32, 82);
-    ctx.lineTo(60, 62);
-    ctx.moveTo(88, 82);
-    ctx.lineTo(60, 62);
+    for (const [tx, ty] of TIPS) {
+      ctx.moveTo(JOINT[0], JOINT[1]);
+      ctx.lineTo(tx, ty);
+    }
     ctx.stroke();
     ctx.restore();
   }
 }
 
 /**
- * Mount the field on a canvas. Returns `{ stop }`.
+ * Mount the field on a canvas. Returns `{ stop, set }`.
  *
- * THE BUDGET, because it runs forever behind everything. Every line of it is code rather than a
- * hope: the count is capped by viewport AREA and not by a constant; DPR is capped at 2 (a 3x canvas
- * is 2.25x the pixels for nothing anyone can see on a backdrop); `visibilitychange` stops the loop
- * outright so a background tab costs zero; and an `IntersectionObserver` does the same where the
- * canvas can scroll out of view, which is the marketing site and not the dashboard.
+ * `set({theme, body, dusk, keepOut})` is how the consumer moves the light: the sky's own state
+ * changes about once a minute, and a repaint on demand is cheaper and simpler than handing this
+ * module a clock and a location. Under reduced motion it repaints the one static frame.
+ *
+ * THE BUDGET, because it runs forever behind everything. Count is capped by AREA and by
+ * `MAX_STARS`; DPR is capped at 2; `visibilitychange` stops the loop outright so a background tab
+ * costs zero; an `IntersectionObserver` does the same where the canvas can scroll out of view,
+ * which is the marketing site and not the dashboard. There is no broadphase and no pair loop any
+ * more — a drift is `sin` twice per axis, so the whole frame is ~24 stars of trigonometry.
  *
  * `prefers-reduced-motion` renders ONE STATIC FRAME and never starts a loop. Not a slowed
  * simulation — a still picture. Accessibility basic, and non-negotiable.
- *
- * MEASURED, because "it should not take any CPU" is a claim and not a hope (operator, 2026-08-26).
- * The physics, timed over 6000 frames after a warm-up:
- *
- *     1440x900   49 particles   0.042 ms/frame   0.25% of a 60fps budget
- *     390x844    12 particles   0.010 ms/frame   0.06%
- *     2560x1440  60 particles   0.027 ms/frame   0.16%
- *
- * The 2560 case is FASTER than the 1440 one per frame because the count is capped at 60 while the
- * grid gets bigger — fewer neighbours per cell. That is the broadphase doing its job; a pair loop
- * would have gone the other way. Driven in a real browser as well: a hidden tab is bit-identical
- * after 2.5 seconds, and a reduced-motion context paints once and never again.
  */
-export function mount(canvas, { seed = 20260826, count, reducedMotion, observe = false } = {}) {
-  if (!canvas?.getContext) return { stop() {} };
+export function mount(canvas, { seed = 20260827, reducedMotion, observe = false, ...initial } = {}) {
+  if (!canvas?.getContext) return { stop() {}, set() {} };
   const ctx = canvas.getContext("2d");
   const still =
     reducedMotion ??
     (typeof window !== "undefined" &&
       !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 
+  let state = { theme: "dark", body: null, dusk: 1, keepOut: [], ...initial };
   let field = null;
   let w = 0;
   let h = 0;
   let raf = 0;
-  let last = 0;
+  let t0 = 0;
   let onScreen = true;
   let stopped = false;
+  let watcher = null;
 
   function size() {
     const box = canvas.getBoundingClientRect();
@@ -277,18 +328,21 @@ export function mount(canvas, { seed = 20260826, count, reducedMotion, observe =
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    field = createField(w, h, { count, seed });
+    field = createField(w, h, { seed, keepOut: state.keepOut });
   }
 
-  function frame(now) {
+  // Under reduced motion `seconds` is pinned to 0, so the still frame is the field's own anchors
+  // with no drift and no twinkle applied — the picture it would settle to, not a random instant.
+  const draw = () =>
+    paint(ctx, field, w, h, {
+      seconds: still || !t0 ? 0 : (performance.now() - t0) / 1000,
+      ...state,
+    });
+
+  function frame() {
     raf = 0;
     if (stopped) return;
-    // Clamped: a tab that was hidden hands back a dt of minutes, and the first step after would
-    // teleport every particle across the screen and through every wall test.
-    const dt = Math.min(0.05, last ? (now - last) / 1000 : 0.016);
-    last = now;
-    field.step(dt, w, h);
-    paint(ctx, field.parts, w, h, field.near);
+    draw();
     schedule();
   }
 
@@ -297,45 +351,51 @@ export function mount(canvas, { seed = 20260826, count, reducedMotion, observe =
     raf = requestAnimationFrame(frame);
   }
 
-  function wake() {
-    last = 0; // the clock restarts with the loop; see the dt clamp above
-    schedule();
-  }
-
   const onResize = () => {
     size();
-    paint(ctx, field.parts, w, h, field.near);
+    draw();
   };
   const onVisible = () => {
     if (document.hidden) {
       cancelAnimationFrame(raf);
       raf = 0;
-    } else wake();
+    } else schedule();
   };
 
   size();
-  paint(ctx, field.parts, w, h, field.near);
-  if (still) return { stop() {} }; // one frame, and no listeners to leak
+  t0 = typeof performance !== "undefined" ? performance.now() : 0;
+  draw();
 
-  window.addEventListener("resize", onResize);
-  document.addEventListener("visibilitychange", onVisible);
-  let watcher = null;
-  if (observe && typeof IntersectionObserver !== "undefined") {
-    watcher = new IntersectionObserver((rows) => {
-      onScreen = rows.some((r) => r.isIntersecting);
-      if (onScreen) wake();
-    });
-    watcher.observe(canvas);
-  }
-  schedule();
-
-  return {
+  const api = {
+    /** Move the light, flip the theme, or hand over new keep-out rects. Only a keep-out change
+        re-places the field: everything else is a repaint, so the sky does not reshuffle at dawn. */
+    set(next = {}) {
+      const rebuild = "keepOut" in next && next.keepOut !== state.keepOut;
+      state = { ...state, ...next };
+      if (rebuild) field = createField(w, h, { seed, keepOut: state.keepOut });
+      if (still || rebuild) draw();
+    },
     stop() {
       stopped = true;
       cancelAnimationFrame(raf);
+      if (typeof window === "undefined") return;
       window.removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisible);
       watcher?.disconnect();
     },
   };
+
+  if (still) return api; // one frame, and no loop — but `set` still repaints on a theme flip
+
+  window.addEventListener("resize", onResize);
+  document.addEventListener("visibilitychange", onVisible);
+  if (observe && typeof IntersectionObserver !== "undefined") {
+    watcher = new IntersectionObserver((rows) => {
+      onScreen = rows.some((r) => r.isIntersecting);
+      if (onScreen) schedule();
+    });
+    watcher.observe(canvas);
+  }
+  schedule();
+  return api;
 }

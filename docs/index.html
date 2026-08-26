@@ -108,14 +108,10 @@
 
   /* --- the backdrop: night-sky marks, fixed, never over text --- */
   #backdrop { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: -1; }
-  /* A phone has no margin for the field to drift in: the desktop placement puts a 116px mark
-     straight through a headline. The rule the zyx backdrop keeps is that it never COMPETES with
-     text, and the answer is a field built for the width rather than no field at all - the same
-     move the constellation makes with a per-mark phone slot. Below 900px the script swaps in
-     fewer, smaller marks pinned to the margins, and the depth grade drops a step so they read as
-     sky instead of as content. */
-  #backdrop span { position: absolute; }
-  #backdrop span > span { display: block; height: 100%; width: 100%; will-change: transform; transform-style: preserve-3d; }
+  /* A phone has no margin for the field to drift in, and this page used to answer that with a
+     second, hand-placed array of five smaller marks. The shared module answers it instead:
+     `nearSize` scales the nearest particle with the smaller viewport dimension. */
+  #backdrop { width: 100%; height: 100%; }
 
   /* --- nav --- */
   nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 26px 0 0; }
@@ -218,7 +214,7 @@
 </head>
 <body>
 
-<div id="backdrop" aria-hidden="true"></div>
+<canvas id="backdrop" aria-hidden="true"></canvas>
 
 <div class="shell">
 
@@ -414,82 +410,28 @@
     });
   });
 
-  // The backdrop: nine hand-placed marks on a slow night-sky wander, ported from the ZyxWorks site's
-  // field variant. Positions, sizes and the depth grade are the ratified ones. The cursor never
-  // changes the motion; hovering a glyph makes its strokes vanish from the tips into the joint.
-  (function () {
-    // The ratified desktop field, and the narrow one beside it. Same glyph, same motion, same
-    // depth vocabulary; only the placement and the grade differ, because a 375px column has no
-    // beside for a mark to sit in.
-    var WIDE = [
-      ["5%", "14%", 84, "ghost-near"], ["22%", "70%", 116, "ghost-near"], ["44%", "7%", 32, "ghost-far"],
-      ["68%", "18%", 68, "ghost"],     ["88%", "52%", 26, "ghost-far"],  ["74%", "84%", 96, "ghost-near"],
-      ["9%", "46%", 44, "ghost-far"],  ["54%", "58%", 56, "ghost"],      ["34%", "32%", 30, "ghost-far"]
-    ];
-    // Every narrow mark hangs off an edge, and every one is graded to the far step. Measured on a
-    // 375px viewport: at left 6% or right 80% a mark sits INSIDE the 24px text gutter and reads as
-    // a smudge behind a letter, which is the one thing this field may not do. With AMP at 0.45 the
-    // horizontal wander is +-17px, so the anchors are biased past the edge to absorb it.
-    var NARROW = [
-      ["-5%", "11%", 46, "ghost-far"], ["88%", "27%", 34, "ghost-far"], ["-7%", "57%", 62, "ghost-far"],
-      ["90%", "73%", 40, "ghost-far"], ["-4%", "88%", 28, "ghost-far"]
-    ];
-    var FIELD = matchMedia("(max-width: 900px)").matches ? NARROW : WIDE;
-    var BASE = [0.058, 0.086, 0.046, 0.069, 0.035, 0.052];
-    // Half the drift on a narrow screen: the desktop amplitude is 38px of travel, which is a
-    // margin mark stepping into the text column and back out of it.
-    var AMP = matchMedia("(max-width: 900px)").matches ? 0.45 : 1;
-    var RAD = Math.PI / 180;
-    var wrap = document.getElementById("backdrop");
-    var marks = FIELD.map(function (f, i) {
-      var tile = document.createElement("span");
-      tile.style.cssText = "left:" + f[0] + ";top:" + f[1] + ";width:" + f[2] + "px;height:" + f[2] + "px;perspective:450px;color:var(--" + f[3] + ")";
-      var inner = document.createElement("span");
-      inner.innerHTML = '<svg class="mk mk-vanish" viewBox="0 0 120 120" width="100%" height="100%" fill="none">' +
-        '<line x1="60" y1="62" x2="60" y2="30"/><line x1="60" y1="62" x2="32" y2="82"/><line x1="60" y1="62" x2="88" y2="82"/></svg>';
-      tile.appendChild(inner);
-      wrap.appendChild(tile);
-      return {
-        el: tile, inner: inner, rect: null, hv: false,
-        ax: (i * 47 + 20) % 360, ay: (i * 83 + 35) % 360, az: (i * 29) % 360,
-        p: BASE.map(function () { return Math.random() * Math.PI * 2; }),
-        f: BASE.map(function (f) { return f * (0.8 + Math.random() * 0.5); })
-      };
-    });
+  // The backdrop is the SHARED module now (`field.js`, beside this file). Edit it in the zyx repo -
+  // `dashboard/src/lib/field.js` - never here and never on the ZyxWorks site: all three used to
+  // carry a hand-port of one idea, already diverged, and this copy's phases came from
+  // `Math.random()` so the sky reshuffled on every reload.
+  //
+  // STILL ONE PAGE, NO BUILD STEP, NO EXTERNAL REQUEST. `field.js` sits next to this file in
+  // /docs, so GitHub Pages serves it the same way it serves the fonts. A module script defers by
+  // default and the DOM above is already parsed, so there is nothing to wait for.
+  //
+  // The NARROW field this page used to carry - five smaller marks pinned to the margins below
+  // 900px, because "the desktop placement puts a 116px mark straight through a headline" - is gone
+  // and its lesson is not: the module's `nearSize` scales the nearest particle with the smaller
+  // viewport dimension, so a phone gets 64px instead of 118 without a second hand-placed array
+  // here. A second array is exactly what the shared module exists to delete.
+</script>
 
-    // The varied resting pose is what every mark starts at, and all that reduced motion ever gets.
-    marks.forEach(function (m) {
-      m.inner.style.transform =
-        "rotateX(" + (Math.sin(m.ax * RAD) * 32).toFixed(2) + "deg) " +
-        "rotateY(" + (Math.sin(m.ay * RAD) * 32).toFixed(2) + "deg) " +
-        "rotateZ(" + (Math.sin(m.az * RAD) * 16).toFixed(2) + "deg)";
-    });
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-    var mx = -9999, my = -9999;
-    addEventListener("pointermove", function (e) { mx = e.clientX; my = e.clientY; }, { passive: true });
-    addEventListener("resize", function () { marks.forEach(function (m) { m.rect = null; }); });
-
-    (function step() {
-      var s = performance.now() / 1000;
-      marks.forEach(function (m) {
-        var r = m.rect || (m.rect = m.el.getBoundingClientRect());
-        var p = m.p, f = m.f;
-        var x = (Math.sin(s * f[0] + p[0]) * 26 + Math.sin(s * f[1] + p[1]) * 12) * AMP;
-        var y = (Math.cos(s * f[2] + p[2]) * 22 + Math.sin(s * f[3] + p[3]) * 10) * AMP;
-        m.inner.style.transform =
-          "translate(" + x.toFixed(1) + "px," + y.toFixed(1) + "px) " +
-          "rotateX(" + (Math.sin(s * f[4] + p[4]) * 20).toFixed(2) + "deg) " +
-          "rotateY(" + (Math.sin(s * f[5] + p[5]) * 20).toFixed(2) + "deg)";
-        var over = mx >= r.left - 4 && mx <= r.right + 4 && my >= r.top - 4 && my <= r.bottom + 4;
-        if (m.hv !== over) {
-          m.hv = over;
-          if (over) m.inner.dataset.mkHover = "1"; else delete m.inner.dataset.mkHover;
-        }
-      });
-      requestAnimationFrame(step);
-    })();
-  })();
+<script type="module">
+  import { mount } from "./field.js";
+  // `observe: true` because this page SCROLLS - a simulation running behind a section nobody is
+  // looking at is the one cost the module refuses to pay. It reads `prefers-reduced-motion` itself
+  // and paints a single static frame when it is set.
+  mount(document.getElementById("backdrop"), { observe: true });
 </script>
 
 </body>

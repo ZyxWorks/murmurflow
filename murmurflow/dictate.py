@@ -2778,8 +2778,13 @@ def listen_loop(
         rec = mine.pop()
         # Whatever streaming already typed stays typed — there is no un-paste (see `stream_tail`) —
         # but nothing more is added to it. An abort throws away the AUDIO, which is what it is for.
-        streamed(stop_streaming(rec.wav))  # drains the flag too, so the cues stay honest
+        stream = stop_streaming(rec.wav)
         wav = stop(rec)
+        # DRAINED AFTER THE RECORDER IS DOWN, and the order is the whole point: `streamed` waits on
+        # a paste that may still be settling, this runs on the poll loop's own thread, and the
+        # microphone is open and the trigger unwatched for as long as it blocks. Nothing above
+        # needs the answer — an abort throws the audio away — so the wait belongs behind the stop.
+        streamed(stream)  # for its other half: the cues come back if nothing reached the screen
         if wav is not None:
             wav.unlink(missing_ok=True)
 

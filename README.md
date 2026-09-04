@@ -268,8 +268,9 @@ Mac roughly doubled every row. Measure your own before believing any of them, in
   `ctypes`. No Xcode, no code signing, no notarization, and no TCC grant that a rebuild invalidates.
 - **No dependencies.** `pip install murmurflow` pulls in nothing. Two Homebrew binaries and macOS
   itself do the work.
-- **No streaming.** It would cost a permanently resident microphone to save a fraction of a batch
-  pass.
+- **No always-on microphone.** Nothing is listening between sentences. Streaming the words out
+  while you talk is opt-in and decodes the clip you are already recording — see
+  [streaming](#streaming-optional).
 - **No LLM on the hot path**, unless you ask for one — see [polish](#polish-optional).
 - **No Linux.** Recording and typing are both small there; the hotkey is not, because Wayland
   exposes no global hotkey API at all. `murmurflow doctor` runs on Linux and says exactly that.
@@ -328,6 +329,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `inputName` | part of a microphone name. Default: system default. `murmurflow devices` lists them |
 | `vocabulary` | proper nouns to bias the transcriber toward |
 | `cue` | tone preset: `system` (default — the Mac's own Tink and Pop), `pebble` (near-subliminal), `glass`, `marimba`, `soft`, `off`. `murmurflow cues` plays them |
+| `stream` | `true` = the words land at your cursor while you are still talking, instead of all at once at the end. **Off** — see below |
 | `polishCommand` | see below |
 | `stripFillers` | `true` = delete the sounds `um` / `uh` / `erm` / `hmm`, and nothing else. **Off** — you get verbatim |
 | `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |
@@ -338,6 +340,59 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 **Right Option is deliberately not offered as a default.** On a German layout it's AltGr — the dead
 key for `@ € \ | ~ [ ] { }` — so binding dictation there fires the microphone on every email
 address and code bracket.
+
+### Streaming (optional)
+
+```bash
+murmurflow config set stream true
+```
+
+Off by default. With it on, the words land at your cursor in lumps while you are still talking
+instead of arriving in one paste when you stop — and **the ready and done tones go quiet**, because
+the text on screen already says both things.
+
+What it actually does: it re-decodes the clip you are currently recording, over and over, and types
+the words that two passes in a row agreed on. Agreement is the safety. Whisper revises — give it
+another second of audio and it re-reads what it already had, now that it knows how the sentence
+ends — so typing each pass's best guess would type words the next pass withdraws, and nothing can
+un-type them. The first pass has nothing to agree with, so it holds back its last four words
+instead.
+
+**How fast it actually is, measured** on an M4 Pro, macOS 26, large-v3-turbo, `-t 8`, against a
+warm server with nothing else on it:
+
+| | seconds |
+|---|---|
+| one pass, over 1s of audio | 2.07 |
+| one pass, over 9s of audio | 2.21 |
+| first words at the cursor | ~3.5 |
+
+A pass costs the same whatever it is decoding, because whisper.cpp pads every request to a 30s
+window — so this is not word-by-word live captioning, it is **a lump of words about every two
+seconds**. On a busy machine (a second server, or this one already answering your last dictation)
+those lumps stretch to four. It earns its keep on a paragraph and does nothing for you on a
+six-word sentence, which finishes before the second pass does.
+
+Three things to know before you turn it on:
+
+- **It needs the tap gesture.** A paste is a synthetic ⌘V, and in hold-to-talk the trigger is a
+  modifier that is physically down — every paste would be sent as ⌥⌘V into whatever app you are
+  in. With `doubleTap false` the setting stands down and says so in the log.
+- **It needs the warm whisper-server.** Partials never fall back to the cold `whisper-cli`: that
+  would spawn a model every 1.2s and make your final transcription slower, not faster. No warm
+  server, no streaming — and the tones stay on, so you are never left with a tool that is silent
+  and typing nothing.
+- **The last pass can still reword what is already typed.** Usually punctuation or a capital. There
+  is no un-paste and deliberately no attempt at one: synthesising backspaces into an app whose
+  cursor may have moved since would delete text that was never ours. A word left as first heard is
+  a cosmetic loss; a doubled half-sentence is not.
+
+The honest way to make it faster is a second, smaller model answering the partials while
+large-v3-turbo keeps the final transcript. Shrinking the encoder window per request instead
+(`audio_ctx`) was tried and thrown out: it does cut a pass to 0.8s, and on some clips it returns
+fluent invented text — *"the final pass has to line a line. So the final pass has to line a line"* —
+at every window size tried, deterministically enough that two passes agree on it and it gets typed.
+Fast and occasionally making things up is the one trade a dictation tool cannot take.
 
 ### Polish (optional)
 
@@ -399,6 +454,11 @@ indistinguishable. One run of each separates them.
 - Audio is written to `~/.murmurflow/audio/` and deleted **the instant it's transcribed** — before
   the optional polish call and before the paste, so a crash downstream can't leave your voice on
   disk.
+- With `stream` on, each pass copies the clip so far to a second file next to it and deletes that
+  copy the moment the pass ends, pass or fail. The copy exists because the recorder has not finished
+  writing the original's header yet and reading it means patching one — never the file ffmpeg is
+  still appending to. It lives for the length of one decode and it is inside the same directory the
+  clip is, so it is covered by the same deletion and the same 10-minute ceiling.
 - The recorder bounds its own life at 10 minutes, so a daemon killed mid-clip can't leave the
   microphone hot. (This is not hypothetical: it was found in development as three orphaned
   recorders, 4.5 hours each, 1.4 GB of audio, microphone open the whole time.)

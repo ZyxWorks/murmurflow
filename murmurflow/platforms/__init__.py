@@ -84,8 +84,9 @@ input_permitted = impl.input_permitted
 #: One line telling the user how to grant it, or ``""`` when there is nothing to grant.
 permission_hint = impl.permission_hint
 
-#: Type text straight into the focused app, character by character, without the clipboard. ``False``
-#: where that is not available — the caller falls back to :func:`inject`.
+#: Type text straight into the focused app, without the clipboard. Returns whatever did NOT go out,
+#: so a caller can fall back to :func:`inject` for exactly that much and no more. The whole string
+#: back means the platform does not do this at all.
 type_text = impl.type_text
 
 # --- sound --------------------------------------------------------------------------------------

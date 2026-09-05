@@ -1720,20 +1720,29 @@ def stream_note(stream: Stream | None) -> str:
     return note
 
 
-def place(text: str) -> bool:
-    """Put a streamed chunk at the cursor, the cheapest way that works. Never raises.
+def place(text: str) -> str:
+    """Put a streamed chunk at the cursor. Returns the part of it that actually landed.
 
     Typed as unicode key events where the platform can (macOS), which is 2.6ms and never touches
     the clipboard; the clipboard paste is the fallback, and is what every other platform does.
     Held by the caller under :data:`_INJECT_LOCK` either way — not for the clipboard's sake now,
     but for ORDER: a chunk must never land after the finished sentence it belongs in the middle of.
+
+    **What LANDED, and not whether it worked.** The typing goes out in pieces, so a failure halfway
+    leaves some of it on screen; falling back with the whole chunk would type the first half twice,
+    and reporting "it failed" would leave the streamer's idea of the screen short, which is what
+    :func:`stream_tail` reads to decide what is still missing at the end.
     """
-    typed = False
+    rest = text
     # Never lose a chunk to a typing API that is having a bad day: whatever it does, the paste is
     # still there underneath.
     with contextlib.suppress(Exception):
-        typed = platforms.type_text(text)
-    return typed or _inject(text)[0]
+        rest = platforms.type_text(text)
+    if not rest:
+        return text
+    if _inject(rest)[0]:
+        return text
+    return text[: len(text) - len(rest)]  # only the part the typing already put on screen
 
 
 def stream_start(rec: Recording) -> None:
@@ -1791,8 +1800,12 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
                 # The space belongs to the FRONT of the chunk and not the back of the last one:
                 # trailing space would be typed and then left behind at the end of the dictation,
                 # and the very first chunk is the one that must not have one.
-                if place(f" {chunk}" if stream.text else chunk):
-                    stream.text = f"{stream.text} {chunk}".strip()
+                # `stream.text` is literally what is on the screen, built from what LANDED rather
+                # than from what was asked for — see :func:`place`. The leading space travels with
+                # the chunk, so this is a concatenation and never a re-join.
+                landed = place(f" {chunk}" if stream.text else chunk)
+                if landed:
+                    stream.text = f"{stream.text}{landed}".strip()
                     stream.typed += 1
         stream.done.wait(max(0.0, STREAM_EVERY_SECONDS - (time.monotonic() - started)))
 

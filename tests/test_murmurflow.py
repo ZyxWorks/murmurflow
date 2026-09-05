@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import itertools
 import json
 import os
 import sys
@@ -1612,11 +1613,9 @@ def test_a_streamed_chunk_is_typed_and_never_touches_the_clipboard(monkeypatch):
     """
     typed: list[str] = []
     pasted: list[str] = []
-    monkeypatch.setattr(
-        dictate.platforms, "type_text", lambda text: bool(typed.append(text)) or True
-    )
+    monkeypatch.setattr(dictate.platforms, "type_text", lambda text: typed.append(text) or "")
     monkeypatch.setattr(dictate, "_inject", lambda text: (bool(pasted.append(text)), "", ""))
-    assert dictate.place(" and then") is True
+    assert dictate.place(" and then") == " and then"
     assert typed == [" and then"]
     assert pasted == []
 
@@ -1624,11 +1623,11 @@ def test_a_streamed_chunk_is_typed_and_never_touches_the_clipboard(monkeypatch):
 def test_a_chunk_that_cannot_be_typed_still_lands_by_paste(monkeypatch):
     """Windows types nothing, and a Mac without the grant cannot either. Never lose the words."""
     pasted: list[str] = []
-    monkeypatch.setattr(dictate.platforms, "type_text", lambda _text: False)
+    monkeypatch.setattr(dictate.platforms, "type_text", lambda text: text)
     monkeypatch.setattr(
         dictate, "_inject", lambda text: (bool(pasted.append(text)) or True, "", "")
     )
-    assert dictate.place(" and then") is True
+    assert dictate.place(" and then") == " and then"
     assert pasted == [" and then"]
 
     def _boom(_text):
@@ -1636,8 +1635,62 @@ def test_a_chunk_that_cannot_be_typed_still_lands_by_paste(monkeypatch):
 
     monkeypatch.setattr(dictate.platforms, "type_text", _boom)
     pasted.clear()
-    assert dictate.place(" and then") is True
+    assert dictate.place(" and then") == " and then"
     assert pasted == [" and then"]
+
+
+def test_typing_that_stops_halfway_pastes_only_what_is_left(monkeypatch):
+    """The text goes out in pieces, so a failure halfway is already half on screen. Told only that
+    it failed, the caller would paste the whole chunk over the top and type the first half twice.
+    """
+    pasted: list[str] = []
+    monkeypatch.setattr(dictate.platforms, "type_text", lambda _text: "then")
+    monkeypatch.setattr(
+        dictate, "_inject", lambda text: (bool(pasted.append(text)) or True, "", "")
+    )
+    assert dictate.place(" and then") == " and then"
+    assert pasted == ["then"], "only the part that never went out"
+
+    # ...and when even the paste fails, only what the typing already placed is remembered, or the
+    # final transcript would be asked to fill a gap that is not there.
+    monkeypatch.setattr(dictate, "_inject", lambda _text: (False, "no", ""))
+    assert dictate.place(" and then") == " and "
+
+
+def test_an_emoji_is_never_split_across_two_events():
+    """Both UTF-16 units of a non-BMP character must reach ONE event, or the app is handed half a
+    character and drops it — silently, while everything reports success.
+    """
+    macos = pytest.importorskip("murmurflow.platforms.macos")
+    if sys.platform != "darwin":
+        pytest.skip("the direct-typing path is macOS only")
+    import ctypes
+
+    size = macos._TYPE_CHUNK
+    text = "a" * (size - 1) + "\U0001f600" + "ok"  # the emoji straddles the first seam
+    units = text.encode("utf-16-le")
+    buffer = (ctypes.c_uint16 * (len(units) // 2)).from_buffer_copy(units)
+    total = len(buffer)
+
+    seams = []
+    start = 0
+    while start < total:
+        start = macos._chunk_end(buffer, start, total)
+        seams.append(start)
+    for seam in seams[:-1]:
+        assert not 0xD800 <= buffer[seam - 1] <= 0xDBFF, "a piece ended on half a character"
+    # ...and every piece still decodes on its own, which is what the event actually receives.
+    pieces = [0, *seams]
+    for lower, upper in itertools.pairwise(pieces):
+        raw = bytes(bytearray(units[lower * 2 : upper * 2]))
+        assert raw.decode("utf-16-le")  # raises on a lone surrogate
+    assert (
+        "".join(
+            bytes(bytearray(units[a * 2 : b * 2])).decode("utf-16-le")
+            for a, b in itertools.pairwise(pieces)
+        )
+        == text
+    )
 
 
 def test_the_last_part_of_a_long_dictation_is_never_pasted_twice():

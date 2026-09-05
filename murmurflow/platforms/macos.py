@@ -450,37 +450,58 @@ _CF.CFRelease.restype = None
 _TYPE_CHUNK = 16
 
 
-def type_text(text: str) -> bool:
-    """Type ``text`` into the focused app as unicode key events. ``False`` if it could not.
+def _chunk_end(units: ctypes.Array[ctypes.c_uint16], start: int, total: int) -> int:
+    """Where the piece beginning at ``start`` ends — never between the halves of one character.
 
-    ``False`` is a real answer and the caller falls back to the clipboard: this needs the same
-    Accessibility grant a paste does, and a machine that cannot post events must still dictate.
+    A non-BMP character (an emoji) is two UTF-16 units, and both have to reach
+    ``CGEventKeyboardSetUnicodeString`` in the same string. Split across two events the app is
+    handed half a character and drops it, silently, while everything reports success.
+    """
+    end = min(start + _TYPE_CHUNK, total)
+    if end < total and end - 1 > start and 0xD800 <= units[end - 1] <= 0xDBFF:
+        end -= 1  # a high surrogate at the seam: let its other half come with it, next time round
+    return end
+
+
+def type_text(text: str) -> str:
+    """Type ``text`` into the focused app as unicode key events. Returns what did NOT go out.
+
+    ``""`` means all of it landed; the whole string back means none of it did, and the caller falls
+    back to the clipboard — this needs the same Accessibility grant a paste does, and a machine
+    that cannot post events must still dictate.
+
+    **The remainder, and not a bool.** The text goes out in pieces, so a failure halfway has
+    already put some of it on screen. A caller told only "that did not work" would paste the whole
+    chunk over the top of the half that landed, and the words in the middle would appear twice.
     """
     if not text:
-        return False
+        return ""
     try:
         lib = _load()
     except _Unavailable:
-        return False
+        return text
     units = text.encode("utf-16-le", errors="ignore")
     buffer = (ctypes.c_uint16 * (len(units) // 2)).from_buffer_copy(units)
+    total = len(buffer)
+    start = 0
     try:
-        for start in range(0, len(buffer), _TYPE_CHUNK):
-            piece = buffer[start : start + _TYPE_CHUNK]
-            payload = (ctypes.c_uint16 * len(piece))(*piece)
+        while start < total:
+            end = _chunk_end(buffer, start, total)
+            payload = (ctypes.c_uint16 * (end - start))(*buffer[start:end])
             for pressed in (True, False):
                 event = lib.CGEventCreateKeyboardEvent(None, 0, pressed)
                 if not event:
-                    return False
+                    return units[start * 2 :].decode("utf-16-le", errors="ignore")
                 # No modifiers, whatever the hands are doing. The characters are carried by the
                 # event, so nothing here is a shortcut that a held Control could turn into one.
                 lib.CGEventSetFlags(event, 0)
                 lib.CGEventKeyboardSetUnicodeString(event, len(payload), payload)
                 lib.CGEventPost(_SESSION_TAP, event)
                 _CF.CFRelease(event)
+            start = end
     except Exception:  # noqa: BLE001 — a failed keystroke falls back to the paste, never crashes
-        return False
-    return True
+        return units[start * 2 :].decode("utf-16-le", errors="ignore")
+    return ""
 
 
 # --- the one sound ------------------------------------------------------------------------------

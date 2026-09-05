@@ -84,8 +84,8 @@ def permission_hint() -> str:
     return _WHY
 
 
-def type_text(text: str) -> bool:
-    return False
+def type_text(text: str) -> str:
+    return text
 
 
 def play_ready() -> None:

@@ -383,6 +383,7 @@ _VERBS = (
         "config set trigger control_option",
         "change the key: control_option · command_option · left_control · f13",
     ),
+    ("config set stream true", "type the words as you say them, instead of all at once at the end"),
     ("config set doubleTap false", "hold the key instead of tapping it twice"),
     ("config set language en", "pin the language — worth ~0.7s a sentence"),
     ("config set stripFillers true", "delete 'um' and 'uh' — off, so you get verbatim"),
@@ -565,7 +566,7 @@ def _reject(key: str, value: object) -> str:
                 f"saying so. Pick one of: {', '.join(offered)} — or a folder holding your own "
                 "ready/done/fail sound files."
             )
-    elif key in {"doubleTap", "stripFillers", "keepAudio"}:
+    elif key in {"doubleTap", "stripFillers", "keepAudio", "stream"}:
         if not isinstance(value, bool):
             return f"`{key}` is true or false, not `{text}`."
     elif key == "quietFloor":
@@ -645,6 +646,17 @@ def _warn(key: str, value: object) -> str:
                 f"`languages` says you speak {', '.join(sorted(spoken))}, so every clip decoded as "
                 f"{dictate.language_code(text)} would be thrown away. Add it there, or unset it."
             )
+    # SAID FROM BOTH SIDES, because either order leaves the same dead setting: turn streaming on
+    # while holding, or turn holding back on while streaming, and `stream` is simply inert. See
+    # `dictate.streaming` for why a held modifier cannot paste.
+    if (key == "stream" and value and not dictate.double_tap_mode()) or (
+        key == "doubleTap" and not value and dictate.streaming_wanted()
+    ):
+        return (
+            "streaming needs the tap gesture — a held-down modifier turns every paste into a "
+            "chord — so it stays off while `doubleTap` is false. `murmurflow config set doubleTap "
+            "true` to have both."
+        )
     if key == "polishCommand" and text:
         program = ""
         with contextlib.suppress(ValueError, IndexError):

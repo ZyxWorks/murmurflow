@@ -14,6 +14,7 @@ import io
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -1556,3 +1557,134 @@ def test_the_shipped_ceiling_leaves_months_of_real_use_in_the_file():
     # ~120 bytes a clip. The point of the number is that trimming is rare, not that it is tidy.
     assert dictate.LOG_MAX_BYTES / 120 > 5_000
     assert dictate.LOG_KEEP_BYTES < dictate.LOG_MAX_BYTES
+
+
+# --- streaming ---------------------------------------------------------------------------------
+
+
+def test_only_the_words_two_passes_agreed_on_are_settled():
+    # The pass that can still see more audio coming is the one that revises, so the word touching
+    # the end is never committed even when both passes said it.
+    assert dictate.stable_prefix("the quick brown", "the quick brown fox") == "the quick brown"
+    assert dictate.stable_prefix("the quick brown", "the quick green fox") == "the quick"
+
+
+def test_punctuation_and_capitals_are_not_a_disagreement():
+    # "okay so we" becomes "Okay, so we" the moment whisper sees the end of the sentence. Treating
+    # that as a changed word would stall the stream on every clip that ends in a full stop.
+    assert dictate.stable_prefix("okay so we", "Okay, so we start") == "Okay, so we"
+
+
+def test_the_first_pass_holds_its_tail_back_instead_of_waiting_for_a_second():
+    # There is nothing yet to agree with, and waiting costs a whole ~2s pass on the one update
+    # whose lateness is most felt. The tail is where whisper's revisions are, so the tail is what
+    # is held.
+    assert dictate.STREAM_HOLDBACK_WORDS == 4
+    assert dictate.stable_prefix("", "one two three four five six") == "one two"
+    assert dictate.stable_prefix("", "hello there world") == ""  # nothing but tail yet
+
+
+def test_the_tail_is_what_is_not_at_the_cursor_yet():
+    assert dictate.stream_tail("the quick brown", "the quick brown fox jumps") == "fox jumps"
+    assert dictate.stream_tail("", "the whole thing") == "the whole thing"
+
+
+def test_a_fully_streamed_sentence_leaves_nothing_to_paste():
+    assert dictate.stream_tail("all of it", "All of it.") == ""
+
+
+def test_a_reworded_prefix_neither_doubles_nor_loses_the_rest():
+    # The final pass turned "to" into "two" inside text that is already on screen. There is no
+    # un-paste, so the only question is whether what follows lands exactly once.
+    assert dictate.stream_tail("send it to him", "send it two him tomorrow") == "tomorrow"
+
+
+def test_streaming_stands_down_while_the_trigger_is_held():
+    # A held modifier turns every ⌘V into ⌥⌘V, so the setting is honoured only under doubleTap.
+    config.set_value("stream", True)
+    config.set_value("doubleTap", False)
+    assert dictate.streaming_wanted() is True
+    assert dictate.streaming() is False
+    config.set_value("doubleTap", True)
+    assert dictate.streaming() is True
+
+
+def test_the_cues_only_stand_down_once_streaming_has_actually_typed_something(monkeypatch):
+    # `stream` on with no warm server behind it decodes nothing. Muting off the SETTING would leave
+    # a tool that is silent and types nothing; muting off the last clip's RESULT cannot.
+    monkeypatch.delenv("MURMURFLOW_NO_AUDIO", raising=False)
+    played: list[str] = []
+    monkeypatch.setattr(dictate.platforms, "play", lambda path: played.append(str(path)))
+    config.set_value("stream", True)
+    config.set_value("doubleTap", True)
+
+    dictate._STREAMED_LAST.clear()  # streaming is on, but has never put a word on screen
+    dictate.cue(dictate.CUE_READY)
+    assert played, "the tones must stay on until streaming has proved it works"
+
+    played.clear()
+    dictate._STREAMED_LAST.set()
+    dictate.cue(dictate.CUE_READY)
+    dictate.cue(dictate.CUE_DONE)
+    assert played == []
+
+    dictate.cue(dictate.CUE_FAIL)  # a failure types nothing, so its tone is the only signal left
+    assert played
+
+
+def test_a_stream_that_typed_nothing_hands_the_cues_back(tmp_path):
+    wav = tmp_path / "never.wav"
+    dictate._STREAMS[str(wav)] = dictate.Stream(threading.Event())
+    dictate._STREAMED_LAST.set()
+    assert dictate.streamed(dictate.stop_streaming(wav)) == ""
+    assert dictate._STREAMED_LAST.is_set() is False
+
+
+def test_stopping_a_stream_returns_what_it_pasted_and_ends_it(tmp_path):
+    wav = tmp_path / "said.wav"
+    stream = dictate.Stream(threading.Event(), "hello there")
+    dictate._STREAMS[str(wav)] = stream
+    stopped = dictate.stop_streaming(wav)
+    assert stopped is stream and stream.done.is_set()
+    assert dictate.streamed(stopped) == "hello there"
+    assert dictate.stop_streaming(wav) is None  # gone from the registry
+
+
+def test_a_paste_still_in_flight_is_counted_before_the_tail_is_worked_out(tmp_path):
+    # The race this seam exists for, and it produced a doubled half-sentence on a real machine: the
+    # pass that was already inside `inject` when the key was released records its words only when
+    # it returns, so reading `text` without waiting reports a prefix shorter than the screen shows.
+    wav = tmp_path / "inflight.wav"
+    stream = dictate.Stream(threading.Event())
+    dictate._STREAMS[str(wav)] = stream
+
+    def _late_paste():
+        with dictate._INJECT_LOCK:
+            time.sleep(0.15)
+            stream.text = "the words already on screen"
+
+    pasting = threading.Thread(target=_late_paste)
+    pasting.start()
+    time.sleep(0.02)  # the key is released mid-paste
+    stopped = dictate.stop_streaming(wav)
+    assert dictate.streamed(stopped) == "the words already on screen"
+    pasting.join()
+
+
+def test_a_leading_space_survives_into_the_paste(monkeypatch):
+    # A streamed chunk arrives as " and then", because the space in front of it is the gap between
+    # it and the words already on screen. `inject` stripping that glued every chunk to the last.
+    sent: list[str] = []
+
+    def _record(text, settle):
+        sent.append(text)
+        return True, "", ""
+
+    monkeypatch.setattr(dictate.platforms, "input_blocked", lambda: "")
+    monkeypatch.setattr(dictate.platforms, "inject", _record)
+    assert dictate.inject(" and then")[0] is True
+    assert sent == [" and then"]
+
+
+def test_whitespace_alone_is_still_nothing_to_type():
+    assert dictate.inject("   ")[1] == "nothing to type"

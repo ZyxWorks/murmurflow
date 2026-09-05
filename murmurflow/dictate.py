@@ -28,8 +28,9 @@ on one Mac roughly doubled them here. Measure your own before believing any of t
 
 **What this deliberately does NOT do.** No compiled helper — hold-to-talk is detected by polling
 ``CGEventSourceFlagsState`` through stdlib :mod:`ctypes` (see :mod:`murmurflow.hotkey`), which needs
-no Xcode, no code signing and no notarization. No streaming or partial decode: it would cost a
-permanently resident microphone to save a fraction of a batch pass. No LLM rewrite on the hot path
+no Xcode, no code signing and no notarization. No always-on microphone: partial decode exists
+(``config set stream true``, see :func:`streaming`) but it decodes the clip you are already
+recording, so nothing is listening between sentences. No LLM rewrite on the hot path
 unless you ask for one — :func:`polish` is opt-in precisely because spawning a model costs seconds
 against a transcription measured in low single digits, which would multiply the felt latency.
 
@@ -1321,7 +1322,18 @@ def clipboard_set(text: str) -> bool:
 
 
 def inject(text: str) -> tuple[bool, str, str]:
-    """Type ``text`` into whatever app has focus. ``(ok, problem, note)``; never raises.
+    """Type ``text`` into whatever app has focus, one paste at a time. ``(ok, problem, note)``.
+
+    The lock is what makes "one at a time" true, and it earns its place only because of streaming:
+    a partial pastes from the streaming thread while the poll loop is finishing the same sentence
+    on its own. See :data:`_INJECT_LOCK` for why two overlapping pastes lose the clipboard.
+    """
+    with _INJECT_LOCK:
+        return _inject(text)
+
+
+def _inject(text: str) -> tuple[bool, str, str]:
+    """:func:`inject` without the lock, for callers that are already holding it. Never raises.
 
     ``note`` is a diagnostic for the daemon log and nothing else: which app the keystroke went to,
     and whether the whole transcript was still on the clipboard when the target read it. A paste
@@ -1338,8 +1350,13 @@ def inject(text: str) -> tuple[bool, str, str]:
     what ENDS the window in which the target may read the clipboard, and a long transcript is still
     being inserted when a fixed wait has already closed it.
     """
-    text = (text or "").strip()
-    if not text:
+    # Emptiness is tested on the STRIPPED text but the text itself is pasted exactly as given, and
+    # the difference is a whole word: a streamed chunk arrives as " and then" because the space in
+    # front of it is the space between it and the words already at the cursor. Stripping here glued
+    # every chunk onto the previous one. Nothing else is affected — `tidy` already returns stripped
+    # text, so the final paste looks identical either way.
+    text = text or ""
+    if not text.strip():
         return False, "nothing to type", ""
     blocked = platforms.input_blocked()
     if blocked:
@@ -1356,6 +1373,283 @@ def inject(text: str) -> tuple[bool, str, str]:
     # before it sends the chord and aborts before the restore, so a refused paste leaves the
     # transcript there over whatever the user had copied — exactly as the blocked branch does.
     return False, f"{problem} {PASTE_YOURSELF}", note
+
+
+# --- streaming --------------------------------------------------------------------------------
+
+# One paste at a time, across every thread that has text to place. The streamer pastes from its own
+# thread while the poll loop is still watching the trigger, so without this a partial and a final
+# can be inside `inject` together — and `inject` writes the clipboard, sends the chord and puts the
+# old clipboard back, so two of them interleaved restore each other's clipboard over the wrong
+# text. Held by BOTH sides, and the streamer re-checks its stop flag inside it, so a pass that was
+# already decoding when the key was released cannot paste after the final text has landed.
+_INJECT_LOCK = threading.Lock()
+
+#: Seconds of speech before the first partial pass. Long enough to be a phrase and not a fragment:
+#: whisper on one second of audio returned "Okay." where the speaker had said "okay so the idea is
+#: that", and a first pass with four words in it commits none of them (see
+#: :data:`STREAM_HOLDBACK_WORDS`), so a shorter wait here does not make the first words arrive
+#: sooner — it just spends a whole pass to find that out.
+STREAM_FIRST_SECONDS = 1.5
+
+#: Minimum gap between passes. A pass costs about the same whatever it is decoding (see
+#: :func:`_partial`), so in practice the gap IS the pass and this only stops a very fast server
+#: being asked the same question ten times a second.
+STREAM_EVERY_SECONDS = 0.8
+
+#: How many words at the end of a lone first pass are held back rather than typed.
+#:
+#: The two-pass agreement in :func:`stable_prefix` is the rule, and the first pass is the one case
+#: it cannot serve: there is nothing yet to agree WITH, so waiting for a second costs a whole extra
+#: pass — measured at ~2.1s on an M4 Pro with large-v3-turbo, flat, because whisper.cpp pads every
+#: request to its 30s window whether it is decoding one second or nine. That is the difference
+#: between the first words landing around 3.5s and around 5.5s, and 5.5s is longer than plenty of
+#: whole sentences.
+#:
+#: Four, because whisper's revisions cluster at the end of the audio — the words it has not heard
+#: the end of yet — and because the ones further back are almost always punctuation or a capital,
+#: which :func:`_key` already ignores and :func:`stream_tail` absorbs.
+STREAM_HOLDBACK_WORDS = 4
+
+#: A partial that takes longer than this is abandoned. Bounded well under the final transcribe's 60s
+#: because whisper-server answers one request at a time: a partial still decoding when the key is
+#: released is time the FINAL transcription spends queued behind it, i.e. straight onto the latency
+#: this whole product is about.
+STREAM_TIMEOUT = 10.0
+
+
+@dataclass
+class Stream:
+    """One recording's live paste: the stop flag, and what it has already put at the cursor."""
+
+    done: threading.Event
+    text: str = ""
+
+
+#: In-flight streams, keyed by the wav they are transcribing. A dict and not an attribute on
+#: `Recording` because a `Recording` is frozen and travels through a JSON file on disk — `toggle`
+#: reads one back in a DIFFERENT process, where no streaming thread exists and this is empty, which
+#: is exactly right: that surface pastes once at the end, as it always did.
+_STREAMS: dict[str, Stream] = {}
+
+#: Did the LAST clip's stream actually put words on the screen?
+#:
+#: The cues stand down for a streamer that is demonstrably working, and only for that one. `stream`
+#: is a setting; a warm whisper-server answering partials in under a second is a fact, and the two
+#: come apart — the server can be missing at start-up or wedge halfway through the afternoon, and
+#: :func:`_partial` is warm-only, so on that machine streaming types nothing at all. Muting the cues
+#: off the SETTING would leave that user with a tool that makes no sound and shows no text, which is
+#: indistinguishable from one that is not running. Muting them off the last clip's RESULT means the
+#: first sentence after a failure sounds exactly like it always did, with nothing to reconfigure.
+_STREAMED_LAST = threading.Event()
+
+
+def streaming() -> bool:
+    """True when partial text is pasted at the cursor while you are still speaking.
+
+    **Gated on the tap gesture, and that is a correctness gate rather than a preference.** A paste
+    is a synthetic ⌘V, and in hold-to-talk the trigger is a modifier that is physically DOWN for
+    the whole clip — so every partial would be sent as ⌥⌘V or ⌃⌘V into whatever app has focus,
+    which is not a paste and in several apps is a destructive shortcut. Tapping holds nothing down.
+    """
+    return streaming_wanted() and double_tap_mode()
+
+
+def streaming_wanted() -> bool:
+    """The ``stream`` setting alone, before the gesture gets a veto — so a caller can say WHY."""
+    return config.flag("stream", False, cfg=_cfg())
+
+
+def _key(word: str) -> str:
+    """A word reduced to what whisper will not change its mind about: its letters, lower case.
+
+    Punctuation and capitalisation are exactly what a later pass revises once it can see the end of
+    the sentence ("okay so" becomes "Okay, so"), and they are also the only difference that does
+    not matter for deciding the same word was heard twice.
+    """
+    return "".join(character for character in word.lower() if character.isalnum())
+
+
+def stable_prefix(previous: str, current: str) -> str:
+    """The words two consecutive passes over the same growing audio BOTH heard. Never raises.
+
+    This is the whole safety of streaming, and the reason it is not simply "paste whatever the last
+    pass said". Whisper revises: give it another second of audio and it re-reads the words it
+    already had, because it now knows how the sentence ends. Pasting each pass's tail therefore
+    types a guess that the next pass often withdraws, and nothing can un-type it.
+
+    Two passes agreeing on a word is the cheap, standard test for "this one is settled" (the
+    local-agreement rule from the streaming-whisper literature; it needs no model change and no
+    timestamps). The final word of the agreed run is dropped as well: it is the one still touching
+    the end of the audio, so it is the one most likely to grow a suffix — "wait" into "waiting".
+
+    The FIRST pass has nothing to agree with and is the exception: it commits everything but its
+    last :data:`STREAM_HOLDBACK_WORDS`. Waiting for a second pass would be stricter and would cost
+    a whole pass — about two seconds — on the one update whose lateness is most felt.
+
+    ponytail: the whole clip is re-decoded every pass, and every pass costs the same because
+    whisper.cpp pads to a 30s window regardless (measured: 2.07s for 1s of audio, 2.21s for 9s).
+    So the real ceiling is not quadratic cost, it is the flat ~2s cadence — the words arrive in
+    two-second lumps, not word by word. Shrinking the encoder window per request (`audio_ctx`) was
+    tried and REMOVED: it does make a pass 0.8s, and on some clips it also returns fluent
+    invented text ("the final pass has to line a line. So the final pass has to line a line") at
+    every window size from 512 to 1350, deterministically enough that two passes agree on it and
+    it gets typed. The honest fix is a second, smaller model answering partials while the big one
+    keeps the final; that is a whole extra server and model to install, so it is not built.
+    """
+    words = current.split()
+    if not previous:
+        return " ".join(words[: max(0, len(words) - STREAM_HOLDBACK_WORDS)])
+    settled = 0
+    for before, after in zip(previous.split(), words, strict=False):
+        if _key(before) != _key(after):
+            break
+        settled += 1
+    return " ".join(words[: min(settled, max(0, len(words) - 1))])
+
+
+def stream_tail(pasted: str, final: str) -> str:
+    """What of ``final`` is not at the cursor yet, given ``pasted`` already is. Never raises.
+
+    The ordinary case is the easy one: the streamed words are still a prefix of the final
+    transcript and this returns the rest of it.
+
+    The interesting case is when they are not, because the last pass — the only one that sees the
+    whole clip — reworded something already typed. **There is no un-paste**, and there deliberately
+    is no attempt at one: synthesising backspaces into an app whose cursor may have moved since
+    (the user clicked away, an autocomplete fired) deletes text that was never ours. So the two are
+    lined up on the last word actually pasted and the transcript carries on from there. A word left
+    reading as whisper first heard it is a cosmetic loss; a doubled or missing half-sentence is not.
+    """
+    already = [_key(word) for word in pasted.split()]
+    if not already:
+        return final
+    words = final.split()
+    keys = [_key(word) for word in words]
+    if keys[: len(already)] == already:
+        return " ".join(words[len(already) :])
+    # Search near the end of what was pasted rather than from the front: the anchor wanted is the
+    # LAST word typed, and an ordinary sentence repeats short words ("the", "to") several times.
+    for index in range(min(len(keys), len(already) + 3) - 1, -1, -1):
+        if keys[index] == already[-1]:
+            return " ".join(words[index + 1 :])
+    return " ".join(words[len(already) :])  # no anchor at all: trust the count and lose nothing
+
+
+def _partial(live: Path, snapshot: Path) -> str:
+    """Transcribe the audio captured SO FAR, or ``""`` if there is nothing worth reading. Never raises.
+
+    The live wav is COPIED and the copy is what gets read, for two reasons that are both about not
+    touching the file ffmpeg is appending to: :func:`repair_wav` writes into the RIFF header (the
+    recorder has not written the real lengths yet — it does that when it exits), and a reader
+    seeking around a growing file is a race nobody needs. A copy torn mid-sample costs one clicky
+    sample at the very end, which is inside the part this never commits anyway.
+
+    Warm server only, never the cold ``whisper-cli`` fallback. A cold pass costs seconds and would
+    be spawned once a second for the length of the clip: a wedged warm server would turn streaming
+    into a CPU fire that also makes the FINAL transcription slower. No warm server, no streaming.
+    """
+    try:
+        shutil.copyfile(live, snapshot)
+    except OSError:
+        return ""
+    try:
+        repair_wav(snapshot)
+        captured = audio_seconds(snapshot)
+        if captured < MIN_CLIP_SECONDS or peak_dbfs(snapshot) < quiet_floor():
+            return ""
+        heard = transcribe_warm(snapshot, timeout=STREAM_TIMEOUT)
+        if not heard.text or heard.confidence < SPEECH_CONFIDENCE or is_hallucination(heard.text):
+            return ""
+        return tidy(heard.text)
+    except Exception:  # noqa: BLE001 — a partial that fails is a partial nobody sees, never a crash
+        return ""
+    finally:
+        snapshot.unlink(missing_ok=True)
+
+
+def stream_start(rec: Recording) -> None:
+    """Begin pasting words at the cursor while ``rec`` is still recording. Returns immediately.
+
+    A no-op unless :func:`streaming` is on, so every caller can call it unconditionally.
+    """
+    if not streaming():
+        return
+    stream = Stream(threading.Event())
+    _STREAMS[str(rec.wav)] = stream
+    threading.Thread(target=_stream_loop, args=(rec, stream), daemon=True).start()
+
+
+def _stream_loop(rec: Recording, stream: Stream) -> None:
+    """The streaming thread: decode what has been said, paste what is settled, repeat."""
+    snapshot = rec.wav.with_name(f"{rec.wav.stem}-partial.wav")
+    previous = ""
+    if stream.done.wait(STREAM_FIRST_SECONDS):
+        return
+    while not stream.done.is_set():
+        started = time.monotonic()
+        heard = _partial(rec.wav, snapshot)
+        # A pass that read nothing — still below the quiet floor, a hallucination thrown out, the
+        # server busy — is not a pass that DISAGREED. Keeping the last real reading as `previous`
+        # means the next good pass can still agree with it; overwriting it with "" would demote
+        # that pass to a first one and hand back the four words the holdback rule keeps.
+        if not heard:
+            stream.done.wait(max(0.0, STREAM_EVERY_SECONDS - (time.monotonic() - started)))
+            continue
+        settled = stable_prefix(previous, heard)
+        previous = heard
+        chunk = stream_tail(stream.text, settled) if settled else ""
+        if chunk:
+            with _INJECT_LOCK:
+                # Inside the lock, because `stop_streaming` sets this and then takes the lock: past
+                # this point the final text may already be at the cursor and this chunk would land
+                # after the end of the sentence it belongs in the middle of.
+                if stream.done.is_set():
+                    return
+                # The space belongs to the FRONT of the chunk and not the back of the last one:
+                # trailing space would be typed and then left behind at the end of the dictation,
+                # and the very first chunk is the one that must not have one.
+                if _inject(f" {chunk}" if stream.text else chunk)[0]:
+                    stream.text = f"{stream.text} {chunk}".strip()
+                    _STREAMED_LAST.set()
+        stream.done.wait(max(0.0, STREAM_EVERY_SECONDS - (time.monotonic() - started)))
+
+
+def stop_streaming(wav: Path) -> Stream | None:
+    """Stop the stream for ``wav`` starting any new pass. Returns it, for :func:`streamed`.
+
+    Deliberately does NOT wait for a pass that is already pasting — this runs the instant the key
+    is released, immediately in front of stopping the recorder, and blocking here would hold the
+    microphone open for the length of a ⌘V. The waiting is :func:`streamed`'s job, and it happens
+    later, behind the transcription, where nobody is counting the milliseconds.
+    """
+    stream = _STREAMS.pop(str(wav), None)
+    if stream is not None:
+        stream.done.set()
+    return stream
+
+
+def streamed(stream: Stream | None) -> str:
+    """What is on the screen already, once every in-flight paste has actually finished. Never raises.
+
+    **The lock, not the flag, is what makes this answer complete, and the difference was a doubled
+    half-sentence on screen.** :func:`stop_streaming` sets the flag, but a pass that was already
+    inside :func:`_inject` when the key was released keeps going — it has to, the ⌘V is sent — and
+    it only records those words in ``stream.text`` when it returns. Read the field without waiting
+    for that and it reports a shorter prefix than is really on the screen, so :func:`stream_tail`
+    computes a tail that starts too early and the final paste types the overlap a second time.
+    Caught exactly that way, against a real whisper-server: "while I am still talking" appeared
+    twice.
+    """
+    if stream is None:
+        return ""
+    with _INJECT_LOCK:
+        text = stream.text
+    if not text:
+        # Nothing reached the screen this time, so the next clip gets its cues back. See
+        # :data:`_STREAMED_LAST` — this is the whole self-healing half of it.
+        _STREAMED_LAST.clear()
+    return text
 
 
 # --- the flow ---------------------------------------------------------------------------------
@@ -1560,6 +1854,10 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     rec = rec or current()
     if rec is None:
         return Result("", 0.0, 0, False, "nothing was recording")
+    # FIRST, before the recorder is even stopped: no new partial pass may start now that the
+    # sentence is over, or a stale guess pastes itself after the finished text. What it DID paste
+    # is read later, by `streamed`, once the last one has landed.
+    stream = stop_streaming(rec.wav)
     seconds = rec.seconds
     wav = stop(rec)
     if wav is None:
@@ -1578,7 +1876,7 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     # After the two ways this can still be a non-event, so a failure cues once rather than being
     # contradicted by a "got it" a moment earlier — and before peak_dbfs and the ~600ms transcribe,
     # which is the whole point: the tone marks the microphone closing, not the text arriving.
-    cue(CUE_DONE)
+    cue(CUE_DONE)  # a no-op while streaming: the words on screen already said it. See `cue`.
     level = peak_dbfs(wav)
     captured = audio_seconds(wav)
 
@@ -1653,7 +1951,15 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     text = polish(text)  # a no-op unless `polishCommand` is configured
     if not paste:
         return Result(text, seconds, elapsed_ms, False, "", level, captured, warm=heard.warm)
-    ok, problem, note = inject(text)
+    pasted = streamed(stream)
+    tail = stream_tail(pasted, text)
+    if pasted and not tail:
+        # Streaming had already typed every word of it. Reporting "nothing to type" as a failure
+        # here would cue the fail tone over a dictation that worked perfectly.
+        return Result(
+            text, seconds, elapsed_ms, True, "", level, captured, "→ streamed", heard.warm
+        )
+    ok, problem, note = inject(f" {tail}" if pasted else tail)
     return Result(text, seconds, elapsed_ms, ok, problem, level, captured, note, heard.warm)
 
 
@@ -1970,6 +2276,13 @@ def cue(sound: str) -> None:
     sound heard can be attributed instead of theorised about.
     """
     if os.environ.get("MURMURFLOW_NO_AUDIO") or cues_muted():
+        return
+    # THE POINT OF STREAMING IS THAT IT REPLACES THESE TWO. `ready` says the microphone is live and
+    # `done` says the clip was taken; when the words themselves appear at the cursor while you are
+    # still speaking, both are a noise reporting something already on screen. `fail` stays, because
+    # a failure is exactly the case where no words ever appear and silence would be indistinguishable
+    # from a tool that is not running.
+    if sound in {CUE_READY, CUE_DONE} and streaming() and _STREAMED_LAST.is_set():
         return
     kind = sound
     sound = sound if Path(sound).is_file() else _cue_path(sound)
@@ -2363,6 +2676,22 @@ def listen_loop(
         emit(f"whisper warm on :{port()}")
     else:
         emit("whisper-server unavailable — falling back to cold whisper-cli (~1s slower)")
+    # Streaming has three preconditions and two of them can be false without anybody being told, so
+    # the daemon says which one it is on the line it already prints at start-up. A setting that is
+    # simply ignored is the worst kind: the user turned it on, nothing changed, and there is
+    # nothing to read.
+    if streaming_wanted():
+        if not double_tap_mode():
+            emit(
+                "[!] stream is on but doubleTap is off — a held key cannot paste, so it stands down"
+            )
+        elif not warm_expected:
+            emit(
+                "[!] stream is on but no warm server answered — partials are warm-only, so it "
+                "stands down and the cues stay on"
+            )
+        else:
+            emit("streaming — the words arrive while you talk, and the cues stand down")
 
     #: Consecutive clips that took the cold path while a warm server was supposed to be answering.
     cold_streak = [0]
@@ -2418,6 +2747,7 @@ def listen_loop(
         rec = start_and_cue()
         if rec is not None:
             mine.append(rec)
+            stream_start(rec)
 
     def on_release() -> None:
         if not mine:
@@ -2445,7 +2775,16 @@ def listen_loop(
         """A keyboard shortcut, not speech: throw the audio away without transcribing it."""
         if not mine:
             return  # same ownership rule as on_release
-        wav = stop(mine.pop())
+        rec = mine.pop()
+        # Whatever streaming already typed stays typed — there is no un-paste (see `stream_tail`) —
+        # but nothing more is added to it. An abort throws away the AUDIO, which is what it is for.
+        stream = stop_streaming(rec.wav)
+        wav = stop(rec)
+        # DRAINED AFTER THE RECORDER IS DOWN, and the order is the whole point: `streamed` waits on
+        # a paste that may still be settling, this runs on the poll loop's own thread, and the
+        # microphone is open and the trigger unwatched for as long as it blocks. Nothing above
+        # needs the answer — an abort throws the audio away — so the wait belongs behind the stop.
+        streamed(stream)  # for its other half: the cues come back if nothing reached the screen
         if wav is not None:
             wav.unlink(missing_ok=True)
 

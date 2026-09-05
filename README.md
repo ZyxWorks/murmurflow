@@ -376,19 +376,36 @@ waiting for it. A separate process cannot queue against itself.
 character-for-character what `large-v3-turbo` did. A live word is pasted and **there is no
 un-paste**, so a model that quietly rewords is not cheaper, it is wrong.
 
-**Measured** on an M4 Pro, macOS 26, `language` on `auto`, one 10.7 second sentence:
+**And a live word is TYPED, not pasted.** The clipboard round trip — save the pasteboard, write the
+text, send ⌘V, wait for the target to read it, put the old contents back — costs about 500ms, more
+than decoding the audio did. It was half the cycle, so the words arrived in two- and three-word
+lumps about once a second. A unicode key event carries the characters itself: no pasteboard,
+nothing to settle, **2.6ms**.
 
-| | one big model | with the live model |
-|---|---|---|
-| one live pass | 2.2s | **0.4s** |
-| first words at the cursor | 3.7s | **1.4s** |
-| lumps of text during the sentence | 5 | **12** |
-| the final transcription, after you stop | 2.9s | **1.7s** |
-| still left to paste when you stop | 62 of 195 chars | **21 of 195** |
+It is also safe on a German keyboard, which is the reason the clipboard was chosen in the first
+place: AppleScript's `keystroke` sends keycodes that the target re-maps through its own layout and
+mangles every umlaut, where `CGEventKeyboardSetUnicodeString` sends the characters themselves. The
+**final** transcript still goes through the clipboard, because it can be two thousand characters at
+once and because its paste reports back what the target actually received.
+
+**Measured** on an M4 Pro, macOS 26, `language` on `auto`, one 10.5 second sentence:
+
+| | one big model, pasted | live model, pasted | live model, typed |
+|---|---|---|---|
+| one live pass | 2.2s | 0.4s | **0.4s** |
+| the cycle: decode, then place the words | ~2.7s | ~0.9s | **~0.43s** |
+| first words at the cursor | 3.7s | 1.4s | **1.5s** |
+| lumps of text during the sentence | 5 | 12 | **21** |
+| still left to paste when you stop | 62 of 195 | 21 of 195 | **9 of 195 chars** |
+
+So it is **a word or two every 0.4 seconds**, not letter-by-letter captioning. Letters would be
+cosmetic: no word is known any sooner than the pass that decodes it. Past 30 seconds of speech
+whisper.cpp's padding becomes a second 30s window and the cycle doubles, so a long dictation lags
+further behind than a short one.
 
 Without the live model everything still works — the live pass goes to the big server, in ~2s lumps,
 as it did before. `murmurflow doctor` says which one you are on, and every clip's line in the daemon
-log ends with what streaming actually did: `stream 12x → 11 typed`.
+log ends with what streaming actually did: `stream 21x → 20 typed`.
 
 **Detecting the language is a whole extra encoder pass** — 0.75s of every 2.2s, measured — and one
 clip does not change language halfway through, so every pass after the first pins itself to what

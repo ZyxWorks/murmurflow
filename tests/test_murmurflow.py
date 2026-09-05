@@ -23,7 +23,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from murmurflow import cli, config, dictate, whisper
+from murmurflow import cli, config, dictate, service, whisper
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +39,13 @@ def _isolated_home(tmp_path, monkeypatch):
     # `preroll` a no-op and its `preroll_claim` wait out the full claim timeout.
     dictate._PREROLL = None
     dictate._STREAMS.clear()
+    # THE SUITE MUST NOT REACH OUT OF THIS DIRECTORY, and `MURMURFLOW_HOME` alone does not stop it:
+    # `config set` bounces the warm servers whenever the listener is INSTALLED, and that question is
+    # about the real machine. On a developer's Mac a config test therefore ran a real `pgrep` and a
+    # real SIGTERM, and killed the whisper-servers his own dictation was using — mid-afternoon, with
+    # nothing on screen to say why it had suddenly gone slow. A test that wants the bounce patches
+    # this back to True for itself.
+    monkeypatch.setattr(service, "running", lambda: False)
     return tmp_path
 
 
@@ -1597,6 +1604,40 @@ def test_a_reworded_prefix_neither_doubles_nor_loses_the_rest():
     # The final pass turned "to" into "two" inside text that is already on screen. There is no
     # un-paste, so the only question is whether what follows lands exactly once.
     assert dictate.stream_tail("send it to him", "send it two him tomorrow") == "tomorrow"
+
+
+def test_a_streamed_chunk_is_typed_and_never_touches_the_clipboard(monkeypatch):
+    """The clipboard round trip was ~500ms against ~420ms to decode the audio, so it was HALF the
+    streaming cycle and the report was "it is lagging behind, two or three words at a time".
+    """
+    typed: list[str] = []
+    pasted: list[str] = []
+    monkeypatch.setattr(
+        dictate.platforms, "type_text", lambda text: bool(typed.append(text)) or True
+    )
+    monkeypatch.setattr(dictate, "_inject", lambda text: (bool(pasted.append(text)), "", ""))
+    assert dictate.place(" and then") is True
+    assert typed == [" and then"]
+    assert pasted == []
+
+
+def test_a_chunk_that_cannot_be_typed_still_lands_by_paste(monkeypatch):
+    """Windows types nothing, and a Mac without the grant cannot either. Never lose the words."""
+    pasted: list[str] = []
+    monkeypatch.setattr(dictate.platforms, "type_text", lambda _text: False)
+    monkeypatch.setattr(
+        dictate, "_inject", lambda text: (bool(pasted.append(text)) or True, "", "")
+    )
+    assert dictate.place(" and then") is True
+    assert pasted == [" and then"]
+
+    def _boom(_text):
+        raise OSError("the event tap said no")
+
+    monkeypatch.setattr(dictate.platforms, "type_text", _boom)
+    pasted.clear()
+    assert dictate.place(" and then") is True
+    assert pasted == [" and then"]
 
 
 def test_the_last_part_of_a_long_dictation_is_never_pasted_twice():

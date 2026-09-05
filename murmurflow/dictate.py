@@ -1485,10 +1485,15 @@ _INJECT_LOCK = threading.Lock()
 #: word on screen at 1.37s against 1.88s.
 STREAM_FIRST_SECONDS = 1.0
 
-#: Minimum gap between passes. A pass costs about the same whatever it is decoding (see
-#: :func:`_partial`), so in practice the gap IS the pass and this only stops a very fast server
-#: being asked the same question ten times a second.
-STREAM_EVERY_SECONDS = 0.8
+#: Minimum gap between passes, measured from the START of the previous one. A pass costs about the
+#: same whatever it is decoding (see :func:`_partial`), so in practice the pass IS the gap and this
+#: only stops a very fast server being asked the same question ten times a second.
+#:
+#: It was 0.8 while a chunk was pasted through the clipboard, which cost ~500ms on its own — the
+#: cycle was ~0.9s and this never bit. Typing the chunk directly costs 2.6ms (see
+#: :func:`platforms.type_text`), so 0.8 became the thing holding the words back rather than the
+#: decode, and the report was "it is lagging behind, two or three words at a time".
+STREAM_EVERY_SECONDS = 0.25
 
 #: How many words at the end of a lone first pass are held back rather than typed.
 #:
@@ -1715,6 +1720,22 @@ def stream_note(stream: Stream | None) -> str:
     return note
 
 
+def place(text: str) -> bool:
+    """Put a streamed chunk at the cursor, the cheapest way that works. Never raises.
+
+    Typed as unicode key events where the platform can (macOS), which is 2.6ms and never touches
+    the clipboard; the clipboard paste is the fallback, and is what every other platform does.
+    Held by the caller under :data:`_INJECT_LOCK` either way — not for the clipboard's sake now,
+    but for ORDER: a chunk must never land after the finished sentence it belongs in the middle of.
+    """
+    typed = False
+    # Never lose a chunk to a typing API that is having a bad day: whatever it does, the paste is
+    # still there underneath.
+    with contextlib.suppress(Exception):
+        typed = platforms.type_text(text)
+    return typed or _inject(text)[0]
+
+
 def stream_start(rec: Recording) -> None:
     """Begin pasting words at the cursor while ``rec`` is still recording. Returns immediately.
 
@@ -1770,7 +1791,7 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
                 # The space belongs to the FRONT of the chunk and not the back of the last one:
                 # trailing space would be typed and then left behind at the end of the dictation,
                 # and the very first chunk is the one that must not have one.
-                if _inject(f" {chunk}" if stream.text else chunk)[0]:
+                if place(f" {chunk}" if stream.text else chunk):
                     stream.text = f"{stream.text} {chunk}".strip()
                     stream.typed += 1
         stream.done.wait(max(0.0, STREAM_EVERY_SECONDS - (time.monotonic() - started)))

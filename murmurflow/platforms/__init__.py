@@ -84,6 +84,10 @@ input_permitted = impl.input_permitted
 #: One line telling the user how to grant it, or ``""`` when there is nothing to grant.
 permission_hint = impl.permission_hint
 
+#: Type text straight into the focused app, character by character, without the clipboard. ``False``
+#: where that is not available — the caller falls back to :func:`inject`.
+type_text = impl.type_text
+
 # --- sound --------------------------------------------------------------------------------------
 
 #: Play the one sound this tool makes — the microphone is live — without blocking and without ever

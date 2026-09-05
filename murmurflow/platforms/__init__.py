@@ -91,9 +91,10 @@ type_text = impl.type_text
 
 # --- sound --------------------------------------------------------------------------------------
 
-#: Play the one sound this tool makes — the microphone is live — without blocking and without ever
-#: raising. No player, no sound, no crash.
+#: The two sounds this tool makes, without blocking and without ever raising. No player, no sound,
+#: no crash. Ready = the microphone is live, start talking. Done = it just closed, stop talking.
 play_ready = impl.play_ready
+play_done = impl.play_done
 
 # --- service ------------------------------------------------------------------------------------
 

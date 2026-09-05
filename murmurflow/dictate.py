@@ -1127,6 +1127,50 @@ def join_segments(transcript: str) -> str:
     return _SEGMENT_SEAM.sub(lambda seam: " " if seam.group(1) or seam.group(2) else "", transcript)
 
 
+#: Polite closings whisper invents for the pause between your last word and your hand.
+#:
+#: **Trailing only, and that is the whole reason this is a second list.** "Thank you." on its own is
+#: a sentence people dictate, and swallowing it looks like the microphone failed — which is exactly
+#: why it was taken OUT of :data:`_HALLUCINATIONS` once. Appended to a sentence that already ended,
+#: it is whisper filling silence: reported live as "random thank-yous, I don't know where this
+#: comes from". :func:`strip_trailing_hallucination` never removes the last sentence standing, so
+#: both readings get what they should.
+_TRAILING_BOILERPLATE: frozenset[str] = frozenset(
+    {
+        "thank you",
+        "thank you.",
+        "thank you!",
+        "thank you very much",
+        "thank you very much.",
+        "thanks",
+        "thanks.",
+        "thank you for watching",
+        "thank you for watching.",
+        "thanks for listening",
+        "thanks for listening.",
+        "bye",
+        "bye.",
+        "bye!",
+        "bye bye",
+        "bye-bye.",
+        "goodbye",
+        "goodbye.",
+        # ...and in the other language he actually speaks.
+        "danke",
+        "danke.",
+        "danke schön",
+        "danke schön.",
+        "vielen dank",
+        "vielen dank.",
+        "tschüss",
+        "tschüss.",
+        "auf wiedersehen",
+        "auf wiedersehen.",
+        "untertitel im auftrag des zdf",
+    }
+)
+
+
 def strip_trailing_hallucination(text: str) -> str:
     """Drop whisper's boilerplate when it is APPENDED to a real sentence.
 
@@ -1136,12 +1180,15 @@ def strip_trailing_hallucination(text: str) -> str:
     ("...so only agent flow is public now. Thanks for watching!"), the whole thing scores as
     confident speech in a language you speak, and every one of those words gets typed.
 
-    Only whole trailing SENTENCES that :func:`is_hallucination` already recognises are removed, and
-    never the last one standing — same one-directional bias as everything else here: an invented
-    line that slips through is visible and deletable, a real one swallowed is invisible.
+    Only whole trailing SENTENCES are removed, and never the last one standing — same
+    one-directional bias as everything else here: an invented line that slips through is visible and
+    deletable, a real one swallowed is invisible. That guard is also what lets this list carry the
+    polite closings (see :data:`_TRAILING_BOILERPLATE`) that the whole-line trap must not.
     """
     parts = _SENTENCE_END.split(text)
-    while len(parts) > 1 and is_hallucination(parts[-1]):
+    while len(parts) > 1 and (
+        is_hallucination(parts[-1]) or parts[-1].strip().lower() in _TRAILING_BOILERPLATE
+    ):
         parts.pop()
     return " ".join(parts)
 
@@ -2069,6 +2116,12 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
             else "hold the key while you talk"
         )
         return Result("", seconds, 0, False, f"{TOO_SHORT} — {advice}")
+    # HERE, the instant the microphone closes — not after the transcribe, and not after the paste.
+    # Cued afterwards it arrives a full transcription behind the thing it is acknowledging, so the
+    # user sees the words land and then hears a tone about them, which reads as a glitch. Every
+    # surface goes through this function, so cueing at the seam is also the only way they stay in
+    # step. After the two ways this can still be a non-event, so nothing chimes at a brushed key.
+    cue_done()
     level = peak_dbfs(wav)
     captured = audio_seconds(wav)
 
@@ -2327,22 +2380,35 @@ def _preroll_expire(pending: _Preroll) -> None:
 
 
 def cue_ready() -> None:
-    """The one sound this tool makes: the microphone is live, start talking. Never raises.
+    """The microphone is live, start talking. Never raises.
 
-    It came back, and the report it came back for is the one thing streaming could not answer.
     The words arriving at the cursor say "it heard you", perfectly — but they arrive a second and
     a half in, which is a second and a half of not knowing whether to start, every single time.
     Fired the moment the device is genuinely live (see :func:`ready`), so it is also the signal
     that stops the first word being spoken into a microphone that is not open yet.
-
-    Exactly one sound and no setting: nothing marks the end, because the text landing already
-    does, and nothing marks a failure, because a failure is a line in the log and not a noise in
-    a meeting.
     """
-    if os.environ.get("MURMURFLOW_NO_AUDIO"):
+    _sound(platforms.play_ready)
+
+
+def cue_done() -> None:
+    """The microphone just closed, stop talking. Never raises.
+
+    **Not "the text has arrived".** It fires the instant the recorder stops, which is a second or
+    more before the final transcription lands — and that gap is precisely why it exists: streaming
+    has already typed almost everything, so the last word or two arriving late looked like the last
+    word or two being LOST. Cued at the seam, the silence afterwards is a wait rather than a fault.
+
+    Two sounds, and no third: a failure is a line in the log, not a noise in a meeting.
+    """
+    _sound(platforms.play_done)
+
+
+def _sound(play: object) -> None:
+    """Make one noise, or none. Never raises, and never anything the test suite can hear."""
+    if os.environ.get("MURMURFLOW_NO_AUDIO") or not callable(play):
         return
     with contextlib.suppress(Exception):
-        platforms.play_ready()
+        play()
 
 
 def bind_trigger(

@@ -114,10 +114,11 @@ tap again to stop. It used to be an opt-in flag called `stream` and that flag is
 meant almost nobody ever saw the good version of the tool. See
 [how it works](#how-the-words-arrive-while-you-talk).
 
-**It makes exactly one sound.** A short tick the moment the microphone is genuinely live, so you
-know when to start. There is no setting, because there is nothing to choose: nothing marks the end
-(the text landing already does) and nothing marks a failure (that is a line in the log, not a noise
-in a meeting). The three configurable tones and the preset system they needed are gone.
+**It makes exactly two sounds, and neither has a setting.** A short tick the moment the microphone
+is genuinely live, so you know when to start. A blunter one the instant it closes, so you know the
+last word or two still coming is a wait and not a loss. Nothing marks a failure — that is a line in
+the log, not a noise in a meeting — and the five configurable tone presets are gone with the
+setting that chose between them.
 
 **And the first word is not missing any more.** CoreAudio takes about 0.6s to hand over its first
 buffer, so a recorder opened on the second tap starts half a sentence late and no decoder can get
@@ -144,6 +145,13 @@ speak catches the rest, and costs nothing (it does not pin the decoder):
 ```sh
 murmurflow config set languages '["de", "en"]'
 ```
+
+The other half of it is the pause between your last word and your hand reaching for the key.
+Whisper fills silence with a goodbye — reported as *"random thank-yous, I don't know where this
+comes from"* — so a trailing `Thank you.`, `Thanks.`, `Danke.`, `Bye bye` or a subtitle credit line
+is dropped when it is appended to a sentence that had already ended. **Never the last sentence
+standing**, so a dictation that really is "Thank you." still types. The cost of that trade is real
+and one-directional: say "Mach das bitte. Danke." and the *Danke* goes.
 
 **Double-tap, or hold.** Double-tap is the default: tap `left Control` twice to start, tap again
 to stop. It is what macOS's own dictation does, it is the only gesture that survives a long

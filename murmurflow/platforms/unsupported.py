@@ -92,6 +92,10 @@ def play_ready() -> None:
     return None
 
 
+def play_done() -> None:
+    return None
+
+
 def service_install(args: list[str], env: dict[str, str]) -> tuple[bool, str]:
     return False, _WHY
 

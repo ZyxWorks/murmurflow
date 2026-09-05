@@ -506,24 +506,36 @@ def type_text(text: str) -> str:
 
 # --- the one sound ------------------------------------------------------------------------------
 
-#: The Mac's own "ready" tick. A system sound rather than a generated tone: it is one people have
-#: heard for twenty years, it needs no file shipped or cached, and it follows the alert-volume
-#: slider, which nothing we synthesise can see.
+#: The Mac's own two ticks. System sounds rather than generated tones: people have heard these for
+#: twenty years, they need no file shipped or cached, and they follow the alert-volume slider, which
+#: nothing we synthesise can see. Tink opens, Pop closes — the pair macOS itself uses for exactly
+#: this, one bright and one blunt, so which is which needs no learning.
 READY_SOUND = "/System/Library/Sounds/Tink.aiff"
+DONE_SOUND = "/System/Library/Sounds/Pop.aiff"
 
 
-def play_ready() -> None:
-    """Say the microphone is live, once, without blocking. Silence, never a crash, if it cannot."""
+def _play(path: str) -> None:
+    """Play one sound without blocking. Silence, never a crash, if it cannot."""
     player = shutil.which("afplay")
-    if not player or not Path(READY_SOUND).is_file():
+    if not player or not Path(path).is_file():
         return
     with contextlib.suppress(OSError, subprocess.SubprocessError):
         subprocess.Popen(
-            [player, READY_SOUND],
+            [player, path],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+
+
+def play_ready() -> None:
+    """The microphone is live: start talking."""
+    _play(READY_SOUND)
+
+
+def play_done() -> None:
+    """The microphone just closed: stop talking. NOT "the text has arrived" — the text says that."""
+    _play(DONE_SOUND)
 
 
 def input_permitted() -> bool:

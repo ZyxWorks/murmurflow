@@ -632,10 +632,26 @@ def test_boilerplate_appended_to_a_real_sentence_is_not_typed():
     assert dictate.tidy("Make it public. Thanks for watching!") == "Make it public."
     assert dictate.tidy("Ship it. [BLANK_AUDIO]") == "Ship it."
     assert dictate.tidy("Fertig. Untertitel von Stephanie Geiges") == "Fertig."
-    # Never the last sentence standing: a clip that is ONLY boilerplate is `finish`'s call, and a
-    # real sentence that merely looks polite is never touched.
+    # Never the last sentence standing: a clip that is ONLY boilerplate is `finish`'s call.
     assert dictate.tidy("Thanks for watching!") == "Thanks for watching!"
-    assert dictate.tidy("Ship it. Thank you.") == "Ship it. Thank you."
+
+
+def test_the_polite_closing_whisper_invents_for_the_pause_is_dropped():
+    """REPORTED: "random thank-yous, I don't know where this comes from."
+
+    Whisper fills the gap between the last word and the hand reaching for the key, and what it
+    fills it with is a goodbye. Only ever as a trailing sentence of its own, so a dictation that IS
+    "Thank you." still types — which is why this list is separate from the whole-line one, and why
+    it was taken out of that one years ago.
+    """
+    assert dictate.tidy("Make it public. Thank you.") == "Make it public."
+    assert dictate.tidy("Ship it on Friday. Thanks.") == "Ship it on Friday."
+    assert dictate.tidy("Mach das bitte. Danke.") == "Mach das bitte."
+    assert dictate.tidy("See you there. Bye bye") == "See you there."
+    # ...and never a sentence somebody meant.
+    assert dictate.tidy("Thank you.") == "Thank you."
+    assert dictate.tidy("Danke.") == "Danke."
+    assert dictate.tidy("I want to thank you for that.") == "I want to thank you for that."
 
 
 def test_filler_stripping_still_works_when_it_is_asked_for():

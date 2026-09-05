@@ -11,7 +11,6 @@ selects it — so a name that is not in that module's contract is private to mac
 
 from __future__ import annotations
 
-import contextlib
 import ctypes
 import ctypes.util
 import os
@@ -437,30 +436,6 @@ def permission_hint() -> str:
 
 
 # --- sound ----------------------------------------------------------------------------------
-
-
-def play(path: str) -> None:
-    """Play a sound file without blocking. Silence, never a crash, if it cannot."""
-    player = shutil.which("afplay")
-    if not player:
-        return
-    with contextlib.suppress(OSError, subprocess.SubprocessError):
-        subprocess.Popen(
-            [player, path],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-
-def system_cues() -> dict[str, str]:
-    """The OS's own alert sounds. A Mac user has heard these for twenty years."""
-    return {
-        "ready": "/System/Library/Sounds/Tink.aiff",
-        "done": "/System/Library/Sounds/Pop.aiff",
-        "fail": "/System/Library/Sounds/Basso.aiff",
-    }
-
 
 # --- service --------------------------------------------------------------------------------
 

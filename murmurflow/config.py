@@ -22,9 +22,6 @@ HOME_ENV = "MURMURFLOW_HOME"
 KEYS: dict[str, str] = {
     "trigger": "hold-to-talk key. Default control_option (two modifiers, so no shortcut can fire it). Also: command_option, control_command, control_shift, left_control, right_shift, f13, command, option",
     "doubleTap": "true = tap the trigger twice to start, twice to stop (instead of holding)",
-    "stream": "true = paste the words at your cursor while you are still talking, instead of all "
-    "at once when you stop. Needs the warm whisper-server and doubleTap (a held modifier would turn "
-    "every paste into a chord). Turns the ready/done cues off: the text is the confirmation",
     "model": "path to a ggml model file, overriding the best one found in ~/.murmurflow/models/",
     "language": "the spoken language, e.g. en / de. Default auto, which costs ~0.7s per clip",
     "languages": 'the languages you actually speak, e.g. ["de", "en"]. A clip whisper decides is '
@@ -32,8 +29,6 @@ KEYS: dict[str, str] = {
     "accept every language. Unlike `language` this does NOT pin the decoder, so it costs nothing",
     "inputName": "substring of the microphone name to record from. Default: system default",
     "vocabulary": "list of proper nouns to bias the transcriber toward (names, jargon, acronyms)",
-    "cue": "tone preset: system (default, the Mac's own Tink/Pop), pebble, glass, marimba, soft, "
-    "off for silence, or a folder holding your own ready/done/fail files",
     "polishCommand": "shell command receiving the transcript on stdin and printing the cleaned text",
     "stripFillers": "true = delete 'um', 'you know', and a leading 'hey'/'so'/'well' from what you "
     "said. OFF by default: a dictation tool types what you said, and a word removed is invisible",

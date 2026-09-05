@@ -41,7 +41,6 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
-import importlib
 import os
 import re
 import shutil
@@ -428,29 +427,6 @@ def input_permitted() -> bool:
 
 def permission_hint() -> str:
     return ""
-
-
-# --- sound ----------------------------------------------------------------------------------
-
-
-def play(path: str) -> None:
-    """Play a wav without blocking. ``winsound`` is stdlib, so there is no player to find."""
-    try:
-        # Reached by name so that mypy, checking this file for darwin, does not try to resolve a
-        # stdlib module that exists only on Windows. It IS stdlib there — nothing to install.
-        winsound = importlib.import_module("winsound")
-        flags = winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT
-        winsound.PlaySound(path, flags)
-    except Exception:  # noqa: BLE001 — a cue must never be able to break a dictation
-        return
-
-
-def system_cues() -> dict[str, str]:
-    """``{}`` on purpose. Windows' own sounds are named by an event key rather than a path
-    (``SystemAsterisk``), which does not fit "a file to play", and MurmurFlow's generated tones are
-    a better cue anyway: every stock Windows sound is an ALERT, mixed to interrupt.
-    """
-    return {}
 
 
 # --- service --------------------------------------------------------------------------------

@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MurmurFlow: write at the speed you talk</title>
-<meta name="description" content="Press-to-talk dictation that runs on your own machine. Hold a key, say it, let go: the words land at your cursor in any app. Free, no account, no subscription, and nothing you say leaves your machine.">
+<meta name="description" content="Double-tap dictation that runs on your own machine. Tap a key twice and talk: the words land at your cursor while you are still talking, in any app. Free, no account, no subscription, and nothing you say leaves your machine.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120' fill='none'><rect width='120' height='120' rx='18' fill='%230B0C10'/><g stroke='%23F6F5F1' stroke-width='11' stroke-linecap='round'><line x1='60' y1='60' x2='60' y2='30'/><line x1='60' y1='60' x2='30' y2='82'/><line x1='60' y1='60' x2='94' y2='74'/></g></svg>">
 <meta property="og:title" content="MurmurFlow: write at the speed you talk">
-<meta property="og:description" content="Hold a key, say it, let go. The words land at your cursor in any app. Runs on your machine. Free.">
+<meta property="og:description" content="Tap a key twice and talk. The words land at your cursor while you are still talking, in any app. Runs on your machine. Free.">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
 <!-- Not listed anywhere: a visitor gets here by typing the URL or from the index. "noindex" is
@@ -234,8 +234,8 @@
 
   <header id="top">
     <h1>Write at the<br>speed you talk.</h1>
-    <p class="lead">Hold a key, say it, let go. The words land at your cursor in any app.
-    On your machine, for nothing.</p>
+    <p class="lead">Tap a key twice and talk. The words land at your cursor while you are still
+    talking, in any app. On your machine, for nothing.</p>
 
     <div class="cta">
       <p class="os mono">macOS, paste into Terminal</p>
@@ -313,7 +313,7 @@
     <h2>What it does not do</h2>
     <ul>
       <li><strong>No compiled helper.</strong> Key state is polled through stdlib <code>ctypes</code>. No Xcode, no signing, no notarization.</li>
-      <li><strong>No streaming.</strong> It would cost a permanently resident microphone to save a fraction of a batch pass.</li>
+      <li><strong>No always-on microphone.</strong> Nothing listens between sentences. The words that arrive while you talk are decoded from the clip you are already recording.</li>
       <li><strong>No LLM on the hot path</strong>, unless you ask for one.</li>
       <li><strong>No Linux.</strong> Wayland exposes no global hotkey API at all, so the answer is honest rather than half working.</li>
     </ul>

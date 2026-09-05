@@ -816,7 +816,7 @@ def _confidence(payload: str) -> tuple[str, float, str]:
     return text, float(raw) if isinstance(raw, (int, float)) else 1.0, spoken
 
 
-def transcribe_warm(wav: Path, *, timeout: float = 60.0) -> Heard:
+def transcribe_warm(wav: Path, *, timeout: float = 60.0, language: str = "") -> Heard:
     """Transcribe via the warm server; empty text if it is not up or errors. Never raises.
 
     Reuses :mod:`whisper`'s language and vocabulary decisions, so every surface that transcribes
@@ -824,12 +824,17 @@ def transcribe_warm(wav: Path, *, timeout: float = 60.0) -> Heard:
 
     Asks for ``verbose_json`` rather than ``text`` purely to get the language score back; the
     transcript is identical either way.
+
+    ``language`` overrides the configured one for THIS request, and it exists for streaming.
+    Detecting the language is a whole extra encoder pass — measured at 0.75s of every 2.2s request
+    on an M4 Pro — and a clip does not change language halfway through, so the partials after the
+    first pin themselves to what the first one heard. See :func:`_stream_loop`.
     """
     if not wav.is_file():
         return Heard("")
     fields = {
         "response_format": "verbose_json",
-        "language": whisper.language(),
+        "language": language or whisper.language(),
         "prompt": whisper.vocabulary(),
         "temperature": "0",
     }
@@ -1385,11 +1390,17 @@ def _inject(text: str) -> tuple[bool, str, str]:
 # already decoding when the key was released cannot paste after the final text has landed.
 _INJECT_LOCK = threading.Lock()
 
-#: Seconds of speech before the first partial pass. Long enough to be a phrase and not a fragment:
-#: whisper on one second of audio returned "Okay." where the speaker had said "okay so the idea is
-#: that", and a first pass with four words in it commits none of them (see
-#: :data:`STREAM_HOLDBACK_WORDS`), so a shorter wait here does not make the first words arrive
-#: sooner — it just spends a whole pass to find that out.
+#: Seconds to wait before the first partial pass. Long enough that whisper is reading a phrase and
+#: not a fragment: on one second of audio it returned "Okay." where the speaker had said "okay so
+#: the idea is that", and a first pass with four words in it commits none of them (see
+#: :data:`STREAM_HOLDBACK_WORDS`), so waiting too little does not make the first words arrive
+#: sooner — it spends a whole pass to find that out.
+#:
+#: Measured against the whole pipeline rather than guessed: at 1.0 the first pass has ~1.4s of
+#: audio (the pre-roll has been recording since the first tap, so the file is not empty when this
+#: begins) and commits the single word "Okay,"; at 1.5 it commits "Okay so the idea" — four words,
+#: at the same wall-clock moment, because the words only reach the screen once a pass RETURNS.
+#: At 2.0 the whole stream is a second late. So 1.5 buys a better first lump for nothing.
 STREAM_FIRST_SECONDS = 1.5
 
 #: Minimum gap between passes. A pass costs about the same whatever it is decoding (see
@@ -1432,32 +1443,21 @@ class Stream:
 #: is exactly right: that surface pastes once at the end, as it always did.
 _STREAMS: dict[str, Stream] = {}
 
-#: Did the LAST clip's stream actually put words on the screen?
-#:
-#: The cues stand down for a streamer that is demonstrably working, and only for that one. `stream`
-#: is a setting; a warm whisper-server answering partials in under a second is a fact, and the two
-#: come apart — the server can be missing at start-up or wedge halfway through the afternoon, and
-#: :func:`_partial` is warm-only, so on that machine streaming types nothing at all. Muting the cues
-#: off the SETTING would leave that user with a tool that makes no sound and shows no text, which is
-#: indistinguishable from one that is not running. Muting them off the last clip's RESULT means the
-#: first sentence after a failure sounds exactly like it always did, with nothing to reconfigure.
-_STREAMED_LAST = threading.Event()
-
 
 def streaming() -> bool:
     """True when partial text is pasted at the cursor while you are still speaking.
 
-    **Gated on the tap gesture, and that is a correctness gate rather than a preference.** A paste
-    is a synthetic ⌘V, and in hold-to-talk the trigger is a modifier that is physically DOWN for
-    the whole clip — so every partial would be sent as ⌥⌘V or ⌃⌘V into whatever app has focus,
-    which is not a paste and in several apps is a destructive shortcut. Tapping holds nothing down.
+    **Always on, and there is no setting.** It used to be opt-in, which meant the product almost
+    nobody saw was the good one: the words landing as you say them is what dictation is FOR, and a
+    checkbox is not a decision anybody has the information to make before they have felt both.
+
+    **Except in hold-to-talk, and that is a correctness gate rather than a preference.** A paste is
+    a synthetic ⌘V, and in hold-to-talk the trigger is a modifier that is physically DOWN for the
+    whole clip — so every partial would be sent as ⌥⌘V or ⌃⌘V into whatever app has focus, which
+    is not a paste and in several apps is a destructive shortcut. Tapping holds nothing down, and
+    tapping is the default gesture.
     """
-    return streaming_wanted() and double_tap_mode()
-
-
-def streaming_wanted() -> bool:
-    """The ``stream`` setting alone, before the gesture gets a veto — so a caller can say WHY."""
-    return config.flag("stream", False, cfg=_cfg())
+    return double_tap_mode()
 
 
 def _key(word: str) -> str:
@@ -1536,14 +1536,17 @@ def stream_tail(pasted: str, final: str) -> str:
     return " ".join(words[len(already) :])  # no anchor at all: trust the count and lose nothing
 
 
-def _partial(live: Path, snapshot: Path) -> str:
-    """Transcribe the audio captured SO FAR, or ``""`` if there is nothing worth reading. Never raises.
+def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
+    """Transcribe the audio captured SO FAR. Empty text if there is nothing worth reading. Never raises.
 
     The live wav is COPIED and the copy is what gets read, for two reasons that are both about not
     touching the file ffmpeg is appending to: :func:`repair_wav` writes into the RIFF header (the
     recorder has not written the real lengths yet — it does that when it exits), and a reader
     seeking around a growing file is a race nobody needs. A copy torn mid-sample costs one clicky
     sample at the very end, which is inside the part this never commits anyway.
+
+    Gated exactly as :func:`finish` gates the final transcript — level, confidence, hallucination
+    AND language — because a partial is typed at the cursor and cannot be taken back.
 
     Warm server only, never the cold ``whisper-cli`` fallback. A cold pass costs seconds and would
     be spawned once a second for the length of the clip: a wedged warm server would turn streaming
@@ -1552,18 +1555,26 @@ def _partial(live: Path, snapshot: Path) -> str:
     try:
         shutil.copyfile(live, snapshot)
     except OSError:
-        return ""
+        return Heard("")
     try:
         repair_wav(snapshot)
         captured = audio_seconds(snapshot)
         if captured < MIN_CLIP_SECONDS or peak_dbfs(snapshot) < quiet_floor():
-            return ""
-        heard = transcribe_warm(snapshot, timeout=STREAM_TIMEOUT)
+            return Heard("")
+        heard = transcribe_warm(snapshot, timeout=STREAM_TIMEOUT, language=language)
         if not heard.text or heard.confidence < SPEECH_CONFIDENCE or is_hallucination(heard.text):
-            return ""
-        return tidy(heard.text)
+            return Heard("")
+        # AND THE LANGUAGE GATE, which the final transcription has always had and this did not.
+        # `finish` can refuse a transcript decoded as a language the user does not speak — that is
+        # what a fluent invented sentence looks like — but it cannot refuse one that is already at
+        # the cursor, and there is no un-paste. A gate that only guards the last pass guards
+        # nothing once the earlier passes type.
+        spoken = spoken_languages()
+        if spoken and heard.language and heard.language not in spoken:
+            return Heard("")
+        return heard._replace(text=tidy(heard.text))
     except Exception:  # noqa: BLE001 — a partial that fails is a partial nobody sees, never a crash
-        return ""
+        return Heard("")
     finally:
         snapshot.unlink(missing_ok=True)
 
@@ -1584,11 +1595,21 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
     """The streaming thread: decode what has been said, paste what is settled, repeat."""
     snapshot = rec.wav.with_name(f"{rec.wav.stem}-partial.wav")
     previous = ""
+    #: The language the first accepted pass heard, pinned onto every pass after it. Worth ~0.75s of
+    #: every ~2.2s pass, because `auto` runs a whole extra encoder pass to answer a question whose
+    #: answer cannot change halfway through one clip. Only ever set from a pass that already
+    #: cleared the confidence gate in `_partial`, and only to a language the user says they speak
+    #: when they have said — a partial pinned to a language nobody in the room is speaking would
+    #: come back as fluent translation, and two of those in a row would agree and get typed.
+    #: The FINAL transcription is never pinned, so the language gate still judges the real clip.
+    pinned = ""
+    spoken = spoken_languages()
     if stream.done.wait(STREAM_FIRST_SECONDS):
         return
     while not stream.done.is_set():
         started = time.monotonic()
-        heard = _partial(rec.wav, snapshot)
+        found = _partial(rec.wav, snapshot, pinned)
+        heard = found.text
         # A pass that read nothing — still below the quiet floor, a hallucination thrown out, the
         # server busy — is not a pass that DISAGREED. Keeping the last real reading as `previous`
         # means the next good pass can still agree with it; overwriting it with "" would demote
@@ -1596,6 +1617,8 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
         if not heard:
             stream.done.wait(max(0.0, STREAM_EVERY_SECONDS - (time.monotonic() - started)))
             continue
+        if not pinned and found.language and (not spoken or found.language in spoken):
+            pinned = found.language
         settled = stable_prefix(previous, heard)
         previous = heard
         chunk = stream_tail(stream.text, settled) if settled else ""
@@ -1611,7 +1634,6 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
                 # and the very first chunk is the one that must not have one.
                 if _inject(f" {chunk}" if stream.text else chunk)[0]:
                     stream.text = f"{stream.text} {chunk}".strip()
-                    _STREAMED_LAST.set()
         stream.done.wait(max(0.0, STREAM_EVERY_SECONDS - (time.monotonic() - started)))
 
 
@@ -1644,12 +1666,7 @@ def streamed(stream: Stream | None) -> str:
     if stream is None:
         return ""
     with _INJECT_LOCK:
-        text = stream.text
-    if not text:
-        # Nothing reached the screen this time, so the next clip gets its cues back. See
-        # :data:`_STREAMED_LAST` — this is the whole self-healing half of it.
-        _STREAMED_LAST.clear()
-    return text
+        return stream.text
 
 
 # --- the flow ---------------------------------------------------------------------------------
@@ -1844,12 +1861,6 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     This is the whole hot path, and the order matters: the audio file is deleted as soon as it has
     been transcribed (before the optional polish call and before the paste), so a crash anywhere
     downstream cannot leave your voice on disk.
-
-    The "got it" cue fires HERE, the instant the microphone closes — not after the paste. Cued by
-    the caller afterwards it arrived a full transcribe behind the text it was acknowledging, so the
-    user saw the words land and then heard a tone about them, which reads as a glitch rather
-    than as feedback. Every surface (the daemon, ``murmurflow toggle``, a huddle) goes through this
-    function, so cueing at the seam is also the only way all three stay in step.
     """
     rec = rec or current()
     if rec is None:
@@ -1873,10 +1884,6 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
             else "hold the key while you talk"
         )
         return Result("", seconds, 0, False, f"{TOO_SHORT} — {advice}")
-    # After the two ways this can still be a non-event, so a failure cues once rather than being
-    # contradicted by a "got it" a moment earlier — and before peak_dbfs and the ~600ms transcribe,
-    # which is the whole point: the tone marks the microphone closing, not the text arriving.
-    cue(CUE_DONE)  # a no-op while streaming: the words on screen already said it. See `cue`.
     level = peak_dbfs(wav)
     captured = audio_seconds(wav)
 
@@ -1954,8 +1961,8 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     pasted = streamed(stream)
     tail = stream_tail(pasted, text)
     if pasted and not tail:
-        # Streaming had already typed every word of it. Reporting "nothing to type" as a failure
-        # here would cue the fail tone over a dictation that worked perfectly.
+        # Streaming had already typed every word of it, so there is nothing left to paste. That is
+        # a dictation that worked perfectly, not the failure "nothing to type" would read as.
         return Result(
             text, seconds, elapsed_ms, True, "", level, captured, "→ streamed", heard.warm
         )
@@ -1977,319 +1984,6 @@ def toggle(*, paste: bool = True) -> Result | None:
 
 
 # --- the daemon -------------------------------------------------------------------------------
-
-# Short system sounds used as the only UI. A menu-bar HUD would need a compiled app bundle; a sound
-# needs nothing, cannot steal focus, and is actually BETTER for this job — you are looking at the
-# app you are dictating into, not at our indicator. Ready = the mic is live, start talking
-# now. Done = the mic just closed, stop talking (NOT "the text has arrived" — the text arriving
-# says that far better than a tone can). Fail = something went wrong.
-CUE_READY = "ready"
-CUE_DONE = "done"
-CUE_FAIL = "fail"
-
-#: ``cue`` values that mean "make no sound at all" — see :func:`cues_muted`.
-CUE_OFF = frozenset({"off", "none", "silent", "mute", "false", "0"})
-
-# The cue log's ceiling — see `_note_cue`. Trimmed to the last 200 plays, which is days of use.
-_CUE_LOG_MAX_BYTES = 200_000
-
-#: The OS's own alert sounds, where it has any to borrow. Empty on a platform that does not name
-#: its sounds by PATH (Windows names them by event key), and the generated tones below are then the
-#: only cue — which is no loss, because every stock system sound is an ALERT, mixed to interrupt.
-_SYSTEM_CUES = platforms.system_cues()
-
-# The default cue is generated rather than borrowed, because every sound in /System/Library/Sounds
-# is an ALERT: designed to interrupt, mixed loud, and instantly recognisable as "a Mac just told
-# you something". Dictation needs the opposite — you are looking at the app you are talking into,
-# so the cue is your only signal, and it should register without announcing itself.
-#
-# Two things separate a cue that sounds like an INSTRUMENT from one that sounds like a computer
-# beeping, and neither is the note you pick:
-#
-#   * the envelope. A struck object never fades IN — it is loudest at the moment of impact and
-#     decays away. An attack of a few ms with an exponential tail is the whole difference; the
-#     symmetric raised-cosine swell the first version used is why it read as flute-ish and cheap.
-#   * the partials. A bare sine is a test tone. Real bells and bars ring at INHARMONIC ratios
-#     (2.76x for a tubular bell, ~3.9x for a marimba bar), which is what the ear hears as wood or
-#     glass rather than as an oscillator.
-#
-# Notes carry an absolute start, so a second note begins while the first is still ringing and the
-# two overlap into one gesture instead of sounding like two separate beeps.
-_CUE_RATE = 44100
-_CUE_REVISION = 2  # bump to reissue the tones — cached files are named for it
-_CUE_FADE = 0.004  # forced fade to zero at the tail, so no preset can ever end on a click
-
-
-@dataclass(frozen=True)
-class _Timbre:
-    """What the struck thing is made of. ``partials`` are (frequency ratio, relative amplitude)."""
-
-    partials: tuple[tuple[float, float], ...]
-    attack: float = 0.004  # seconds to full amplitude; 0 would click
-    decay: float = 0.45  # exponential time constant, as a fraction of the note length
-    peak: float = 0.16  # of full scale; a macOS alert sound sits around 0.8
-    swell: bool = False  # raised-cosine instead of struck — the original `soft` shape
-
-
-# Each preset is (timbre, {cue: ((frequency, start, length), ...)}). Rising = listening,
-# falling = the mic closed, low and slow = something went wrong — that grammar holds across all of
-# them, so switching preset never changes what a sound MEANS.
-_CUE_PRESETS: dict[str, tuple[_Timbre, dict[str, tuple[tuple[float, float, float], ...]]]] = {
-    # Tubular-bell partials, bright and clean. The most "premium" of the set, and it was the default
-    # until somebody dictated all day with it: a bright chime twice a sentence, hundreds of times,
-    # is the one setting that stops being a nice detail and becomes a reason to turn the tool off.
-    "glass": (
-        _Timbre(((1.0, 1.0), (2.76, 0.40), (5.40, 0.14)), decay=0.40),
-        {
-            CUE_READY: ((1174.66, 0.000, 0.30), (1567.98, 0.070, 0.38)),  # D6 -> G6
-            CUE_DONE: ((1567.98, 0.000, 0.26), (1046.50, 0.065, 0.40)),  # G6 -> C6
-            CUE_FAIL: ((587.33, 0.000, 0.34), (392.00, 0.110, 0.50)),  # D5 -> G4
-        },
-    ),
-    # Wooden bar: warmer, drier, shorter. Reads as a soft knock rather than a chime.
-    "marimba": (
-        _Timbre(((1.0, 1.0), (3.94, 0.28), (9.60, 0.06)), decay=0.26),
-        {
-            CUE_READY: ((783.99, 0.000, 0.22), (1174.66, 0.060, 0.28)),  # G5 -> D6
-            CUE_DONE: ((1046.50, 0.000, 0.20), (698.46, 0.055, 0.30)),  # C6 -> F5
-            CUE_FAIL: ((392.00, 0.000, 0.26), (293.66, 0.090, 0.38)),  # G4 -> D4
-        },
-    ),
-    # One short low blip. The least you can play and still be understood — nearly subliminal, which
-    # is exactly what a sound you will hear a few hundred times a day has to be. The DEFAULT.
-    "pebble": (
-        _Timbre(((1.0, 1.0), (2.0, 0.10)), decay=0.30, peak=0.14),
-        {
-            CUE_READY: ((659.26, 0.000, 0.16), (987.77, 0.045, 0.20)),  # E5 -> B5
-            CUE_DONE: ((659.26, 0.000, 0.18),),  # single note
-            CUE_FAIL: ((329.63, 0.000, 0.22), (246.94, 0.080, 0.30)),  # E4 -> B3
-        },
-    ),
-    # The original: pure sine pair under a symmetric swell. Kept because someone may prefer it.
-    "soft": (
-        _Timbre(((1.0, 1.0),), swell=True),
-        {
-            CUE_READY: ((784.00, 0.000, 0.065), (1174.66, 0.065, 0.105)),
-            CUE_DONE: ((1046.50, 0.000, 0.055), (698.46, 0.055, 0.095)),
-            CUE_FAIL: ((392.00, 0.000, 0.085), (311.13, 0.085, 0.150)),
-        },
-    ),
-}
-# THE DEFAULT IS THE SYSTEM SOUND (operator, after living with both). The generated presets were
-# the default on the argument below — that every sound in /System/Library/Sounds is an ALERT, mixed
-# to interrupt. True, and beside the point in practice: a Mac user has heard Tink and Pop for twenty
-# years, so they read as "the machine acknowledged you" without being learned, and they are already
-# tuned to the output device and the user's alert-volume setting, which a generated tone is not.
-#
-# `pebble` is the FALLBACK, not a rival: if the system sound is missing — a stripped install, or any
-# machine that is not a Mac — a cue must still play. It is the only signal that the microphone is
-# live, so losing it to a missing file is not an acceptable failure.
-DEFAULT_CUE = "system"
-FALLBACK_PRESET = "pebble"
-
-
-def cue_presets() -> tuple[str, ...]:
-    """Every built-in preset name — the CLI auditions these and `cue` is validated against."""
-    return tuple(_CUE_PRESETS)
-
-
-def _render(timbre: _Timbre, notes: tuple[tuple[float, float, float], ...]) -> array.array[int]:
-    """Mix ``notes`` into one 16-bit mono buffer. Overlapping tails are summed, then clipped."""
-    total = int(_CUE_RATE * max(start + length for _f, start, length in notes)) + 1
-    buf = [0.0] * total
-    weight = sum(amp for _ratio, amp in timbre.partials) or 1.0
-    for freq, start, length in notes:
-        count = int(_CUE_RATE * length)
-        offset = int(_CUE_RATE * start)
-        for i in range(count):
-            seconds = i / _CUE_RATE
-            if timbre.swell:
-                envelope = 0.5 - 0.5 * math.cos(2 * math.pi * i / count)
-            else:
-                rise = min(1.0, seconds / timbre.attack) if timbre.attack else 1.0
-                envelope = rise * math.exp(-seconds / (length * timbre.decay))
-            value = sum(
-                amp * math.sin(2 * math.pi * freq * ratio * seconds)
-                for ratio, amp in timbre.partials
-            )
-            buf[offset + i] += timbre.peak * envelope * value / weight
-    fade = min(int(_CUE_RATE * _CUE_FADE), total)
-    for i in range(fade):
-        buf[total - fade + i] *= 1.0 - i / fade
-    return array.array("h", (max(-32767, min(32767, int(v * 32767))) for v in buf))
-
-
-def _cue_file(kind: str, preset: str = "") -> Path | None:
-    """Path to the generated tone for ``kind``, synthesising it once. ``None`` if it can't be made.
-
-    Cached under ``~/.murmurflow/audio/cues/`` and named for the preset AND ``_CUE_REVISION``, so changing
-    a tone ships the new one instead of being masked forever by a stale file, and auditioning every
-    preset costs one synthesis each. Written to a temp name and renamed, because a half-written wav
-    would be a permanently broken cue.
-    """
-    timbre_notes = _CUE_PRESETS.get(preset or FALLBACK_PRESET)
-    if timbre_notes is None:
-        return None
-    timbre, cues = timbre_notes
-    notes = cues.get(kind)
-    if not notes:
-        return None
-    try:
-        path = _scratch_dir() / "cues" / f"{preset or FALLBACK_PRESET}-{kind}-v{_CUE_REVISION}.wav"
-        if path.is_file():
-            return path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        frames = _render(timbre, notes)
-        tmp = path.with_suffix(".part")
-        with wave.open(str(tmp), "wb") as out:
-            out.setnchannels(1)
-            out.setsampwidth(2)
-            out.setframerate(_CUE_RATE)
-            out.writeframes(frames.tobytes())
-        tmp.replace(path)
-        return path
-    except (OSError, ValueError, wave.Error):
-        return None
-
-
-def custom_cue_dir() -> Path:
-    """``~/.murmurflow/audio/cues/custom/`` — drop ``ready``/``done``/``fail`` here to use your own sounds.
-
-    The escape hatch that means we never have to be anyone's taste: any sound file downloaded from
-    anywhere works, no code and no rebuild. Named files rather than a config key per cue, because
-    "put three files in this folder" is one instruction instead of three.
-    """
-    return _scratch_dir() / "cues" / "custom"
-
-
-def _custom_cue(folder: Path, kind: str) -> str:
-    """A caller-supplied ``<kind>.<ext>`` in ``folder``, or ``""``. afplay reads all of these."""
-    for suffix in (".wav", ".aiff", ".aif", ".m4a", ".mp3", ".caf"):
-        candidate = folder / f"{kind}{suffix}"
-        if candidate.is_file():
-            return str(candidate)
-    return ""
-
-
-def cue_preset_name() -> str:
-    """What ``cue`` currently resolves to: a preset name, ``system``, or a folder path.
-
-    Reported by ``murmurflow cues``/``doctor`` so "which sound am I hearing" is answerable without
-    reading the config and re-deriving the fallback rules.
-    """
-    setting = str(_cfg().get("cue", "") or "").strip()
-    if not setting:
-        return DEFAULT_CUE
-    if setting.lower() in CUE_OFF:
-        return "off"
-    if setting.lower() == "system" or setting.lower() in _CUE_PRESETS:
-        return setting.lower()
-    return setting  # a folder path, reported verbatim
-
-
-def _cue_path(kind: str) -> str:
-    """Resolve a cue name to a playable file. ``cue`` decides, most specific first:
-
-    1. a file you dropped in ``~/.murmurflow/audio/cues/custom/`` — ALWAYS wins, whatever else is set, so
-       a downloaded sound needs no config at all,
-    2. a folder path in ``cue`` (``~/Sounds/mine``) holding ``ready``/``done``/``fail``,
-    3. ``system`` — the macOS Tink/Pop/Basso,
-    4. a built-in preset name (``glass``/``marimba``/``pebble``/``soft``),
-    5. the default preset.
-
-    An unreadable or unknown setting degrades to the default rather than to silence: a cue is the
-    only signal that the microphone is live, so it must never be possible to lose it by
-    typing the wrong thing in a config file.
-    """
-    setting = str(_cfg().get("cue", "") or "").strip()
-    with contextlib.suppress(OSError):
-        dropped = _custom_cue(custom_cue_dir(), kind)
-        if dropped:
-            return dropped
-    if setting and setting.lower() not in {"system", *_CUE_PRESETS}:
-        folder = Path(setting).expanduser()
-        with contextlib.suppress(OSError):
-            if folder.is_dir():
-                supplied = _custom_cue(folder, kind)
-                if supplied:
-                    return supplied
-    if not setting or setting.lower() == "system":
-        system = _SYSTEM_CUES.get(kind, "")
-        if system and Path(system).is_file():
-            return system
-        # A missing system sound must not mean silence. The cue is the only signal that the
-        # microphone is live, so the generated fallback answers for it.
-        fallback = _cue_file(kind, FALLBACK_PRESET)
-        return str(fallback) if fallback else kind
-    preset = setting.lower() if setting.lower() in _CUE_PRESETS else FALLBACK_PRESET
-    generated = _cue_file(kind, preset)
-    return str(generated) if generated else _SYSTEM_CUES.get(kind, kind)
-
-
-def cue_log_path() -> Path:
-    """``~/.murmurflow/audio/cues.jsonl`` — every sound this runtime played, with the file it played."""
-    return _scratch_dir() / "cues.jsonl"
-
-
-def _note_cue(kind: str, sound: str) -> None:
-    """Record that a cue was played. Best-effort, and the point is ATTRIBUTION.
-
-    "Random beeps and boops, and not even the ones I selected" has now been diagnosed wrong twice —
-    once as our own code, once as macOS's dictation — because a sound leaves no trace and every
-    theory sounds equally plausible afterwards. A timestamped line per cue settles it in one look:
-    if the log says nothing was played at that second, the sound was not ours, and the hunt moves
-    to whatever else is running on the machine.
-    """
-    try:
-        path = cue_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "cue": kind, "file": Path(sound).name}
-        data = (json.dumps(row) + "\n").encode("utf-8")
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-        try:
-            os.write(fd, data)
-        finally:
-            os.close(fd)
-        if path.stat().st_size > _CUE_LOG_MAX_BYTES:
-            tail = path.read_text("utf-8").splitlines()[-200:]
-            path.write_text("\n".join(tail) + "\n", "utf-8")
-    except Exception:  # noqa: BLE001, S110 — a log about a sound must never cost the sound
-        pass
-
-
-def cues_muted() -> bool:
-    """True when ``cue`` is off — no cue sound is made at all.
-
-    An escape hatch that had to exist: a day was lost chasing a beep that could not be placed, and
-    the only acceptable answer was all of them gone. The cost is real and yours to accept — the cues
-    are the only signal that the microphone is live, since you are looking at the app, not at
-    us. `murmurflow config set cue glass` brings them back.
-    """
-    return str(_cfg().get("cue", "") or "").strip().lower() in CUE_OFF
-
-
-def cue(sound: str) -> None:
-    """Play a short cue by name (``CUE_READY``/``CUE_DONE``/``CUE_FAIL``), non-blocking.
-
-    Silent no-op if audio is unavailable. An existing file path is played as given, so a caller
-    that already has a sound file keeps working. Every play is recorded (:func:`_note_cue`) so a
-    sound heard can be attributed instead of theorised about.
-    """
-    if os.environ.get("MURMURFLOW_NO_AUDIO") or cues_muted():
-        return
-    # THE POINT OF STREAMING IS THAT IT REPLACES THESE TWO. `ready` says the microphone is live and
-    # `done` says the clip was taken; when the words themselves appear at the cursor while you are
-    # still speaking, both are a noise reporting something already on screen. `fail` stays, because
-    # a failure is exactly the case where no words ever appear and silence would be indistinguishable
-    # from a tool that is not running.
-    if sound in {CUE_READY, CUE_DONE} and streaming() and _STREAMED_LAST.is_set():
-        return
-    kind = sound
-    sound = sound if Path(sound).is_file() else _cue_path(sound)
-    if not Path(sound).is_file():
-        return
-    platforms.play(sound)
-    _note_cue(kind, sound)
 
 
 def apple_dictation_conflict(trigger: str = "") -> bool:
@@ -2345,31 +2039,67 @@ def double_tap_mode() -> bool:
     return config.flag("doubleTap", True, cfg=_cfg())
 
 
-def start_and_cue() -> Recording | None:
-    """Begin recording and cue the user once the microphone is genuinely live.
+# --- the head start ----------------------------------------------------------------------------
+#
+# THE FIRST HALF-SECOND OF EVERY SENTENCE WAS MISSING, and whisper was never the reason: CoreAudio
+# takes that long to hand ffmpeg its first buffer, so the audio does not exist to transcribe.
+# Measured on an M4 Pro — from :func:`start` to the first sample in the file is 0.35-0.65s, and
+# after that the capture tracks real time to within 0.3%. A FIXED head loss, not a drift, and one
+# no amount of decoding can bring back.
+#
+# So the recorder is opened one gesture EARLY. The FIRST tap of the double-tap opens it; the second
+# tap, a quarter of a second later, then starts a microphone that is already live. If the pair never
+# completes the pre-roll is stopped and its file deleted — see :data:`PREROLL_SECONDS`, which is the
+# whole privacy cost of this: a stray single tap of the trigger holds the microphone open for that
+# long and writes a clip nobody ever reads.
 
-    The cue runs on a THREAD, never inline. :func:`ready` blocks for the ~300ms CoreAudio needs, and
-    doing that on the poll loop's own thread means the loop is deaf while it waits — it cannot see a
-    chord (so the abort fires late, after the sound has already played) and it cannot see a fast
-    release. Off-thread the loop keeps polling, and the cue simply checks the clip is still alive
-    before making a noise.
+#: How long an unclaimed pre-roll may live. A double-tap is bounded by ``hotkey.DOUBLE_TAP_WINDOW``
+#: press-to-press plus ``hotkey.TAP_MAX`` for the second tap's own duration, so anything the second
+#: tap could still claim has arrived well inside this.
+PREROLL_SECONDS = 1.2
+
+_PREROLL_LOCK = threading.Lock()
+_PREROLL: Recording | None = None
+
+
+def preroll() -> None:
+    """Open the microphone speculatively, for a gesture that has not finished yet. Never raises.
+
+    Safe to call on any keypress: it does nothing while something is already recording, and an
+    unclaimed pre-roll stops itself after :data:`PREROLL_SECONDS`.
     """
-    rec = start()
-    if rec is None:
-        return None
+    global _PREROLL
+    with _PREROLL_LOCK:
+        if _PREROLL is not None or current() is not None:
+            return
+        rec = start()
+        if rec is None:
+            return
+        _PREROLL = rec
+    # A timer thread and not a deadline checked by the poll loop: the loop only runs a callback
+    # when a KEY moves, and the case to clean up is precisely the one where no key moves again.
+    threading.Timer(PREROLL_SECONDS, _preroll_expire, args=(rec,)).start()
 
-    def _cue_when_live() -> None:
-        # Generous timeout. The device normally opens in ~300ms everywhere — the "launchd takes
-        # SECONDS" reading this cap was widened for turned out to be launchd THROTTLING the agent
-        # (fixed by `ProcessType: Interactive`, see `platforms.macos.render_plist`), not a slow CoreAudio.
-        # The wide cap stays as cheap insurance on unknown client hardware: this is a daemon thread
-        # with the recording already running, so waiting longer costs nothing and giving up early
-        # costs the user the cue, and with it the sentence.
-        if ready(rec, timeout=8.0) and current() is not None:
-            cue(CUE_READY)
 
-    threading.Thread(target=_cue_when_live, daemon=True).start()
+def preroll_claim() -> Recording | None:
+    """Take the pre-rolled recording, if there is one. It becomes the caller's to finish."""
+    global _PREROLL
+    with _PREROLL_LOCK:
+        rec, _PREROLL = _PREROLL, None
     return rec
+
+
+def _preroll_expire(rec: Recording) -> None:
+    """Stop and delete ``rec`` unless it has been claimed in the meantime. Never raises."""
+    global _PREROLL
+    with _PREROLL_LOCK:
+        if _PREROLL is not rec:
+            return
+        _PREROLL = None
+    with contextlib.suppress(Exception):
+        wav = stop(rec)
+        if wav is not None:
+            wav.unlink(missing_ok=True)
 
 
 def bind_trigger(
@@ -2676,22 +2406,17 @@ def listen_loop(
         emit(f"whisper warm on :{port()}")
     else:
         emit("whisper-server unavailable — falling back to cold whisper-cli (~1s slower)")
-    # Streaming has three preconditions and two of them can be false without anybody being told, so
-    # the daemon says which one it is on the line it already prints at start-up. A setting that is
-    # simply ignored is the worst kind: the user turned it on, nothing changed, and there is
-    # nothing to read.
-    if streaming_wanted():
-        if not double_tap_mode():
-            emit(
-                "[!] stream is on but doubleTap is off — a held key cannot paste, so it stands down"
-            )
-        elif not warm_expected:
-            emit(
-                "[!] stream is on but no warm server answered — partials are warm-only, so it "
-                "stands down and the cues stay on"
-            )
-        else:
-            emit("streaming — the words arrive while you talk, and the cues stand down")
+    # Streaming is on unless something PHYSICALLY stops it, and the daemon names which — a feature
+    # that is silently absent is the worst kind, because there is nothing anywhere to read.
+    if not double_tap_mode():
+        emit(
+            "[!] holding the key cannot type as you talk — a held modifier turns every paste into "
+            "a chord. Run: murmurflow config set doubleTap true"
+        )
+    elif not warm_expected:
+        emit("[!] no warm server answered — partials are warm-only, so the words arrive at the end")
+    else:
+        emit("the words arrive while you talk")
 
     #: Consecutive clips that took the cold path while a warm server was supposed to be answering.
     cold_streak = [0]
@@ -2730,21 +2455,31 @@ def listen_loop(
     # Recording it started itself rather than whatever happens to be in flight.
     mine: list[Recording] = []
 
+    def on_tap(what: str) -> None:
+        """Open the microphone on the first tap of the pair — see :func:`preroll`.
+
+        On the PRESS and not the release, because every millisecond here is a millisecond of the
+        first word: the device needs ~0.6s and the rest of the gesture only supplies ~0.5s of it.
+
+        A LENT trigger opens nothing. This runs before `on_press` gets to check, so without the
+        check here a paused daemon still opened the microphone for up to
+        :data:`PREROLL_SECONDS` on every press of a key it had promised not to listen to.
+        """
+        if what == "press" and not mine and not paused()[0]:
+            preroll()
+
     def on_press() -> None:
-        # THE LENT KEY IS CHECKED HERE AND NOT IN `start_and_cue`, and the difference is the whole
-        # rule: a pause stands the DAEMON down, it does not disable recording. Somebody who types
+        # THE LENT KEY IS CHECKED HERE AND NOT IN `preroll`, and the difference is the whole rule:
+        # a pause stands the DAEMON down, it does not disable recording. Somebody who types
         # `murmurflow toggle` while the key is lent is asking for a recording on purpose and gets
-        # one; only the trigger stands down.
-        #
-        # No cue, deliberately. The person pressing it knows they lent the key out — they are
-        # talking to whatever borrowed it — and a sound here would be this program interrupting the
-        # conversation it stood down for. The log says so once per press, because a daemon that
+        # one; only the trigger stands down. The log says so once per press, because a daemon that
         # does nothing still has to be explainable after the fact.
         lent, holder = paused()
         if lent:
             emit(f"[--] the trigger is lent to {holder} — not recording")
             return
-        rec = start_and_cue()
+        # The pre-roll FIRST: it is already `current()`, so a plain `start()` would decline.
+        rec = preroll_claim() or start()
         if rec is not None:
             mine.append(rec)
             stream_start(rec)
@@ -2755,18 +2490,8 @@ def listen_loop(
         result = finish(mine.pop())
         watch_warm(result.warm)
         if result.problem:
-            # A clip too short to hold a word is not a FAILURE, it is a gesture that was never a
-            # sentence — a brushed key, or a hand that changed its mind. Chiming at it is the
-            # "beeping that comes back out of nowhere" that makes a background daemon feel broken:
-            # nothing was asked for, so a noise reporting that it did not work is pure confusion.
-            # It is still logged. Every OTHER problem (a silent microphone, a failed transcription)
-            # followed a real attempt and still gets its tone.
-            if not result.problem.startswith((TOO_SHORT, NOTHING_SAID)):
-                cue(CUE_FAIL)
             emit(f"[!] {result.problem}")
             return
-        # No cue here: `finish` already played it when the microphone closed, and the text landing
-        # at the cursor is a better confirmation than any second tone.
         emit(log_line(result))
         # One stat per dictation, off the felt path: the text is already at the cursor by now.
         trim_log()
@@ -2778,16 +2503,18 @@ def listen_loop(
         rec = mine.pop()
         # Whatever streaming already typed stays typed — there is no un-paste (see `stream_tail`) —
         # but nothing more is added to it. An abort throws away the AUDIO, which is what it is for.
-        stream = stop_streaming(rec.wav)
+        stop_streaming(rec.wav)
         wav = stop(rec)
-        # DRAINED AFTER THE RECORDER IS DOWN, and the order is the whole point: `streamed` waits on
-        # a paste that may still be settling, this runs on the poll loop's own thread, and the
-        # microphone is open and the trigger unwatched for as long as it blocks. Nothing above
-        # needs the answer — an abort throws the audio away — so the wait belongs behind the stop.
-        streamed(stream)  # for its other half: the cues come back if nothing reached the screen
         if wav is not None:
             wav.unlink(missing_ok=True)
 
     _, device = resolve_input()
     emit(f"listening — {trigger_hint(trigger)} (mic: {device})")
-    bind_trigger(on_press, on_release, trigger=trigger, on_abort=on_abort, should_stop=should_stop)
+    bind_trigger(
+        on_press,
+        on_release,
+        trigger=trigger,
+        on_abort=on_abort,
+        should_stop=should_stop,
+        on_tap=on_tap,
+    )

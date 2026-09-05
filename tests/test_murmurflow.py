@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import itertools
 import json
 import os
 import sys
@@ -23,7 +24,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from murmurflow import cli, config, dictate, whisper
+from murmurflow import cli, config, dictate, service, whisper
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +40,13 @@ def _isolated_home(tmp_path, monkeypatch):
     # `preroll` a no-op and its `preroll_claim` wait out the full claim timeout.
     dictate._PREROLL = None
     dictate._STREAMS.clear()
+    # THE SUITE MUST NOT REACH OUT OF THIS DIRECTORY, and `MURMURFLOW_HOME` alone does not stop it:
+    # `config set` bounces the warm servers whenever the listener is INSTALLED, and that question is
+    # about the real machine. On a developer's Mac a config test therefore ran a real `pgrep` and a
+    # real SIGTERM, and killed the whisper-servers his own dictation was using — mid-afternoon, with
+    # nothing on screen to say why it had suddenly gone slow. A test that wants the bounce patches
+    # this back to True for itself.
+    monkeypatch.setattr(service, "running", lambda: False)
     return tmp_path
 
 
@@ -624,10 +632,26 @@ def test_boilerplate_appended_to_a_real_sentence_is_not_typed():
     assert dictate.tidy("Make it public. Thanks for watching!") == "Make it public."
     assert dictate.tidy("Ship it. [BLANK_AUDIO]") == "Ship it."
     assert dictate.tidy("Fertig. Untertitel von Stephanie Geiges") == "Fertig."
-    # Never the last sentence standing: a clip that is ONLY boilerplate is `finish`'s call, and a
-    # real sentence that merely looks polite is never touched.
+    # Never the last sentence standing: a clip that is ONLY boilerplate is `finish`'s call.
     assert dictate.tidy("Thanks for watching!") == "Thanks for watching!"
-    assert dictate.tidy("Ship it. Thank you.") == "Ship it. Thank you."
+
+
+def test_the_polite_closing_whisper_invents_for_the_pause_is_dropped():
+    """REPORTED: "random thank-yous, I don't know where this comes from."
+
+    Whisper fills the gap between the last word and the hand reaching for the key, and what it
+    fills it with is a goodbye. Only ever as a trailing sentence of its own, so a dictation that IS
+    "Thank you." still types — which is why this list is separate from the whole-line one, and why
+    it was taken out of that one years ago.
+    """
+    assert dictate.tidy("Make it public. Thank you.") == "Make it public."
+    assert dictate.tidy("Ship it on Friday. Thanks.") == "Ship it on Friday."
+    assert dictate.tidy("Mach das bitte. Danke.") == "Mach das bitte."
+    assert dictate.tidy("See you there. Bye bye") == "See you there."
+    # ...and never a sentence somebody meant.
+    assert dictate.tidy("Thank you.") == "Thank you."
+    assert dictate.tidy("Danke.") == "Danke."
+    assert dictate.tidy("I want to thank you for that.") == "I want to thank you for that."
 
 
 def test_filler_stripping_still_works_when_it_is_asked_for():
@@ -1599,6 +1623,92 @@ def test_a_reworded_prefix_neither_doubles_nor_loses_the_rest():
     assert dictate.stream_tail("send it to him", "send it two him tomorrow") == "tomorrow"
 
 
+def test_a_streamed_chunk_is_typed_and_never_touches_the_clipboard(monkeypatch):
+    """The clipboard round trip was ~500ms against ~420ms to decode the audio, so it was HALF the
+    streaming cycle and the report was "it is lagging behind, two or three words at a time".
+    """
+    typed: list[str] = []
+    pasted: list[str] = []
+    monkeypatch.setattr(dictate.platforms, "type_text", lambda text: typed.append(text) or "")
+    monkeypatch.setattr(dictate, "_inject", lambda text: (bool(pasted.append(text)), "", ""))
+    assert dictate.place(" and then") == " and then"
+    assert typed == [" and then"]
+    assert pasted == []
+
+
+def test_a_chunk_that_cannot_be_typed_still_lands_by_paste(monkeypatch):
+    """Windows types nothing, and a Mac without the grant cannot either. Never lose the words."""
+    pasted: list[str] = []
+    monkeypatch.setattr(dictate.platforms, "type_text", lambda text: text)
+    monkeypatch.setattr(
+        dictate, "_inject", lambda text: (bool(pasted.append(text)) or True, "", "")
+    )
+    assert dictate.place(" and then") == " and then"
+    assert pasted == [" and then"]
+
+    def _boom(_text):
+        raise OSError("the event tap said no")
+
+    monkeypatch.setattr(dictate.platforms, "type_text", _boom)
+    pasted.clear()
+    assert dictate.place(" and then") == " and then"
+    assert pasted == [" and then"]
+
+
+def test_typing_that_stops_halfway_pastes_only_what_is_left(monkeypatch):
+    """The text goes out in pieces, so a failure halfway is already half on screen. Told only that
+    it failed, the caller would paste the whole chunk over the top and type the first half twice.
+    """
+    pasted: list[str] = []
+    monkeypatch.setattr(dictate.platforms, "type_text", lambda _text: "then")
+    monkeypatch.setattr(
+        dictate, "_inject", lambda text: (bool(pasted.append(text)) or True, "", "")
+    )
+    assert dictate.place(" and then") == " and then"
+    assert pasted == ["then"], "only the part that never went out"
+
+    # ...and when even the paste fails, only what the typing already placed is remembered, or the
+    # final transcript would be asked to fill a gap that is not there.
+    monkeypatch.setattr(dictate, "_inject", lambda _text: (False, "no", ""))
+    assert dictate.place(" and then") == " and "
+
+
+def test_an_emoji_is_never_split_across_two_events():
+    """Both UTF-16 units of a non-BMP character must reach ONE event, or the app is handed half a
+    character and drops it — silently, while everything reports success.
+    """
+    macos = pytest.importorskip("murmurflow.platforms.macos")
+    if sys.platform != "darwin":
+        pytest.skip("the direct-typing path is macOS only")
+    import ctypes
+
+    size = macos._TYPE_CHUNK
+    text = "a" * (size - 1) + "\U0001f600" + "ok"  # the emoji straddles the first seam
+    units = text.encode("utf-16-le")
+    buffer = (ctypes.c_uint16 * (len(units) // 2)).from_buffer_copy(units)
+    total = len(buffer)
+
+    seams = []
+    start = 0
+    while start < total:
+        start = macos._chunk_end(buffer, start, total)
+        seams.append(start)
+    for seam in seams[:-1]:
+        assert not 0xD800 <= buffer[seam - 1] <= 0xDBFF, "a piece ended on half a character"
+    # ...and every piece still decodes on its own, which is what the event actually receives.
+    pieces = [0, *seams]
+    for lower, upper in itertools.pairwise(pieces):
+        raw = bytes(bytearray(units[lower * 2 : upper * 2]))
+        assert raw.decode("utf-16-le")  # raises on a lone surrogate
+    assert (
+        "".join(
+            bytes(bytearray(units[a * 2 : b * 2])).decode("utf-16-le")
+            for a, b in itertools.pairwise(pieces)
+        )
+        == text
+    )
+
+
 def test_the_last_part_of_a_long_dictation_is_never_pasted_twice():
     """REPORTED: 88 seconds, 1586 characters, and the end of it appeared on screen a second time.
 
@@ -1831,6 +1941,27 @@ def test_an_impostor_on_the_port_is_never_handed_the_audio(monkeypatch):
     monkeypatch.setattr(dictate.subprocess, "run", lambda *_a, **_k: _Whisper())
     assert dictate.ours(dictate.partial_port()) is True
     assert dictate.partial_at() == dictate.partial_port()
+
+
+def test_zero_means_the_main_port_here_as_it_does_everywhere_else(monkeypatch):
+    """FOUND LIVE. `start_server()` with no port asked whether a whisper-server held port ZERO.
+
+    Nothing is ever listening there, so the answer was always no, and the daemon announced that its
+    own running server was unavailable — then ran every clip on the cold path, all day.
+    """
+    monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
+    asked: list[str] = []
+
+    class _Found:
+        stdout = "4242\n"
+
+    def _run(argv, **_kwargs):
+        asked.append(argv[-1])
+        return _Found()
+
+    monkeypatch.setattr(dictate.subprocess, "run", _run)
+    assert dictate.start_server() is True
+    assert asked == [f"whisper-server.*--port {dictate.port()}"], "asked about the wrong port"
 
 
 def test_a_port_that_leaves_no_room_for_the_live_server_is_refused(monkeypatch):

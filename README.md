@@ -114,10 +114,11 @@ tap again to stop. It used to be an opt-in flag called `stream` and that flag is
 meant almost nobody ever saw the good version of the tool. See
 [how it works](#how-the-words-arrive-while-you-talk).
 
-**It makes exactly one sound.** A short tick the moment the microphone is genuinely live, so you
-know when to start. There is no setting, because there is nothing to choose: nothing marks the end
-(the text landing already does) and nothing marks a failure (that is a line in the log, not a noise
-in a meeting). The three configurable tones and the preset system they needed are gone.
+**It makes exactly two sounds, and neither has a setting.** A short tick the moment the microphone
+is genuinely live, so you know when to start. A blunter one the instant it closes, so you know the
+last word or two still coming is a wait and not a loss. Nothing marks a failure — that is a line in
+the log, not a noise in a meeting — and the five configurable tone presets are gone with the
+setting that chose between them.
 
 **And the first word is not missing any more.** CoreAudio takes about 0.6s to hand over its first
 buffer, so a recorder opened on the second tap starts half a sentence late and no decoder can get
@@ -144,6 +145,13 @@ speak catches the rest, and costs nothing (it does not pin the decoder):
 ```sh
 murmurflow config set languages '["de", "en"]'
 ```
+
+The other half of it is the pause between your last word and your hand reaching for the key.
+Whisper fills silence with a goodbye — reported as *"random thank-yous, I don't know where this
+comes from"* — so a trailing `Thank you.`, `Thanks.`, `Danke.`, `Bye bye` or a subtitle credit line
+is dropped when it is appended to a sentence that had already ended. **Never the last sentence
+standing**, so a dictation that really is "Thank you." still types. The cost of that trade is real
+and one-directional: say "Mach das bitte. Danke." and the *Danke* goes.
 
 **Double-tap, or hold.** Double-tap is the default: tap `left Control` twice to start, tap again
 to stop. It is what macOS's own dictation does, it is the only gesture that survives a long
@@ -376,19 +384,36 @@ waiting for it. A separate process cannot queue against itself.
 character-for-character what `large-v3-turbo` did. A live word is pasted and **there is no
 un-paste**, so a model that quietly rewords is not cheaper, it is wrong.
 
-**Measured** on an M4 Pro, macOS 26, `language` on `auto`, one 10.7 second sentence:
+**And a live word is TYPED, not pasted.** The clipboard round trip — save the pasteboard, write the
+text, send ⌘V, wait for the target to read it, put the old contents back — costs about 500ms, more
+than decoding the audio did. It was half the cycle, so the words arrived in two- and three-word
+lumps about once a second. A unicode key event carries the characters itself: no pasteboard,
+nothing to settle, **2.6ms**.
 
-| | one big model | with the live model |
-|---|---|---|
-| one live pass | 2.2s | **0.4s** |
-| first words at the cursor | 3.7s | **1.4s** |
-| lumps of text during the sentence | 5 | **12** |
-| the final transcription, after you stop | 2.9s | **1.7s** |
-| still left to paste when you stop | 62 of 195 chars | **21 of 195** |
+It is also safe on a German keyboard, which is the reason the clipboard was chosen in the first
+place: AppleScript's `keystroke` sends keycodes that the target re-maps through its own layout and
+mangles every umlaut, where `CGEventKeyboardSetUnicodeString` sends the characters themselves. The
+**final** transcript still goes through the clipboard, because it can be two thousand characters at
+once and because its paste reports back what the target actually received.
+
+**Measured** on an M4 Pro, macOS 26, `language` on `auto`, one 10.5 second sentence:
+
+| | one big model, pasted | live model, pasted | live model, typed |
+|---|---|---|---|
+| one live pass | 2.2s | 0.4s | **0.4s** |
+| the cycle: decode, then place the words | ~2.7s | ~0.9s | **~0.43s** |
+| first words at the cursor | 3.7s | 1.4s | **1.5s** |
+| lumps of text during the sentence | 5 | 12 | **21** |
+| still left to paste when you stop | 62 of 195 | 21 of 195 | **9 of 195 chars** |
+
+So it is **a word or two every 0.4 seconds**, not letter-by-letter captioning. Letters would be
+cosmetic: no word is known any sooner than the pass that decodes it. Past 30 seconds of speech
+whisper.cpp's padding becomes a second 30s window and the cycle doubles, so a long dictation lags
+further behind than a short one.
 
 Without the live model everything still works — the live pass goes to the big server, in ~2s lumps,
 as it did before. `murmurflow doctor` says which one you are on, and every clip's line in the daemon
-log ends with what streaming actually did: `stream 12x → 11 typed`.
+log ends with what streaming actually did: `stream 21x → 20 typed`.
 
 **Detecting the language is a whole extra encoder pass** — 0.75s of every 2.2s, measured — and one
 clip does not change language halfway through, so every pass after the first pins itself to what

@@ -600,8 +600,13 @@ OWNERSHIP_SECONDS = 30.0
 _OWNERSHIP: dict[int, tuple[float, bool]] = {}
 
 
-def ours(at: int) -> bool:
+def ours(at: int = 0) -> bool:
     """Is the thing listening on ``at`` a whisper-server, rather than whatever got there first.
+
+    ``0`` means the main port, the same as it does to :func:`server_url` and :func:`server_up`.
+    It has to: this is called with whatever a caller was given, and a caller that was given the
+    default asked about port ZERO — where nothing is ever listening, so the answer was always no
+    and the daemon started every morning announcing that its own running server was unavailable.
 
     **Because the answer decides where recorded audio is sent.** Both ports are predictable — one
     is a documented default, the other is one above it — and any local process can bind them first
@@ -612,6 +617,7 @@ def ours(at: int) -> bool:
     finding one there IS the answer. Cached for :data:`OWNERSHIP_SECONDS` because this sits on the
     partial path, which asks it about once a second, and `pgrep` is a process spawn.
     """
+    at = at or port()
     now = time.monotonic()
     cached = _OWNERSHIP.get(at)
     if cached is not None and now - cached[0] < OWNERSHIP_SECONDS:
@@ -1121,6 +1127,50 @@ def join_segments(transcript: str) -> str:
     return _SEGMENT_SEAM.sub(lambda seam: " " if seam.group(1) or seam.group(2) else "", transcript)
 
 
+#: Polite closings whisper invents for the pause between your last word and your hand.
+#:
+#: **Trailing only, and that is the whole reason this is a second list.** "Thank you." on its own is
+#: a sentence people dictate, and swallowing it looks like the microphone failed — which is exactly
+#: why it was taken OUT of :data:`_HALLUCINATIONS` once. Appended to a sentence that already ended,
+#: it is whisper filling silence: reported live as "random thank-yous, I don't know where this
+#: comes from". :func:`strip_trailing_hallucination` never removes the last sentence standing, so
+#: both readings get what they should.
+_TRAILING_BOILERPLATE: frozenset[str] = frozenset(
+    {
+        "thank you",
+        "thank you.",
+        "thank you!",
+        "thank you very much",
+        "thank you very much.",
+        "thanks",
+        "thanks.",
+        "thank you for watching",
+        "thank you for watching.",
+        "thanks for listening",
+        "thanks for listening.",
+        "bye",
+        "bye.",
+        "bye!",
+        "bye bye",
+        "bye-bye.",
+        "goodbye",
+        "goodbye.",
+        # ...and in the other language he actually speaks.
+        "danke",
+        "danke.",
+        "danke schön",
+        "danke schön.",
+        "vielen dank",
+        "vielen dank.",
+        "tschüss",
+        "tschüss.",
+        "auf wiedersehen",
+        "auf wiedersehen.",
+        "untertitel im auftrag des zdf",
+    }
+)
+
+
 def strip_trailing_hallucination(text: str) -> str:
     """Drop whisper's boilerplate when it is APPENDED to a real sentence.
 
@@ -1130,12 +1180,15 @@ def strip_trailing_hallucination(text: str) -> str:
     ("...so only agent flow is public now. Thanks for watching!"), the whole thing scores as
     confident speech in a language you speak, and every one of those words gets typed.
 
-    Only whole trailing SENTENCES that :func:`is_hallucination` already recognises are removed, and
-    never the last one standing — same one-directional bias as everything else here: an invented
-    line that slips through is visible and deletable, a real one swallowed is invisible.
+    Only whole trailing SENTENCES are removed, and never the last one standing — same
+    one-directional bias as everything else here: an invented line that slips through is visible and
+    deletable, a real one swallowed is invisible. That guard is also what lets this list carry the
+    polite closings (see :data:`_TRAILING_BOILERPLATE`) that the whole-line trap must not.
     """
     parts = _SENTENCE_END.split(text)
-    while len(parts) > 1 and is_hallucination(parts[-1]):
+    while len(parts) > 1 and (
+        is_hallucination(parts[-1]) or parts[-1].strip().lower() in _TRAILING_BOILERPLATE
+    ):
         parts.pop()
     return " ".join(parts)
 
@@ -1485,10 +1538,15 @@ _INJECT_LOCK = threading.Lock()
 #: word on screen at 1.37s against 1.88s.
 STREAM_FIRST_SECONDS = 1.0
 
-#: Minimum gap between passes. A pass costs about the same whatever it is decoding (see
-#: :func:`_partial`), so in practice the gap IS the pass and this only stops a very fast server
-#: being asked the same question ten times a second.
-STREAM_EVERY_SECONDS = 0.8
+#: Minimum gap between passes, measured from the START of the previous one. A pass costs about the
+#: same whatever it is decoding (see :func:`_partial`), so in practice the pass IS the gap and this
+#: only stops a very fast server being asked the same question ten times a second.
+#:
+#: It was 0.8 while a chunk was pasted through the clipboard, which cost ~500ms on its own — the
+#: cycle was ~0.9s and this never bit. Typing the chunk directly costs 2.6ms (see
+#: :func:`platforms.type_text`), so 0.8 became the thing holding the words back rather than the
+#: decode, and the report was "it is lagging behind, two or three words at a time".
+STREAM_EVERY_SECONDS = 0.25
 
 #: How many words at the end of a lone first pass are held back rather than typed.
 #:
@@ -1715,6 +1773,31 @@ def stream_note(stream: Stream | None) -> str:
     return note
 
 
+def place(text: str) -> str:
+    """Put a streamed chunk at the cursor. Returns the part of it that actually landed.
+
+    Typed as unicode key events where the platform can (macOS), which is 2.6ms and never touches
+    the clipboard; the clipboard paste is the fallback, and is what every other platform does.
+    Held by the caller under :data:`_INJECT_LOCK` either way — not for the clipboard's sake now,
+    but for ORDER: a chunk must never land after the finished sentence it belongs in the middle of.
+
+    **What LANDED, and not whether it worked.** The typing goes out in pieces, so a failure halfway
+    leaves some of it on screen; falling back with the whole chunk would type the first half twice,
+    and reporting "it failed" would leave the streamer's idea of the screen short, which is what
+    :func:`stream_tail` reads to decide what is still missing at the end.
+    """
+    rest = text
+    # Never lose a chunk to a typing API that is having a bad day: whatever it does, the paste is
+    # still there underneath.
+    with contextlib.suppress(Exception):
+        rest = platforms.type_text(text)
+    if not rest:
+        return text
+    if _inject(rest)[0]:
+        return text
+    return text[: len(text) - len(rest)]  # only the part the typing already put on screen
+
+
 def stream_start(rec: Recording) -> None:
     """Begin pasting words at the cursor while ``rec`` is still recording. Returns immediately.
 
@@ -1770,8 +1853,12 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
                 # The space belongs to the FRONT of the chunk and not the back of the last one:
                 # trailing space would be typed and then left behind at the end of the dictation,
                 # and the very first chunk is the one that must not have one.
-                if _inject(f" {chunk}" if stream.text else chunk)[0]:
-                    stream.text = f"{stream.text} {chunk}".strip()
+                # `stream.text` is literally what is on the screen, built from what LANDED rather
+                # than from what was asked for — see :func:`place`. The leading space travels with
+                # the chunk, so this is a concatenation and never a re-join.
+                landed = place(f" {chunk}" if stream.text else chunk)
+                if landed:
+                    stream.text = f"{stream.text}{landed}".strip()
                     stream.typed += 1
         stream.done.wait(max(0.0, STREAM_EVERY_SECONDS - (time.monotonic() - started)))
 
@@ -2029,6 +2116,12 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
             else "hold the key while you talk"
         )
         return Result("", seconds, 0, False, f"{TOO_SHORT} — {advice}")
+    # HERE, the instant the microphone closes — not after the transcribe, and not after the paste.
+    # Cued afterwards it arrives a full transcription behind the thing it is acknowledging, so the
+    # user sees the words land and then hears a tone about them, which reads as a glitch. Every
+    # surface goes through this function, so cueing at the seam is also the only way they stay in
+    # step. After the two ways this can still be a non-event, so nothing chimes at a brushed key.
+    cue_done()
     level = peak_dbfs(wav)
     captured = audio_seconds(wav)
 
@@ -2287,22 +2380,35 @@ def _preroll_expire(pending: _Preroll) -> None:
 
 
 def cue_ready() -> None:
-    """The one sound this tool makes: the microphone is live, start talking. Never raises.
+    """The microphone is live, start talking. Never raises.
 
-    It came back, and the report it came back for is the one thing streaming could not answer.
     The words arriving at the cursor say "it heard you", perfectly — but they arrive a second and
     a half in, which is a second and a half of not knowing whether to start, every single time.
     Fired the moment the device is genuinely live (see :func:`ready`), so it is also the signal
     that stops the first word being spoken into a microphone that is not open yet.
-
-    Exactly one sound and no setting: nothing marks the end, because the text landing already
-    does, and nothing marks a failure, because a failure is a line in the log and not a noise in
-    a meeting.
     """
-    if os.environ.get("MURMURFLOW_NO_AUDIO"):
+    _sound(platforms.play_ready)
+
+
+def cue_done() -> None:
+    """The microphone just closed, stop talking. Never raises.
+
+    **Not "the text has arrived".** It fires the instant the recorder stops, which is a second or
+    more before the final transcription lands — and that gap is precisely why it exists: streaming
+    has already typed almost everything, so the last word or two arriving late looked like the last
+    word or two being LOST. Cued at the seam, the silence afterwards is a wait rather than a fault.
+
+    Two sounds, and no third: a failure is a line in the log, not a noise in a meeting.
+    """
+    _sound(platforms.play_done)
+
+
+def _sound(play: object) -> None:
+    """Make one noise, or none. Never raises, and never anything the test suite can hear."""
+    if os.environ.get("MURMURFLOW_NO_AUDIO") or not callable(play):
         return
     with contextlib.suppress(Exception):
-        platforms.play_ready()
+        play()
 
 
 def bind_trigger(

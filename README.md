@@ -425,7 +425,7 @@ A broken polish command degrades to the plain transcript. It never costs you the
 ## Commands
 
 ```
-murmurflow install      install the login agent so dictation is always live
+murmurflow install      install (or UPDATE) dictation, and keep it live after every login
 murmurflow listen       run the daemon in this terminal instead (blocks)
 murmurflow doctor       what is missing, and the one command that fixes each thing
 murmurflow keytest      does this Mac actually see your trigger key?
@@ -450,6 +450,19 @@ you leave it on, and deletes the clip when you turn it off.
 `config set` refuses a setting it does not recognise and a value that cannot work — a trigger name
 this machine cannot poll, a model path that is not there, a language you did not say you speak. All of those
 used to be accepted and then fail silently, which is the same symptom as broken hardware.
+
+**`install` is also `update`.** The listener does not run your checkout — `uv tool install` made
+a copy of the package and launchd runs that — so a `git pull` alone changes a directory the running
+program never reads, silently. `murmurflow install` therefore re-installs the package from wherever
+it came from first (a local checkout, a git URL, PyPI), then re-executes itself out of the new copy
+and registers the agent. Two commands, and only because the first one is git:
+
+```sh
+git pull && murmurflow install
+```
+
+An update that cannot run never blocks the install: no `uv`, a source that has moved, a network
+that is down — each prints a line and carries on with the copy already on the machine.
 
 `doctor` and `keytest` exist because dictation fails in exactly four ways — the key isn't seen, the
 microphone isn't heard, the model isn't found, the text isn't typed — and from the outside those are

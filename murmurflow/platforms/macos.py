@@ -11,6 +11,7 @@ selects it — so a name that is not in that module's contract is private to mac
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import ctypes.util
 import os
@@ -399,6 +400,28 @@ def inject(text: str, settle: float) -> tuple[bool, str, str]:
     if "not allowed" in hint.lower() or "1002" in hint:
         hint = permission_hint()
     return False, f"paste failed: {hint}.", ""
+
+
+# --- the one sound ------------------------------------------------------------------------------
+
+#: The Mac's own "ready" tick. A system sound rather than a generated tone: it is one people have
+#: heard for twenty years, it needs no file shipped or cached, and it follows the alert-volume
+#: slider, which nothing we synthesise can see.
+READY_SOUND = "/System/Library/Sounds/Tink.aiff"
+
+
+def play_ready() -> None:
+    """Say the microphone is live, once, without blocking. Silence, never a crash, if it cannot."""
+    player = shutil.which("afplay")
+    if not player or not Path(READY_SOUND).is_file():
+        return
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.Popen(
+            [player, READY_SOUND],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
 
 def input_permitted() -> bool:

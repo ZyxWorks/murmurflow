@@ -84,6 +84,12 @@ input_permitted = impl.input_permitted
 #: One line telling the user how to grant it, or ``""`` when there is nothing to grant.
 permission_hint = impl.permission_hint
 
+# --- sound --------------------------------------------------------------------------------------
+
+#: Play the one sound this tool makes — the microphone is live — without blocking and without ever
+#: raising. No player, no sound, no crash.
+play_ready = impl.play_ready
+
 # --- service ------------------------------------------------------------------------------------
 
 #: Install the always-on listener so it starts at login. ``(ok, detail)``.

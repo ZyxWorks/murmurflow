@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import array
 import contextlib
+import difflib
 import json
 import math
 import os
@@ -1608,12 +1609,25 @@ def stream_tail(pasted: str, final: str) -> str:
     The ordinary case is the easy one: the streamed words are still a prefix of the final
     transcript and this returns the rest of it.
 
-    The interesting case is when they are not, because the last pass — the only one that sees the
-    whole clip — reworded something already typed. **There is no un-paste**, and there deliberately
-    is no attempt at one: synthesising backspaces into an app whose cursor may have moved since
-    (the user clicked away, an autocomplete fired) deletes text that was never ours. So the two are
-    lined up on the last word actually pasted and the transcript carries on from there. A word left
-    reading as whisper first heard it is a cosmetic loss; a doubled or missing half-sentence is not.
+    The interesting case is when they are not, because the final pass — the only one that sees the
+    whole clip, and now a different and better model than the live one — reworded something already
+    typed. **There is no un-paste**, and there deliberately is no attempt at one: synthesising
+    backspaces into an app whose cursor may have moved since (the user clicked away, an autocomplete
+    fired) deletes text that was never ours. So the two are lined up on the last RUN of words
+    actually pasted, and the transcript carries on from there.
+
+    **Aligning the two is a sequence-diff problem, and the stdlib has one.** It was a hand-rolled
+    search for the last word pasted, bounded to a few positions either side of the word count, and
+    a real dictation broke it: 88 seconds, 1586 characters, and the last chunk of it landed on
+    screen twice. One word is not an anchor — an ordinary paragraph says "the" and "to" a dozen
+    times — and the word count stopped being a hint the moment the live pass moved to its OWN
+    model, because two models do not agree word-for-word over 250 words. ``SequenceMatcher`` lines
+    the two up wherever they actually correspond; the end of its last matching block is the point
+    in ``final`` that the cursor has already reached.
+
+    ``autojunk=False`` is load-bearing: on a sequence this long the default treats any element
+    appearing in more than 1% of it as junk, which for a paragraph of English is "the", "to" and
+    "a" — exactly the words that hold the alignment together.
     """
     already = [_key(word) for word in pasted.split()]
     if not already:
@@ -1622,12 +1636,12 @@ def stream_tail(pasted: str, final: str) -> str:
     keys = [_key(word) for word in words]
     if keys[: len(already)] == already:
         return " ".join(words[len(already) :])
-    # Search near the end of what was pasted rather than from the front: the anchor wanted is the
-    # LAST word typed, and an ordinary sentence repeats short words ("the", "to") several times.
-    for index in range(min(len(keys), len(already) + 3) - 1, -1, -1):
-        if keys[index] == already[-1]:
-            return " ".join(words[index + 1 :])
-    return " ".join(words[len(already) :])  # no anchor at all: trust the count and lose nothing
+    matcher = difflib.SequenceMatcher(a=already, b=keys, autojunk=False)
+    matched = [block for block in matcher.get_matching_blocks() if block.size]
+    if not matched:
+        return " ".join(words[len(already) :])  # nothing corresponds: trust the count, lose nothing
+    reached = matched[-1]
+    return " ".join(words[reached.b + reached.size :])
 
 
 def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
@@ -2186,52 +2200,109 @@ def double_tap_mode() -> bool:
 # long and writes a clip nobody ever reads.
 
 #: How long an unclaimed pre-roll may live. A double-tap is bounded by ``hotkey.DOUBLE_TAP_WINDOW``
-#: press-to-press plus ``hotkey.TAP_MAX`` for the second tap's own duration, so anything the second
-#: tap could still claim has arrived well inside this.
-PREROLL_SECONDS = 1.2
+#: press-to-press plus ``hotkey.TAP_MAX`` for the second tap's own duration — about a second in the
+#: worst case — so anything the second tap could still claim has arrived well inside this.
+PREROLL_SECONDS = 1.5
+
+#: How long :func:`preroll_claim` will wait for a pre-roll that is still opening.
+#:
+#: Nearly always zero: :func:`start` returns as soon as ffmpeg is spawned, in about 7ms, and that
+#: happened a quarter of a second ago on the first tap. The exception is the one case worth waiting
+#: for — :func:`resolve_input` re-listing the devices when its cache has expired, which shells out
+#: to ffmpeg and takes about a second. Waiting is right there: the alternative is starting a SECOND
+#: recorder on a microphone that is already opening.
+PREROLL_CLAIM_SECONDS = 3.0
+
+
+@dataclass
+class _Preroll:
+    """A microphone opening for a gesture that has not finished yet."""
+
+    #: Set once :func:`start` has returned, whatever it returned.
+    open: threading.Event
+    rec: Recording | None = None
+
 
 _PREROLL_LOCK = threading.Lock()
-_PREROLL: Recording | None = None
+_PREROLL: _Preroll | None = None
 
 
 def preroll() -> None:
-    """Open the microphone speculatively, for a gesture that has not finished yet. Never raises.
+    """Open the microphone speculatively, for a gesture that has not finished yet. Returns at once.
 
-    Safe to call on any keypress: it does nothing while something is already recording, and an
-    unclaimed pre-roll stops itself after :data:`PREROLL_SECONDS`.
+    **Every line of the actual work is on a thread, and that is the whole point of this function.**
+    It is called from the key poll loop, on a key-DOWN, in the middle of the gesture that loop is
+    trying to measure — and the loop has 16ms per tick to notice the key moving. Opening a
+    recording is a config read, a liveness probe and a process spawn, and once in a while a
+    device re-list that takes a second. Doing that inline made the loop deaf for as long as it
+    took, so taps went missing and the daemon could not reliably tell whether it was listening.
+
+    Safe to call on any keypress: it does nothing while something is already recording or already
+    pre-rolling, and an unclaimed pre-roll stops itself after :data:`PREROLL_SECONDS`.
     """
     global _PREROLL
     with _PREROLL_LOCK:
-        if _PREROLL is not None or current() is not None:
+        if _PREROLL is not None:
             return
-        rec = start()
-        if rec is None:
-            return
-        _PREROLL = rec
-    # A timer thread and not a deadline checked by the poll loop: the loop only runs a callback
-    # when a KEY moves, and the case to clean up is precisely the one where no key moves again.
-    threading.Timer(PREROLL_SECONDS, _preroll_expire, args=(rec,)).start()
+        pending = _Preroll(threading.Event())
+        _PREROLL = pending
+
+    def _open() -> None:
+        with contextlib.suppress(Exception):
+            pending.rec = None if current() is not None else start()
+        pending.open.set()
+
+    threading.Thread(target=_open, daemon=True).start()
+    # A timer and not a deadline checked by the poll loop: the loop only runs a callback when a KEY
+    # moves, and the case to clean up is precisely the one where no key moves again.
+    threading.Timer(PREROLL_SECONDS, _preroll_expire, args=(pending,)).start()
 
 
 def preroll_claim() -> Recording | None:
     """Take the pre-rolled recording, if there is one. It becomes the caller's to finish."""
     global _PREROLL
     with _PREROLL_LOCK:
-        rec, _PREROLL = _PREROLL, None
-    return rec
+        pending, _PREROLL = _PREROLL, None
+    if pending is None:
+        return None
+    pending.open.wait(PREROLL_CLAIM_SECONDS)
+    return pending.rec
 
 
-def _preroll_expire(rec: Recording) -> None:
-    """Stop and delete ``rec`` unless it has been claimed in the meantime. Never raises."""
+def _preroll_expire(pending: _Preroll) -> None:
+    """Stop and delete the pre-roll unless it has been claimed in the meantime. Never raises."""
     global _PREROLL
     with _PREROLL_LOCK:
-        if _PREROLL is not rec:
+        if _PREROLL is not pending:
             return
         _PREROLL = None
+    # Behind the opener, or the recorder it is in the middle of spawning outlives this and holds
+    # the microphone open with nobody left holding a reference to it.
+    pending.open.wait(PREROLL_CLAIM_SECONDS)
     with contextlib.suppress(Exception):
-        wav = stop(rec)
-        if wav is not None:
-            wav.unlink(missing_ok=True)
+        if pending.rec is not None:
+            wav = stop(pending.rec)
+            if wav is not None:
+                wav.unlink(missing_ok=True)
+
+
+def cue_ready() -> None:
+    """The one sound this tool makes: the microphone is live, start talking. Never raises.
+
+    It came back, and the report it came back for is the one thing streaming could not answer.
+    The words arriving at the cursor say "it heard you", perfectly — but they arrive a second and
+    a half in, which is a second and a half of not knowing whether to start, every single time.
+    Fired the moment the device is genuinely live (see :func:`ready`), so it is also the signal
+    that stops the first word being spoken into a microphone that is not open yet.
+
+    Exactly one sound and no setting: nothing marks the end, because the text landing already
+    does, and nothing marks a failure, because a failure is a line in the log and not a noise in
+    a meeting.
+    """
+    if os.environ.get("MURMURFLOW_NO_AUDIO"):
+        return
+    with contextlib.suppress(Exception):
+        platforms.play_ready()
 
 
 def bind_trigger(
@@ -2601,6 +2672,11 @@ def listen_loop(
     # Recording it started itself rather than whatever happens to be in flight.
     mine: list[Recording] = []
 
+    def _say_ready(rec: Recording) -> None:
+        """Sound the one cue, once the microphone is genuinely live and the clip is still alive."""
+        if ready(rec, timeout=8.0) and current() is not None:
+            cue_ready()
+
     def on_tap(what: str) -> None:
         """Open the microphone on the first tap of the pair — see :func:`preroll`.
 
@@ -2629,6 +2705,10 @@ def listen_loop(
         if rec is not None:
             mine.append(rec)
             stream_start(rec)
+            # ON A THREAD, never inline: `ready` blocks until the device hands over its first
+            # buffer, and this runs on the poll loop, which is the only thing watching the key.
+            # Usually instant — the pre-roll opened the microphone a quarter of a second ago.
+            threading.Thread(target=_say_ready, args=(rec,), daemon=True).start()
 
     def on_release() -> None:
         if not mine:

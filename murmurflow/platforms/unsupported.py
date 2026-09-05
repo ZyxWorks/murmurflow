@@ -84,6 +84,10 @@ def permission_hint() -> str:
     return _WHY
 
 
+def play_ready() -> None:
+    return None
+
+
 def service_install(args: list[str], env: dict[str, str]) -> tuple[bool, str]:
     return False, _WHY
 

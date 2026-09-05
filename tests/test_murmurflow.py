@@ -35,6 +35,10 @@ def _isolated_home(tmp_path, monkeypatch):
     # a real whisper-server is on that port, so a stale True leaked into other tests and hid a
     # failure that only CI — where nothing is listening — could see.
     dictate._OWNERSHIP.clear()
+    # And an unclaimed pre-roll is module state too: one left behind makes the NEXT test's
+    # `preroll` a no-op and its `preroll_claim` wait out the full claim timeout.
+    dictate._PREROLL = None
+    dictate._STREAMS.clear()
     return tmp_path
 
 
@@ -1087,6 +1091,7 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True):
     """Run `listen_loop` over a fixed list of dictations. Returns (server starts, server stops)."""
     starts: list[int] = []
     stops: list[int] = []
+    cues: list[int] = []
 
     class _Inline:  # the bounce runs on a thread; here it runs where the assertion can see it
         def __init__(self, target=None, args=(), kwargs=None, daemon=False):
@@ -1105,6 +1110,11 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True):
     monkeypatch.setattr(dictate, "stop_server", lambda at=0: bool(stops.append(at)) or 1)
     monkeypatch.setattr(dictate, "preroll_claim", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
     monkeypatch.setattr(dictate, "stream_start", lambda _rec: None)  # not what this drives
+    # The ready cue waits for the device to hand over its first buffer, and `_Inline` above runs
+    # every thread inline — so without these three clips would sit out the full 8s timeout each.
+    monkeypatch.setattr(dictate, "ready", lambda _rec, timeout=0.0: True)
+    monkeypatch.setattr(dictate, "current", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
+    monkeypatch.setattr(dictate, "cue_ready", lambda: cues.append(1))
     pending = list(results)
     monkeypatch.setattr(dictate, "finish", lambda _rec: pending.pop(0))
 
@@ -1116,6 +1126,7 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True):
 
     monkeypatch.setattr(dictate, "bind_trigger", _bind)
     dictate.listen_loop()
+    assert len(cues) == len(results), "every clip that starts says so, once"
     return starts, stops
 
 
@@ -1588,6 +1599,33 @@ def test_a_reworded_prefix_neither_doubles_nor_loses_the_rest():
     assert dictate.stream_tail("send it to him", "send it two him tomorrow") == "tomorrow"
 
 
+def test_the_last_part_of_a_long_dictation_is_never_pasted_twice():
+    """REPORTED: 88 seconds, 1586 characters, and the end of it appeared on screen a second time.
+
+    The live pass and the final pass are DIFFERENT MODELS now, so they drift by a few words over a
+    paragraph — and the old alignment hunted for the single last word typed within three positions
+    of the word count. Over 250 words the count is off by more than three and "the" is everywhere,
+    so it matched early and re-pasted everything after that match.
+    """
+    live = (
+        "we should ship the thing to the team before friday because otherwise we are waiting for "
+        "the review until the week after and that pushes the launch into the month after that"
+    )
+    final = (
+        "We should ship the whole thing to the team before Friday, because otherwise we are going "
+        "to be waiting for the review until the week after that, and that pushes the launch into "
+        "the month after that, which is not what we agreed."
+    )
+    assert dictate.stream_tail(live, final) == "which is not what we agreed."
+
+
+def test_an_alignment_holds_even_when_the_common_words_are_everywhere():
+    """`autojunk` would drop "the"/"to"/"a" from a sequence this long — the words holding it up."""
+    live = " ".join(["the cat sat on the mat and"] * 12) + " then it left"
+    final = " ".join(["the cat sat on the mat and"] * 12) + " then it left the room"
+    assert dictate.stream_tail(live, final) == "the room"
+
+
 def test_streaming_is_on_by_default_and_needs_no_setting():
     # It used to be opt-in, and opt-in meant almost nobody ever saw the good version of the product.
     config.set_value("doubleTap", None)
@@ -1915,10 +1953,32 @@ def test_the_second_tap_takes_the_microphone_the_first_tap_already_opened(monkey
 
     dictate.preroll()
     dictate.preroll()  # the second tap's own key-down must not open a SECOND recorder
+    claimed = dictate.preroll_claim()  # waits for the opener thread, then takes what it made
     assert len(made) == 1
-    assert dictate.preroll_claim() is made[0]
+    assert claimed is made[0]
     assert stopped == []  # claimed, so nothing was thrown away
     assert dictate.preroll_claim() is None  # and it is gone from the registry
+
+
+def test_opening_the_microphone_never_blocks_the_key_loop(monkeypatch, tmp_path):
+    """`preroll` runs from the poll loop, on a key-DOWN, and that loop has 16ms to see the key move.
+
+    Inline it was a config read, a liveness probe and a process spawn — and once in a while a
+    device re-list that takes a second — so taps went missing and the daemon could not tell whether
+    it was listening.
+    """
+    monkeypatch.setattr(
+        dictate.threading, "Timer", lambda *_a, **_k: types.SimpleNamespace(start=lambda: None)
+    )
+    opening = threading.Event()
+    monkeypatch.setattr(dictate, "current", lambda: None)
+    monkeypatch.setattr(dictate, "start", lambda: opening.wait(5) and None)
+
+    began = time.monotonic()
+    dictate.preroll()
+    held = time.monotonic() - began
+    opening.set()  # before the assert, so a failure does not also leave a thread parked
+    assert held < 0.1, "the key loop was held while the microphone opened"
 
 
 def test_a_pre_roll_nobody_claims_stops_itself_and_leaves_no_audio(monkeypatch, tmp_path):
@@ -1935,6 +1995,10 @@ def test_a_pre_roll_nobody_claims_stops_itself_and_leaves_no_audio(monkeypatch, 
     )
 
     dictate.preroll()
+    deadline = time.monotonic() + 5
+    while not made and time.monotonic() < deadline:  # let the opener thread spawn the recorder
+        time.sleep(0.01)
+    assert made, "the pre-roll never opened anything"
     fired[0]()  # the pair never completed and the timer came due
     assert stopped == made
     assert not made[0].wav.exists()

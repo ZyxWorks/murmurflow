@@ -114,16 +114,17 @@ tap again to stop. It used to be an opt-in flag called `stream` and that flag is
 meant almost nobody ever saw the good version of the tool. See
 [how it works](#how-the-words-arrive-while-you-talk).
 
-**It makes no sound.** There were three tones — ready, done, fail — and they are gone, with the
-setting that configured them. The text appearing at your cursor is a better "the microphone is
-live" than a chime, it arrives at the same moment, and the room cannot hear it. What went wrong is
-still written to `~/.murmurflow/listen.log`, one line per clip.
+**It makes exactly one sound.** A short tick the moment the microphone is genuinely live, so you
+know when to start. There is no setting, because there is nothing to choose: nothing marks the end
+(the text landing already does) and nothing marks a failure (that is a line in the log, not a noise
+in a meeting). The three configurable tones and the preset system they needed are gone.
 
 **And the first word is not missing any more.** CoreAudio takes about 0.6s to hand over its first
 buffer, so a recorder opened on the second tap starts half a sentence late and no decoder can get
 that audio back. The recorder is now opened on the **first** tap instead and the second tap claims
-it, already live. Measured over a five-second sentence: 0.35s of speech lost before, 0.04s after.
-A tap that never becomes a pair stops the recorder within 1.2s and deletes what it caught.
+it, already live — which is also why the tick usually sounds the instant you finish tapping.
+Measured over a five-second sentence: 0.35s of speech lost before, 0.04s after. A tap that never
+becomes a pair stops the recorder within 1.5s and deletes what it caught.
 
 **What you said is what you get.** Nothing is removed, reworded or reordered. If you say
 "hey, ship it on Friday", "hey" appears. There is an opt-in filler strip, and it removes **sounds

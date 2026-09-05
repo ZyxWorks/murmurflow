@@ -10,11 +10,13 @@ from __future__ import annotations
 import argparse
 import contextlib
 import difflib
+import os
 import shlex
 import signal
 import subprocess
 import sys
 import time
+import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -84,8 +86,111 @@ def _setup(name: str = "") -> int:
     return 0
 
 
+# --- installing IS updating ---------------------------------------------------------------------
+#
+# `git pull && murmurflow install` has to be the whole update, and it was not.
+#
+# The listener does not run the checkout. `uv tool install` made a COPY of the package, launchd
+# runs that copy, and a `git pull` therefore changed a directory the running program never reads.
+# Every fix landed in a repo, nothing changed on the machine, and there was no error anywhere to
+# say so — the tool simply kept behaving like last week. The old cure was a four-command chain
+# nobody should have to remember, and the second command in it is the one everybody forgot.
+#
+# So `install` re-installs the package from wherever it came from first, and then re-executes
+# itself out of the new copy to do the actual install. Re-exec rather than carrying on in-process
+# because `uv tool install --force` replaces the directory this process is importing FROM: modules
+# already loaded are fine, but the next lazy import would open a path that no longer exists.
+
+#: Set on the re-executed child, so the update can never loop.
+_RESYNCED = "MURMURFLOW_RESYNCED"
+
+
+def _receipt() -> Path | None:
+    """``uv-receipt.toml`` for this install, or ``None`` when this is not a ``uv tool`` install.
+
+    Found by walking UP from this module rather than by guessing at ``~/.local/share/uv/tools``:
+    that directory moves with ``UV_TOOL_DIR``, and running from a checkout or a venv has no receipt
+    at all — which is the honest answer "there is nothing to re-sync", not a failure.
+    """
+    for parent in Path(__file__).resolve().parents:
+        receipt = parent / "uv-receipt.toml"
+        if receipt.is_file():
+            return receipt
+    return None
+
+
+def _update_command(receipt: Path) -> list[str] | None:
+    """The ``uv`` argv that brings this install up to date with its source, or ``None``.
+
+    A LOCAL directory is re-installed from that directory, because that is what a `git pull` just
+    changed. Anything else (a git URL, PyPI) is an `upgrade`, which re-resolves it for itself.
+    """
+    uv = dictate.resolve_bin("uv")
+    if not uv:
+        return None
+    try:
+        data = tomllib.loads(receipt.read_text("utf-8"))
+        requirements = data["tool"]["requirements"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    for requirement in requirements if isinstance(requirements, list) else []:
+        if not isinstance(requirement, dict) or requirement.get("name") != "murmurflow":
+            continue
+        source = str(requirement.get("directory") or requirement.get("editable") or "")
+        if source and Path(source).is_dir():
+            return [uv, "tool", "install", "--force", "--python", "3.13", source]
+        return [uv, "tool", "upgrade", "murmurflow"]
+    return None
+
+
+def _update() -> None:
+    """Re-install this package from its source, then re-exec into the new copy. Usually a no-op.
+
+    Never blocks the install: a machine with no ``uv``, a source that has gone away, a network that
+    is down — all of them print a line and carry on with the copy that is already here. An update
+    that could not run is an inconvenience; an ``install`` that refuses to run is a dead tool.
+    """
+    receipt = None if os.environ.get(_RESYNCED) else _receipt()
+    if receipt is None:
+        return
+    command = _update_command(receipt)
+    if command is None:
+        return
+    _out("updating the installed copy from its source...")
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        _out(f"[!] could not update it ({error}) — installing the copy already here")
+        return
+    if done.returncode != 0:
+        detail = (done.stderr or "").strip().splitlines()
+        _out(
+            f"[!] could not update it ({detail[-1] if detail else 'unknown error'}) — installing the copy already here"
+        )
+        return
+    _out("[OK] code updated")
+    os.environ[_RESYNCED] = "1"
+    try:
+        # Our own interpreter, our own module name, and the argv we were given. Not a shell, and
+        # nothing here comes from anywhere a caller could aim it.
+        os.execv(sys.executable, [sys.executable, "-m", "murmurflow", *sys.argv[1:]])  # noqa: S606
+    except OSError as error:
+        # STOP, rather than carrying on in the old process. The package directory this process
+        # imports from has just been replaced: what is already loaded still works, and the next
+        # lazy import opens a path that is gone. Half an install is worse than none, and re-running
+        # the command is now free — the update is already done, and the guard above skips it.
+        _out(f"[!] updated, but could not restart into the new copy ({error}).")
+        _out("    Run `murmurflow install` once more — the update itself is done.")
+        raise SystemExit(1) from error
+
+
 def _install() -> int:
-    """Warm the microphone, then install the launchd agent so dictation is live after every login."""
+    """Update the installed copy, warm the microphone, then install the launchd agent.
+
+    This is the ONE command: `git pull && murmurflow install` and the machine is running what the
+    repo says. See :func:`_update` for why the update belongs here rather than in a verb of its own.
+    """
+    _update()  # may re-exec; anything after this line runs in the NEW copy
     ready, hint = dictate.available()
     if not ready:
         _out(hint)

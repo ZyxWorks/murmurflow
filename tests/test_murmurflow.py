@@ -1702,6 +1702,80 @@ def test_a_language_you_do_not_speak_is_never_pinned(monkeypatch, tmp_path):
     assert set(asked) == {""}  # every pass still detects; none is pinned to a language he lacks
 
 
+# --- installing is updating -----------------------------------------------------------------------
+
+
+def _receipt_at(tmp_path, body):
+    receipt = tmp_path / "uv-receipt.toml"
+    receipt.write_text(body, "utf-8")
+    return receipt
+
+
+def test_a_local_checkout_is_reinstalled_from_that_checkout(tmp_path, monkeypatch):
+    """`git pull` changes the checkout; the daemon runs the COPY uv made. So install re-copies."""
+    monkeypatch.setattr(cli.dictate, "resolve_bin", lambda _n: "/opt/homebrew/bin/uv")
+    checkout = tmp_path / "murmurflow"
+    checkout.mkdir()
+    receipt = _receipt_at(
+        tmp_path,
+        f'[tool]\nrequirements = [{{ name = "murmurflow", directory = "{checkout}" }}]\n',
+    )
+    assert cli._update_command(receipt) == [
+        "/opt/homebrew/bin/uv",
+        "tool",
+        "install",
+        "--force",
+        "--python",
+        "3.13",
+        str(checkout),
+    ]
+
+
+def test_an_install_from_git_or_pypi_is_upgraded_instead(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.dictate, "resolve_bin", lambda _n: "/opt/homebrew/bin/uv")
+    receipt = _receipt_at(tmp_path, '[tool]\nrequirements = [{ name = "murmurflow" }]\n')
+    assert cli._update_command(receipt) == ["/opt/homebrew/bin/uv", "tool", "upgrade", "murmurflow"]
+
+
+def test_no_uv_and_a_corrupt_receipt_both_mean_do_not_update(tmp_path, monkeypatch):
+    """An update that cannot run is an inconvenience. An `install` that refuses is a dead tool."""
+    receipt = _receipt_at(tmp_path, '[tool]\nrequirements = [{ name = "murmurflow" }]\n')
+    monkeypatch.setattr(cli.dictate, "resolve_bin", lambda _n: "")
+    assert cli._update_command(receipt) is None
+    monkeypatch.setattr(cli.dictate, "resolve_bin", lambda _n: "/opt/homebrew/bin/uv")
+    assert cli._update_command(_receipt_at(tmp_path, "not toml at all {{{")) is None
+
+
+def test_a_restart_that_fails_stops_the_install_rather_than_half_doing_it(tmp_path, monkeypatch):
+    """The package directory this process imports from has just been replaced. Carrying on means
+    the next lazy import opens a path that is gone, which is half an install and no error.
+    """
+    monkeypatch.setattr(cli, "_receipt", lambda: tmp_path / "uv-receipt.toml")
+    monkeypatch.setattr(cli, "_update_command", lambda _r: ["uv", "tool", "upgrade", "murmurflow"])
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *_a, **_k: types.SimpleNamespace(returncode=0, stderr="")
+    )
+    monkeypatch.delenv(cli._RESYNCED, raising=False)
+
+    def _boom(*_a):
+        raise OSError("Text file busy")
+
+    monkeypatch.setattr(cli.os, "execv", _boom)
+    with pytest.raises(SystemExit) as exit_code:
+        cli._update()
+    assert exit_code.value.code == 1
+
+
+def test_the_re_executed_child_never_updates_again(tmp_path, monkeypatch):
+    """The child of the re-exec runs `install` too, and without the guard it would re-exec forever."""
+    ran: list[list[str]] = []
+    monkeypatch.setattr(cli.subprocess, "run", lambda cmd, **_k: ran.append(cmd))
+    monkeypatch.setattr(cli, "_receipt", lambda: tmp_path / "uv-receipt.toml")
+    monkeypatch.setenv(cli._RESYNCED, "1")
+    cli._update()
+    assert ran == []
+
+
 # --- the microphone opens one gesture early -------------------------------------------------------
 
 

@@ -32,13 +32,29 @@ def _out(line: str = "") -> None:
 
 
 def _setup(name: str = "") -> int:
-    """Download a ggml speech model into ``~/.murmurflow/models/``.
+    """Download the speech models into ``~/.murmurflow/models/``.
 
-    The model is the single biggest lever on accuracy — bigger models are the difference between
-    proper nouns transcribed and proper nouns guessed at — so the default is the big one, and the
-    download is the only part of installation that takes real time.
+    TWO of them, and only because they do different jobs. The big one writes the transcript you
+    keep, and it is the single biggest lever on accuracy — bigger models are the difference between
+    proper nouns transcribed and proper nouns guessed at. The small one answers the live pass while
+    you are still talking, where 0.4s matters far more than the last few percent of accuracy (see
+    :data:`whisper.PARTIAL_PREFERENCE`). Naming one explicitly downloads only that one.
     """
-    model = name or whisper.DEFAULT_MODEL
+    if name:
+        return _download(name)
+    failed = _download(whisper.DEFAULT_MODEL)
+    # The live model is an IMPROVEMENT, never a requirement: without it the partials go to the big
+    # server and arrive in ~2s lumps, which is what they did before it existed. So a failure here
+    # is reported and does not fail the setup somebody is waiting on.
+    if _download(whisper.DEFAULT_PARTIAL_MODEL):
+        _out("[!] the live model did not download — the words will arrive in slower lumps.")
+        _out("    Try again later: murmurflow setup small")
+    return failed
+
+
+def _download(name: str) -> int:
+    """Fetch one ggml model by name. ``0`` when it is there afterwards."""
+    model = name
     if not model.startswith("ggml-") or not model.endswith(".bin"):
         model = f"ggml-{model}.bin"
     if model not in whisper.MODEL_PREFERENCE:
@@ -331,6 +347,23 @@ def _doctor(*, verbs: bool = False) -> int:
     )
     model = whisper.model()
     rows.append((bool(model), f"model: {model or 'NOT FOUND'}", "murmurflow setup"))
+    # Its own row, because its absence is INVISIBLE and it is the whole difference between the
+    # words arriving as you speak and arriving in two-second lumps. Without it the partials go to
+    # the big server, which is correct and five times slower, and nothing anywhere says so.
+    live_model = whisper.partial_model()
+    rows.append(
+        (
+            bool(live_model),
+            "live model: "
+            + (
+                f"{live_model}"
+                f"{'' if dictate.server_up(dictate.partial_port()) else '  (server not up yet)'}"
+                if live_model
+                else "none — the words arrive in ~2s lumps instead of as you speak"
+            ),
+            "murmurflow setup small   (~488 MB, ~5x quicker on the live pass)",
+        )
+    )
     # A warm server is the difference between the first sentence after a boot taking ~1s and
     # taking ~13s, and it is invisible either way — the tool just feels slow. Worth its own row
     # for the second reason too: a server that is up but WEDGED answers every request with an

@@ -91,7 +91,7 @@ if (-not $mf) { $mf = Join-Path $env:USERPROFILE ".local\bin\murmurflow.exe" } e
 if (-not (Test-Path $mf)) { Die "murmurflow installed but could not be found. Open a new terminal and run: murmurflow doctor" }
 
 # --- 4. The model, then the listener --------------------------------------------------------------
-Say "Downloading the transcription model (~1.6 GB, once)"
+Say "Downloading the transcription models (~2.1 GB, once)"
 & $mf setup
 Check "murmurflow setup (the model download)"
 

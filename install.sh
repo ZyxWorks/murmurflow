@@ -62,7 +62,7 @@ MF="$HOME/.local/bin/murmurflow"
 [ -n "$MF" ] && [ -x "$MF" ] || die "murmurflow installed but could not be found. Open a new terminal and run: murmurflow doctor"
 
 # --- 4. The speech model, then the login agent --------------------------------------------------
-say "Downloading the speech model (~1.6 GB, once)"
+say "Downloading the speech models (~2.1 GB, once)"
 "$MF" setup
 
 say "Turning dictation on"

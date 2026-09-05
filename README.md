@@ -32,7 +32,7 @@ irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex
 
 Either one works on a machine with nothing on it: no package manager, no Python, no developer
 tools, and on Windows no Administrator either. It installs what is missing, downloads the speech
-model (~1.6 GB, once), and turns dictation on for every login. On macOS it also opens the one
+speech models (~2.1 GB, once), and turns dictation on for every login. On macOS it also opens the one
 permission switch the OS will not let a script flip for you; Windows has no such switch.
 
 Then double-tap **Control**, say something, and tap it once more to stop. That's the whole product,
@@ -63,7 +63,7 @@ the fewest ways to go wrong:
 ```sh
 brew install whisper-cpp ffmpeg uv
 uv tool install --python 3.13 git+https://github.com/ZyxWorks/murmurflow
-murmurflow setup             # downloads the speech model (~1.6 GB, once)
+murmurflow setup             # downloads both speech models (~2.1 GB, once)
 murmurflow install           # dictation is live now, and after every login
 ```
 
@@ -316,6 +316,10 @@ change: the best model **present** wins.
 murmurflow setup base            # smaller and faster, noticeably worse
 ```
 
+`setup` also fetches `small`, which is not a downgrade of the transcript: it is the separate model
+that answers the live pass while you talk. See
+[how the words arrive](#how-the-words-arrive-while-you-talk).
+
 Teach it your own words — the cheapest accuracy win there is:
 
 ```sh
@@ -338,7 +342,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `stripFillers` | `true` = delete the sounds `um` / `uh` / `erm` / `hmm`, and nothing else. **Off** — you get verbatim |
 | `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |
 | `model` | path to a ggml model file, overriding the best one found in `~/.murmurflow/models/` |
-| `port` | loopback port for the warm whisper-server. Default `8479` |
+| `port` | loopback port for the warm whisper-server. Default `8479`. The live model's server takes the next one up |
 | `keepAudio` | keep the evidence for one bad transcription: the last clip, and the transcript in the log. Off, so your sentences are not written down |
 
 **Right Option is deliberately not offered as a default.** On a German layout it's AltGr — the dead
@@ -357,28 +361,39 @@ ends — so typing each pass's best guess would type words the next pass withdra
 un-type them. The first pass has nothing to agree with, so it holds back its last four words
 instead.
 
-**How fast it actually is, measured** on an M4 Pro, macOS 26, large-v3-turbo, `language` on
-`auto`, against a warm server with a second one also resident:
+**Two models, because they do different jobs.** `large-v3-turbo` (~1.6 GB) writes the transcript
+you keep. `small` (~488 MB) answers the live pass while you are still talking, on its own
+whisper-server, on its own port. `murmurflow setup` fetches both.
 
-| | seconds |
-|---|---|
-| the first pass (whisper also has to detect the language) | 2.2 |
-| every pass after it (pinned to what the first one heard) | 1.4 |
-| first words at the cursor | ~3.5 |
-| a new lump of words, thereafter | ~1.5 |
+That is not only about speed. **whisper-server answers one request at a time**, so a live pass
+still decoding when you stop talking is time the *final* transcription spends queued behind it —
+measured at 1 to 2.3 seconds added to the end of every sentence, at exactly the moment somebody is
+waiting for it. A separate process cannot queue against itself.
 
-A pass costs the same whatever it is decoding, because whisper.cpp pads every request to a 30s
-window — so this is not word-by-word live captioning, it is **a lump of words every second and a
-half**. On a busy machine (a second server, or this one already answering your last dictation)
-those lumps stretch. It earns its keep on a paragraph and does nothing for you on a six-word
-sentence, which finishes before the second pass does.
+`small` and not `base`, and that is a measurement rather than caution: on the same German clip
+`base` typed *das* where the speaker said *dass* and dropped a plural, while `small` returned
+character-for-character what `large-v3-turbo` did. A live word is pasted and **there is no
+un-paste**, so a model that quietly rewords is not cheaper, it is wrong.
+
+**Measured** on an M4 Pro, macOS 26, `language` on `auto`, one 10.7 second sentence:
+
+| | one big model | with the live model |
+|---|---|---|
+| one live pass | 2.2s | **0.4s** |
+| first words at the cursor | 3.7s | **1.4s** |
+| lumps of text during the sentence | 5 | **12** |
+| the final transcription, after you stop | 2.9s | **1.7s** |
+| still left to paste when you stop | 62 of 195 chars | **21 of 195** |
+
+Without the live model everything still works — the live pass goes to the big server, in ~2s lumps,
+as it did before. `murmurflow doctor` says which one you are on, and every clip's line in the daemon
+log ends with what streaming actually did: `stream 12x → 11 typed`.
 
 **Detecting the language is a whole extra encoder pass** — 0.75s of every 2.2s, measured — and one
 clip does not change language halfway through, so every pass after the first pins itself to what
-the first one heard. That is where the 2.2 → 1.4 comes from, and it costs nothing: the pin is only
-taken from a pass that already cleared the confidence gate, only to a language on your `languages`
-list when you have one, and the **final** transcription is never pinned, so the language gate still
-judges the real clip.
+the first one heard. It costs nothing: the pin is only taken from a pass that already cleared the
+confidence gate, only to a language on your `languages` list when you have one, and the **final**
+transcription is never pinned, so the language gate still judges the real clip.
 
 Two things to know:
 
@@ -394,9 +409,8 @@ Two things to know:
   cursor may have moved since would delete text that was never ours. A word left as first heard is
   a cosmetic loss; a doubled half-sentence is not.
 
-The honest way to make it faster still is a second, smaller model answering the partials while
-large-v3-turbo keeps the final transcript. Shrinking the encoder window per request instead
-(`audio_ctx`) was tried and thrown out: it does cut a pass to 0.8s, and on some clips it returns
+Shrinking the encoder window per request (`audio_ctx`) was tried instead and thrown out: it does
+cut a pass to 0.8s, and on some clips it returns
 fluent invented text — *"the final pass has to line a line. So the final pass has to line a line"* —
 at every window size tried, deterministically enough that two passes agree on it and it gets typed.
 Fast and occasionally making things up is the one trade a dictation tool cannot take.
@@ -430,7 +444,7 @@ murmurflow listen       run the daemon in this terminal instead (blocks)
 murmurflow doctor       what is missing, and the one command that fixes each thing
 murmurflow keytest      does this Mac actually see your trigger key?
 murmurflow devices      list microphones
-murmurflow setup        download a speech model
+murmurflow setup        download both speech models (the big one, and the fast live one)
 murmurflow config       show or change settings
 murmurflow toggle       start/stop one recording (bind this to a macOS Shortcut)
 murmurflow transcribe   transcribe an audio file and print the text

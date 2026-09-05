@@ -31,6 +31,10 @@ def _isolated_home(tmp_path, monkeypatch):
     """Every test gets its own ~/.murmurflow. This is the whole isolation the suite needs."""
     monkeypatch.setenv(config.HOME_ENV, str(tmp_path))
     monkeypatch.setenv("MURMURFLOW_NO_AUDIO", "1")  # never make a sound in CI
+    # Who holds a port is cached across calls, and the cache is module state. On a DEVELOPER's Mac
+    # a real whisper-server is on that port, so a stale True leaked into other tests and hid a
+    # failure that only CI — where nothing is listening — could see.
+    dictate._OWNERSHIP.clear()
     return tmp_path
 
 
@@ -266,9 +270,11 @@ def test_stop_server_matches_our_port_and_never_a_neighbours(monkeypatch):
     monkeypatch.setattr(dictate.subprocess, "run", _run)
     monkeypatch.setattr(dictate.os, "kill", lambda pid, sig: killed.append(pid))
 
-    assert dictate.stop_server() == 2
-    assert killed == [111, 222]
-    assert "8479" in seen["argv"][-1]
+    # Four kills, because there are TWO of ours now: the big server and the small one that answers
+    # the live pass. The fake `pgrep` above answers both queries with the same two pids.
+    assert dictate.stop_server() == 4
+    assert killed == [111, 222, 111, 222]
+    assert "8480" in seen["argv"][-1]  # the last query is the live server, one port up
 
 
 def test_stop_server_survives_a_process_that_is_already_gone(monkeypatch):
@@ -1096,7 +1102,7 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True):
     monkeypatch.setattr(dictate, "resolve_input", lambda: ("0", "a mic"))
     monkeypatch.setattr(dictate, "paused", lambda: (False, ""))
     monkeypatch.setattr(dictate, "start_server", lambda **_k: bool(starts.append(1)) or warm_starts)
-    monkeypatch.setattr(dictate, "stop_server", lambda: bool(stops.append(1)) or 1)
+    monkeypatch.setattr(dictate, "stop_server", lambda at=0: bool(stops.append(at)) or 1)
     monkeypatch.setattr(dictate, "preroll_claim", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
     monkeypatch.setattr(dictate, "stream_start", lambda _rec: None)  # not what this drives
     pending = list(results)
@@ -1125,7 +1131,10 @@ def test_a_warm_server_that_stopped_answering_is_restarted(monkeypatch):
     the desk came back as Japanese and was typed. Nothing on screen said the fast path was gone.
     """
     starts, stops = _drive_listener(monkeypatch, [_clip(False), _clip(False), _clip(False)])
-    assert stops == [1]  # bounced once, at the second cold clip
+    # Bounced once, at the second cold clip — and ONLY the big server's port. Taking the live
+    # server with it left every later partial on the big model until the next daemon restart.
+    assert stops == [dictate.port()]
+    assert dictate.partial_port() not in stops
     assert len(starts) == 2  # the one at daemon start, and the one that brought it back
 
 
@@ -1184,8 +1193,10 @@ def test_the_warm_server_is_started_in_a_writable_directory(monkeypatch, tmp_pat
         seen["cmd"], seen["kwargs"] = cmd, kwargs
         raise OSError("not really spawning anything in a test")
 
-    monkeypatch.setattr(dictate, "server_up", lambda: False)
-    monkeypatch.setattr(dictate, "serve_command", lambda: ["whisper-server", "--convert"])
+    monkeypatch.setattr(dictate, "server_up", lambda _at=0: False)
+    monkeypatch.setattr(
+        dictate, "serve_command", lambda _m="", _at=0: ["whisper-server", "--convert"]
+    )
     monkeypatch.setattr(dictate.subprocess, "Popen", _popen)
     assert dictate.start_server() is False
     cwd = Path(str(seen["kwargs"]["cwd"]))
@@ -1700,6 +1711,101 @@ def test_a_language_you_do_not_speak_is_never_pinned(monkeypatch, tmp_path):
     stream.done.set()
     thread.join(timeout=2)
     assert set(asked) == {""}  # every pass still detects; none is pinned to a language he lacks
+
+
+# --- the live pass has its own small model ----------------------------------------------------
+
+
+def test_the_live_model_is_a_small_one_and_never_the_transcript_model(tmp_path, monkeypatch):
+    """`model` is the transcript you keep; the live pass is a different job with a different cost.
+
+    They must not share a knob: pinning the transcript to a small model is a decision about
+    accuracy, and it must not silently also become the decision about the live pass, or vice versa.
+    """
+    models = config.home_root() / "models"
+    models.mkdir(parents=True, exist_ok=True)
+    (models / "ggml-large-v3-turbo.bin").write_bytes(b"x")
+    assert whisper.partial_model() == ""  # a big model is not a live model
+    (models / "ggml-base.bin").write_bytes(b"x")
+    assert whisper.partial_model().endswith("ggml-base.bin")
+    (models / "ggml-small.bin").write_bytes(b"x")
+    assert whisper.partial_model().endswith("ggml-small.bin")  # small beats base: measured German
+    assert whisper.model().endswith("ggml-large-v3-turbo.bin")  # and the transcript is unmoved
+
+    # An explicit `model` override still names the transcript model, and only that one.
+    config.set_value("model", str(models / "ggml-base.bin"))
+    assert whisper.model().endswith("ggml-base.bin")
+    assert whisper.partial_model().endswith("ggml-small.bin")
+
+
+def test_the_live_server_gets_its_own_model_and_its_own_port(monkeypatch):
+    """Its own PROCESS is the point, not just its own model: whisper-server answers one request at
+    a time, so a partial sharing the queue is time the FINAL transcription spends waiting.
+    """
+    monkeypatch.setattr(dictate, "resolve_bin", lambda _n: "/usr/bin/whisper-server")
+    config.set_value("port", 8479)
+    command = dictate.serve_command("/models/ggml-small.bin", dictate.partial_port())
+    assert command is not None
+    assert "/models/ggml-small.bin" in command
+    assert "8480" in command
+    assert dictate.partial_port() == 8480
+
+
+def test_a_missing_live_server_sends_the_partials_to_the_big_one(monkeypatch):
+    """Slower, and never wrong. It is what they did before the small server existed."""
+    monkeypatch.setattr(dictate, "ours", lambda _at: True)  # who holds the port is a separate test
+    monkeypatch.setattr(dictate, "server_up", lambda _at=0: False)
+    assert dictate.partial_at() == 0  # 0 means "the default port", i.e. the big server
+    monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
+    assert dictate.partial_at() == dictate.partial_port()
+
+
+def test_the_log_says_whether_streaming_typed_or_merely_ran():
+    """ "It does not stream" and "my sentence was too short to settle a word" wrote the same line."""
+    assert dictate.stream_note(None) == ""
+    assert dictate.stream_note(dictate.Stream(threading.Event())) == ""  # never ran
+    ran = dictate.Stream(threading.Event(), "", passes=4, blank=3, typed=0)
+    assert dictate.stream_note(ran) == "stream 4x → 0 typed, 3 read nothing"
+    worked = dictate.Stream(threading.Event(), "hello", passes=9, blank=1, typed=8)
+    assert dictate.stream_note(worked) == "stream 9x → 8 typed, 1 read nothing"
+
+
+def test_an_impostor_on_the_port_is_never_handed_the_audio(monkeypatch):
+    """Both ports are predictable, and a socket that accepts a connection proves nothing about who
+    is on the other end of it. Anything but a whisper-server would be sent recorded speech and
+    believed about what was said.
+    """
+    monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
+
+    class _Nobody:
+        stdout = ""  # pgrep found no whisper-server holding the port
+
+    monkeypatch.setattr(dictate.subprocess, "run", lambda *_a, **_k: _Nobody())
+    assert dictate.ours(dictate.partial_port()) is False
+    assert dictate.partial_at() == 0  # so the partials go to the big server, not to the impostor
+    assert dictate.start_server(at=dictate.partial_port()) is False  # and it is never adopted
+
+    dictate._OWNERSHIP.clear()
+
+    class _Whisper:
+        stdout = "4242\n"
+
+    monkeypatch.setattr(dictate.subprocess, "run", lambda *_a, **_k: _Whisper())
+    assert dictate.ours(dictate.partial_port()) is True
+    assert dictate.partial_at() == dictate.partial_port()
+
+
+def test_a_port_that_leaves_no_room_for_the_live_server_is_refused(monkeypatch):
+    """65535 puts the live server on 65536, which cannot bind — and nothing would say why."""
+    monkeypatch.setattr(cli.service, "restart", lambda: False)
+    assert cli.main(["config", "set", "port", "65535"]) == 2
+    assert "port" not in config.load()
+    assert cli.main(["config", "set", "port", str(dictate.MAX_PORT)]) == 0
+    assert dictate.partial_port() == 65535
+    # And a config hand-edited past the ceiling degrades to the default rather than to an
+    # unbindable pair, because `port` is read on the daemon's hot path and must never raise.
+    config.set_value("port", 65535)
+    assert dictate.port() == dictate.DEFAULT_PORT
 
 
 # --- installing is updating -----------------------------------------------------------------------

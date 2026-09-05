@@ -84,14 +84,6 @@ def permission_hint() -> str:
     return _WHY
 
 
-def play(path: str) -> None:
-    return None
-
-
-def system_cues() -> dict[str, str]:
-    return {}
-
-
 def service_install(args: list[str], env: dict[str, str]) -> tuple[bool, str]:
     return False, _WHY
 

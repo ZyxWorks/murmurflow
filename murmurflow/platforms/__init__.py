@@ -84,13 +84,6 @@ input_permitted = impl.input_permitted
 #: One line telling the user how to grant it, or ``""`` when there is nothing to grant.
 permission_hint = impl.permission_hint
 
-# --- sound --------------------------------------------------------------------------------------
-
-#: Play a wav, without blocking and without ever raising. A missing player is silence, not a crash.
-play = impl.play
-#: ``{kind: path}`` of the OS's own alert sounds, or ``{}`` where there are none to borrow.
-system_cues = impl.system_cues
-
 # --- service ------------------------------------------------------------------------------------
 
 #: Install the always-on listener so it starts at login. ``(ok, detail)``.

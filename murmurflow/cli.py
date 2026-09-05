@@ -301,15 +301,14 @@ def _doctor(*, verbs: bool = False) -> int:
                 f"{len(live)} ({', '.join(str(pid) for pid in live) or 'none — dictation is off'})"
                 if len(live) <= 1
                 else f"{len(live)} AT ONCE ({', '.join(str(pid) for pid in live)}) "
-                "— every sound and every sentence doubles"
+                "— every sentence is typed twice"
             ),
             "murmurflow uninstall, then murmurflow install",
         )
     )
     # A murmurflow-only count reads "listeners: 1 [OK]" on a Mac where a SECOND program holds the
-    # same key — which is the setup the user actually hears: two chimes in two different presets,
-    # one sentence pasted twice. Reinstalling murmurflow cannot fix that, so it is its own row
-    # with its own fix.
+    # same key — which is the setup the user actually sees: one sentence pasted twice. Reinstalling
+    # murmurflow cannot fix that, so it is its own row with its own fix.
     rivals = dictate.rival_listeners()
     rows.append(
         (
@@ -322,7 +321,7 @@ def _doctor(*, verbs: bool = False) -> int:
                     f"{name} IS LISTENING TOO ({', '.join(str(pid) for pid in pids)})"
                     for name, pids, _ in rivals
                 )
-                + " — every sound and every sentence doubles"
+                + " — every sentence is typed twice"
             ),
             "; ".join(fix for _, _, fix in rivals),
         )
@@ -365,7 +364,6 @@ def _doctor(*, verbs: bool = False) -> int:
     # time, transcript and the app the paste went to is already written there. Nothing said so.
     _out(f"  log: {config.log_path()}")
     _out(f"  trigger: {dictate.trigger_hint()}")
-    _out(f"  cue: {dictate.cue_preset_name()}")
     polish = str(config.load().get("polishCommand", "") or "")
     _out(f"  polish: {polish or 'off (deterministic cleanup only)'}")
     if verbs:
@@ -374,16 +372,13 @@ def _doctor(*, verbs: bool = False) -> int:
 
 
 #: The bare `murmurflow` prints these under the health report. Health answers "is it working";
-#: this answers "and what do I type next", which is the question that actually followed — a user
-#: who wanted a different tone had no way to discover `config set cue` from a list of green ticks.
+#: this answers "and what do I type next", which is the question that actually followed — a list of
+#: green ticks is not somewhere anybody discovers `config set`.
 _VERBS = (
-    ("config set cue pebble", "change the sound: pebble · glass · marimba · soft · system · off"),
-    ("cues", "play every tone so you can pick one"),
     (
         "config set trigger control_option",
         "change the key: control_option · command_option · left_control · f13",
     ),
-    ("config set stream true", "type the words as you say them, instead of all at once at the end"),
     ("config set doubleTap false", "hold the key instead of tapping it twice"),
     ("config set language en", "pin the language — worth ~0.7s a sentence"),
     ("config set stripFillers true", "delete 'um' and 'uh' — off, so you get verbatim"),
@@ -480,22 +475,6 @@ def _keytest(*, trigger: str = "", seconds: float = 20.0) -> int:
     return 0
 
 
-def _cues(name: str = "") -> int:
-    """Play the three tones, so "which sound am I hearing" is answerable without reading config."""
-    if name:
-        config.set_value("cue", name)
-        _out(f"cue set to {name}")
-    _out(f"preset: {dictate.cue_preset_name()}")
-    _out(f"available: {', '.join(dictate.cue_presets())}, system, off")
-    for kind in (dictate.CUE_READY, dictate.CUE_DONE, dictate.CUE_FAIL):
-        _out(f"  {kind}")
-        dictate.cue(kind)
-        time.sleep(0.7)
-    _out("")
-    _out(f"your own sounds: drop ready/done/fail files into {dictate.custom_cue_dir()}")
-    return 0
-
-
 # --- settings ---------------------------------------------------------------------------------
 
 
@@ -533,11 +512,10 @@ def _reject(key: str, value: object) -> str:
     """Why writing ``value`` to ``key`` would not do what was just asked for, or ``""``.
 
     **Every way of misconfiguring this daemon fails silently, and they all fail the same way.** A
-    trigger name this machine cannot poll binds a key that never fires. A cue name that is not a
-    preset quietly falls back to a different sound. A misspelt setting is written to a file nothing
-    ever reads. From the outside all three are "I hold the key and nothing happens", none of them
-    leaves a trace anywhere, and each costs an evening to find. The typo is the only moment any of
-    it is cheap to catch, so it is caught here and the write is refused.
+    trigger name this machine cannot poll binds a key that never fires. A misspelt setting is
+    written to a file nothing ever reads. From the outside both are "I press the key and nothing
+    happens", neither leaves a trace anywhere, and each costs an evening to find. The typo is the
+    only moment any of it is cheap to catch, so it is caught here and the write is refused.
     """
     if key not in config.KEYS:
         near = difflib.get_close_matches(key, list(config.KEYS), n=1)
@@ -554,19 +532,7 @@ def _reject(key: str, value: object) -> str:
                 f"trigger that never fires. Pick one of: "
                 f"{', '.join(sorted(hotkey.trigger_names()))}"
             )
-    elif key == "cue":
-        accepted = {*dictate.cue_presets(), "system", *dictate.CUE_OFF}
-        if text.lower() not in accepted and not Path(text).expanduser().is_dir():
-            # OFFERED is not the same set as ACCEPTED: `none`/`mute`/`silent`/`false`/`0` all mean
-            # off and all keep working, but listing five spellings of one answer makes the four
-            # real choices harder to see.
-            offered = (*dictate.cue_presets(), "system", "off")
-            return (
-                f"`{text}` is not a cue, and an unknown one plays a different sound instead of "
-                f"saying so. Pick one of: {', '.join(offered)} — or a folder holding your own "
-                "ready/done/fail sound files."
-            )
-    elif key in {"doubleTap", "stripFillers", "keepAudio", "stream"}:
+    elif key in {"doubleTap", "stripFillers", "keepAudio"}:
         if not isinstance(value, bool):
             return f"`{key}` is true or false, not `{text}`."
     elif key == "quietFloor":
@@ -646,17 +612,6 @@ def _warn(key: str, value: object) -> str:
                 f"`languages` says you speak {', '.join(sorted(spoken))}, so every clip decoded as "
                 f"{dictate.language_code(text)} would be thrown away. Add it there, or unset it."
             )
-    # SAID FROM BOTH SIDES, because either order leaves the same dead setting: turn streaming on
-    # while holding, or turn holding back on while streaming, and `stream` is simply inert. See
-    # `dictate.streaming` for why a held modifier cannot paste.
-    if (key == "stream" and value and not dictate.double_tap_mode()) or (
-        key == "doubleTap" and not value and dictate.streaming_wanted()
-    ):
-        return (
-            "streaming needs the tap gesture — a held-down modifier turns every paste into a "
-            "chord — so it stays off while `doubleTap` is false. `murmurflow config set doubleTap "
-            "true` to have both."
-        )
     if key == "polishCommand" and text:
         program = ""
         with contextlib.suppress(ValueError, IndexError):
@@ -784,9 +739,6 @@ def main(argv: list[str] | None = None) -> int:
     p_key.add_argument("--trigger", default="", help="watch only this key")
     p_key.add_argument("--seconds", type=float, default=20.0)
 
-    p_cues = sub.add_parser("cues", help="play the three tones, or switch preset")
-    p_cues.add_argument("preset", nargs="?", default="")
-
     p_pause = sub.add_parser("pause", help="lend the trigger key to another program for a while")
     p_pause.add_argument("--seconds", type=float, default=dictate.DEFAULT_PAUSE_SECONDS)
     p_pause.add_argument("--who", default="", help="what is borrowing it, in words")
@@ -804,7 +756,7 @@ def main(argv: list[str] | None = None) -> int:
     p_listen = sub.add_parser("run", help=argparse.SUPPRESS)  # alias for `listen`
     p_listen.add_argument("--trigger", default="")
 
-    # `murmurflow murmurflow config set cue glass` is what happens when somebody copies a line out
+    # `murmurflow murmurflow config set trigger f13` is what happens when somebody copies a line out
     # of the help, which prints every verb with the program name in front so it can be pasted
     # whole. Both readings are the same intent and argparse answered the honest one with a wall of
     # `invalid choice`. Only a LEADING repeat is dropped, so `transcribe murmurflow.wav` is safe.
@@ -831,8 +783,6 @@ def main(argv: list[str] | None = None) -> int:
             return _devices()
         if command == "keytest":
             return _keytest(trigger=args.trigger, seconds=args.seconds)
-        if command == "cues":
-            return _cues(args.preset)
         if command == "pause":
             return _pause(args.seconds, args.who)
         if command == "resume":

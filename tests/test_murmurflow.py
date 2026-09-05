@@ -16,6 +16,7 @@ import os
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -542,7 +543,6 @@ def test_a_room_recording_is_never_transcribed_at_all(monkeypatch, tmp_path):
         dictate, "transcribe", lambda *a, **k: called.append("ran") or dictate.Heard("")
     )
     monkeypatch.setattr(dictate, "stop", lambda rec=None: wav)
-    monkeypatch.setattr(dictate, "cue", lambda _kind: None)
     rec = dictate.Recording(pid=1, wav=wav, started_at=0.0)
 
     result = dictate.finish(rec, paste=False)
@@ -641,30 +641,9 @@ def test_what_a_person_never_says_is_still_trapped(junk):
 
 
 def test_the_program_name_typed_twice_is_the_same_command():
-    # `murmurflow murmurflow config set cue glass` - what happens when the help, which prints every
-    # verb with the program name so it can be pasted whole, gets pasted after typing the name.
+    # `murmurflow murmurflow config` - what happens when the help, which prints every verb with the
+    # program name so it can be pasted whole, gets pasted after typing the name.
     assert cli.main(["murmurflow", "config"]) == 0
-
-
-def test_the_default_cue_is_the_system_sound_with_a_generated_fallback():
-    # A Mac user has heard Tink and Pop for twenty years, so they read as acknowledgement without
-    # being learned, and they follow the alert-volume setting a generated tone cannot see.
-    assert dictate.cue_preset_name() == "system"
-    assert dictate._cue_path(dictate.CUE_READY).startswith("/System/Library/Sounds/")
-
-
-def test_a_missing_system_sound_falls_back_to_a_tone_and_never_to_silence(monkeypatch):
-    # The cue is the ONLY signal that the microphone is live. Losing it to a missing file - a
-    # stripped install, or any machine that is not a Mac - is not an acceptable failure.
-    monkeypatch.setattr(dictate, "_SYSTEM_CUES", {})
-    path = dictate._cue_path(dictate.CUE_READY)
-    assert path.endswith(".wav") and dictate.FALLBACK_PRESET in path
-
-
-def test_an_explicit_preset_still_wins_over_the_system_default():
-    config.set_value("cue", "glass")
-    assert dictate.cue_preset_name() == "glass"
-    assert "glass" in dictate._cue_path(dictate.CUE_READY)
 
 
 def test_a_long_paste_waits_longer_before_the_clipboard_comes_back():
@@ -974,7 +953,6 @@ def test_the_cold_path_reports_its_language_so_the_gate_still_applies(monkeypatc
     monkeypatch.setattr(dictate, "peak_dbfs", lambda _p: -1.0)  # a loud bump clears the level gate
     monkeypatch.setattr(dictate, "transcribe", lambda *a, **k: heard)
     monkeypatch.setattr(dictate, "stop", lambda rec=None: wav)
-    monkeypatch.setattr(dictate, "cue", lambda _kind: None)
     result = dictate.finish(dictate.Recording(pid=1, wav=wav, started_at=0.0), paste=False)
     assert result.text == ""
     assert "ja" in result.problem
@@ -1012,7 +990,6 @@ def test_a_trigger_is_stored_under_one_spelling_however_it_was_typed(monkeypatch
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        ("cue", "pebbel"),  # a near miss silently plays a DIFFERENT sound
         ("doubleTap", "yep"),  # anything but true/false reads as false
         ("quietFloor", "quiet"),  # the gate would fall back to -30 and never say so
         ("quietFloor", "30"),  # peak dBFS is never above 0: a positive floor discards EVERY clip
@@ -1031,7 +1008,7 @@ def test_a_value_that_cannot_work_is_refused_rather_than_written(key, value):
 
 @pytest.mark.parametrize(
     ("key", "value"),
-    [("cue", "off"), ("language", "auto"), ("language", "en"), ("languages", '["de", "english"]')],
+    [("language", "auto"), ("language", "en"), ("languages", '["de", "english"]')],
 )
 def test_the_spellings_a_person_actually_uses_are_all_accepted(key, value, monkeypatch):
     monkeypatch.setattr(cli.service, "restart", lambda: False)
@@ -1040,10 +1017,10 @@ def test_the_spellings_a_person_actually_uses_are_all_accepted(key, value, monke
 
 def test_unsetting_a_key_still_works_but_not_one_that_never_existed(monkeypatch):
     monkeypatch.setattr(cli.service, "restart", lambda: False)
-    config.set_value("cue", "glass")
-    assert cli.main(["config", "set", "cue"]) == 0
-    assert "cue" not in config.load()
-    assert cli.main(["config", "set", "cuu"]) == 2
+    config.set_value("inputName", "Built-in")
+    assert cli.main(["config", "set", "inputName"]) == 0
+    assert "inputName" not in config.load()
+    assert cli.main(["config", "set", "inputNaem"]) == 2
 
 
 def test_changing_the_model_stops_the_server_that_baked_the_old_one_in(monkeypatch):
@@ -1061,7 +1038,7 @@ def test_changing_the_model_stops_the_server_that_baked_the_old_one_in(monkeypat
     assert order == ["stop", "restart"]
     # ...and a setting the server knows nothing about does not pay for a model reload.
     order.clear()
-    assert cli.main(["config", "set", "cue", "glass"]) == 0
+    assert cli.main(["config", "set", "stripFillers", "true"]) == 0
     assert order == ["restart"]
 
 
@@ -1106,11 +1083,11 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True):
     stops: list[int] = []
 
     class _Inline:  # the bounce runs on a thread; here it runs where the assertion can see it
-        def __init__(self, target=None, daemon=False):
-            self._target = target
+        def __init__(self, target=None, args=(), kwargs=None, daemon=False):
+            self._run = lambda: target(*args, **(kwargs or {}))
 
         def start(self):
-            self._target()
+            self._run()
 
     monkeypatch.setattr(dictate.threading, "Thread", _Inline)
     monkeypatch.setattr(dictate, "available", lambda: (True, ""))
@@ -1120,7 +1097,8 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True):
     monkeypatch.setattr(dictate, "paused", lambda: (False, ""))
     monkeypatch.setattr(dictate, "start_server", lambda **_k: bool(starts.append(1)) or warm_starts)
     monkeypatch.setattr(dictate, "stop_server", lambda: bool(stops.append(1)) or 1)
-    monkeypatch.setattr(dictate, "start_and_cue", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
+    monkeypatch.setattr(dictate, "preroll_claim", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
+    monkeypatch.setattr(dictate, "stream_start", lambda _rec: None)  # not what this drives
     pending = list(results)
     monkeypatch.setattr(dictate, "finish", lambda _rec: pending.pop(0))
 
@@ -1599,45 +1577,141 @@ def test_a_reworded_prefix_neither_doubles_nor_loses_the_rest():
     assert dictate.stream_tail("send it to him", "send it two him tomorrow") == "tomorrow"
 
 
+def test_streaming_is_on_by_default_and_needs_no_setting():
+    # It used to be opt-in, and opt-in meant almost nobody ever saw the good version of the product.
+    config.set_value("doubleTap", None)
+    assert dictate.streaming() is True
+
+
 def test_streaming_stands_down_while_the_trigger_is_held():
-    # A held modifier turns every ⌘V into ⌥⌘V, so the setting is honoured only under doubleTap.
-    config.set_value("stream", True)
+    # A held modifier turns every ⌘V into ⌥⌘V, so it is honoured only under doubleTap.
     config.set_value("doubleTap", False)
-    assert dictate.streaming_wanted() is True
     assert dictate.streaming() is False
     config.set_value("doubleTap", True)
     assert dictate.streaming() is True
 
 
-def test_the_cues_only_stand_down_once_streaming_has_actually_typed_something(monkeypatch):
-    # `stream` on with no warm server behind it decodes nothing. Muting off the SETTING would leave
-    # a tool that is silent and types nothing; muting off the last clip's RESULT cannot.
-    monkeypatch.delenv("MURMURFLOW_NO_AUDIO", raising=False)
-    played: list[str] = []
-    monkeypatch.setattr(dictate.platforms, "play", lambda path: played.append(str(path)))
-    config.set_value("stream", True)
-    config.set_value("doubleTap", True)
+def test_a_partial_pins_the_language_the_first_pass_heard(monkeypatch, tmp_path):
+    """Detecting the language is 0.75s of every 2.2s pass, and one clip does not change language.
 
-    dictate._STREAMED_LAST.clear()  # streaming is on, but has never put a word on screen
-    dictate.cue(dictate.CUE_READY)
-    assert played, "the tones must stay on until streaming has proved it works"
+    The pin is only ever taken from a pass that already cleared the confidence gate, and the FINAL
+    transcription is never pinned — so the "is that one of yours" gate still judges the real clip.
+    """
+    config.set_value("languages", ["de", "en"])
+    asked: list[str] = []
 
-    played.clear()
-    dictate._STREAMED_LAST.set()
-    dictate.cue(dictate.CUE_READY)
-    dictate.cue(dictate.CUE_DONE)
-    assert played == []
+    def _partial(_live, _snapshot, language=""):
+        asked.append(language)
+        return dictate.Heard("hello there my friend and also you", 0.99, "en", warm=True)
 
-    dictate.cue(dictate.CUE_FAIL)  # a failure types nothing, so its tone is the only signal left
-    assert played
+    monkeypatch.setattr(dictate, "_partial", _partial)
+    monkeypatch.setattr(dictate, "_inject", lambda _text: (True, "", ""))
+    monkeypatch.setattr(dictate, "STREAM_FIRST_SECONDS", 0.0)
+    monkeypatch.setattr(dictate, "STREAM_EVERY_SECONDS", 0.0)
+
+    stream = dictate.Stream(threading.Event())
+    thread = threading.Thread(
+        target=dictate._stream_loop,
+        args=(dictate.Recording(1, tmp_path / "live.wav", 0.0), stream),
+        daemon=True,
+    )
+    thread.start()
+    while len(asked) < 3:
+        time.sleep(0.01)
+    stream.done.set()
+    thread.join(timeout=2)
+    assert asked[0] == ""  # the first pass has to detect it
+    assert asked[1] == "en" and asked[2] == "en"  # and nothing after it pays for that again
 
 
-def test_a_stream_that_typed_nothing_hands_the_cues_back(tmp_path):
-    wav = tmp_path / "never.wav"
-    dictate._STREAMS[str(wav)] = dictate.Stream(threading.Event())
-    dictate._STREAMED_LAST.set()
-    assert dictate.streamed(dictate.stop_streaming(wav)) == ""
-    assert dictate._STREAMED_LAST.is_set() is False
+def test_a_language_you_do_not_speak_is_never_pinned(monkeypatch, tmp_path):
+    """A partial pinned to a language nobody is speaking comes back as fluent TRANSLATION, and two
+    of those in a row agree with each other and get typed. So the pin is gated the same way the
+    final transcript is.
+    """
+    config.set_value("languages", ["de", "en"])
+    asked: list[str] = []
+
+    def _partial(_live, _snapshot, language=""):
+        asked.append(language)
+        return dictate.Heard("gokigen you desu ne totemo ii tenki", 0.99, "ja", warm=True)
+
+    monkeypatch.setattr(dictate, "_partial", _partial)
+    monkeypatch.setattr(dictate, "_inject", lambda _text: (True, "", ""))
+    monkeypatch.setattr(dictate, "STREAM_FIRST_SECONDS", 0.0)
+    monkeypatch.setattr(dictate, "STREAM_EVERY_SECONDS", 0.0)
+
+    stream = dictate.Stream(threading.Event())
+    thread = threading.Thread(
+        target=dictate._stream_loop,
+        args=(dictate.Recording(1, tmp_path / "live.wav", 0.0), stream),
+        daemon=True,
+    )
+    thread.start()
+    while len(asked) < 3:
+        time.sleep(0.01)
+    stream.done.set()
+    thread.join(timeout=2)
+    assert set(asked) == {""}  # every pass still detects; none is pinned to a language he lacks
+
+
+# --- the microphone opens one gesture early -------------------------------------------------------
+
+
+def _fake_recorder(monkeypatch, tmp_path, stopped):
+    """A `start` that costs nothing and a `stop` that only records that it was called."""
+    made: list[dictate.Recording] = []
+
+    def _start():
+        wav = tmp_path / f"pre-{len(made)}.wav"
+        wav.write_bytes(b"")
+        rec = dictate.Recording(1000 + len(made), wav, 0.0)
+        made.append(rec)
+        return rec
+
+    monkeypatch.setattr(dictate, "start", _start)
+    monkeypatch.setattr(dictate, "current", lambda: None)
+    monkeypatch.setattr(dictate, "stop", lambda rec=None: stopped.append(rec) or rec.wav)
+    return made
+
+
+def test_the_second_tap_takes_the_microphone_the_first_tap_already_opened(monkeypatch, tmp_path):
+    """THE FIRST HALF-SECOND OF EVERY SENTENCE. CoreAudio needs ~0.6s to hand over its first
+    buffer, and no decoder can recover audio that was never captured — so the recorder is opened
+    on the first tap and the second tap claims it, already live.
+    """
+    stopped: list[dictate.Recording] = []
+    made = _fake_recorder(monkeypatch, tmp_path, stopped)
+    monkeypatch.setattr(
+        dictate.threading, "Timer", lambda *_a, **_k: types.SimpleNamespace(start=lambda: None)
+    )
+
+    dictate.preroll()
+    dictate.preroll()  # the second tap's own key-down must not open a SECOND recorder
+    assert len(made) == 1
+    assert dictate.preroll_claim() is made[0]
+    assert stopped == []  # claimed, so nothing was thrown away
+    assert dictate.preroll_claim() is None  # and it is gone from the registry
+
+
+def test_a_pre_roll_nobody_claims_stops_itself_and_leaves_no_audio(monkeypatch, tmp_path):
+    """The privacy half: a stray single tap must not leave the microphone open, or a file behind."""
+    stopped: list[dictate.Recording] = []
+    made = _fake_recorder(monkeypatch, tmp_path, stopped)
+    fired: list[object] = []
+    monkeypatch.setattr(
+        dictate.threading,
+        "Timer",
+        lambda _s, fn, args=(): types.SimpleNamespace(
+            start=lambda: fired.append(lambda: fn(*args))
+        ),
+    )
+
+    dictate.preroll()
+    fired[0]()  # the pair never completed and the timer came due
+    assert stopped == made
+    assert not made[0].wav.exists()
+    assert dictate.preroll_claim() is None
 
 
 def test_stopping_a_stream_returns_what_it_pasted_and_ends_it(tmp_path):

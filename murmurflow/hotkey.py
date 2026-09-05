@@ -312,8 +312,9 @@ def listen_double_tap(
     still SEES the machine react to a keystroke that was never meant for it. A double-tap is a
     deliberate gesture, so the interaction stays silent until it is genuinely asked for.
 
-    ``on_tap`` (optional) is told about every press this loop DECIDES something about — ``"tap"``,
-    ``"hold"``, ``"chord"``, ``"start"``, ``"stop"``. It exists because the alternative failure is
+    ``on_tap`` (optional) is told ``"press"`` the instant the key goes down, and then about every
+    press this loop DECIDES something about — ``"tap"``, ``"hold"``, ``"chord"``, ``"start"``,
+    ``"stop"``. It exists because the alternative failure is
     unanswerable: a listener that reacts to nothing looks identical whether the key is never read,
     the taps are too far apart, or the chord guard is eating them. The user hit exactly that on
     a newly-bound key ("I can't hear any sound when I double click the right command"), and there
@@ -345,6 +346,10 @@ def listen_double_tap(
         now_held = is_trigger_down(trigger)
         if now_held and not held:
             held, pressed_at = True, now
+            # On the PRESS, before anything is known about what this gesture will turn out to be.
+            # It is what lets the daemon open the microphone early — see `dictate.preroll`, where
+            # the whole point is that the device needs longer to wake than the gesture takes.
+            saw("press")
         elif not now_held and held:
             held = False
             if now - pressed_at > tap_max:

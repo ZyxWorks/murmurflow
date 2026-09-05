@@ -1927,6 +1927,27 @@ def test_an_impostor_on_the_port_is_never_handed_the_audio(monkeypatch):
     assert dictate.partial_at() == dictate.partial_port()
 
 
+def test_zero_means_the_main_port_here_as_it_does_everywhere_else(monkeypatch):
+    """FOUND LIVE. `start_server()` with no port asked whether a whisper-server held port ZERO.
+
+    Nothing is ever listening there, so the answer was always no, and the daemon announced that its
+    own running server was unavailable — then ran every clip on the cold path, all day.
+    """
+    monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
+    asked: list[str] = []
+
+    class _Found:
+        stdout = "4242\n"
+
+    def _run(argv, **_kwargs):
+        asked.append(argv[-1])
+        return _Found()
+
+    monkeypatch.setattr(dictate.subprocess, "run", _run)
+    assert dictate.start_server() is True
+    assert asked == [f"whisper-server.*--port {dictate.port()}"], "asked about the wrong port"
+
+
 def test_a_port_that_leaves_no_room_for_the_live_server_is_refused(monkeypatch):
     """65535 puts the live server on 65536, which cannot bind — and nothing would say why."""
     monkeypatch.setattr(cli.service, "restart", lambda: False)

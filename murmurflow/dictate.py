@@ -600,8 +600,13 @@ OWNERSHIP_SECONDS = 30.0
 _OWNERSHIP: dict[int, tuple[float, bool]] = {}
 
 
-def ours(at: int) -> bool:
+def ours(at: int = 0) -> bool:
     """Is the thing listening on ``at`` a whisper-server, rather than whatever got there first.
+
+    ``0`` means the main port, the same as it does to :func:`server_url` and :func:`server_up`.
+    It has to: this is called with whatever a caller was given, and a caller that was given the
+    default asked about port ZERO — where nothing is ever listening, so the answer was always no
+    and the daemon started every morning announcing that its own running server was unavailable.
 
     **Because the answer decides where recorded audio is sent.** Both ports are predictable — one
     is a documented default, the other is one above it — and any local process can bind them first
@@ -612,6 +617,7 @@ def ours(at: int) -> bool:
     finding one there IS the answer. Cached for :data:`OWNERSHIP_SECONDS` because this sits on the
     partial path, which asks it about once a second, and `pgrep` is a process spawn.
     """
+    at = at or port()
     now = time.monotonic()
     cached = _OWNERSHIP.get(at)
     if cached is not None and now - cached[0] < OWNERSHIP_SECONDS:

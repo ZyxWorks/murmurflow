@@ -1098,7 +1098,7 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True):
     monkeypatch.setattr(dictate, "resolve_input", lambda: ("0", "a mic"))
     monkeypatch.setattr(dictate, "paused", lambda: (False, ""))
     monkeypatch.setattr(dictate, "start_server", lambda **_k: bool(starts.append(1)) or warm_starts)
-    monkeypatch.setattr(dictate, "stop_server", lambda: bool(stops.append(1)) or 1)
+    monkeypatch.setattr(dictate, "stop_server", lambda at=0: bool(stops.append(at)) or 1)
     monkeypatch.setattr(dictate, "preroll_claim", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
     monkeypatch.setattr(dictate, "stream_start", lambda _rec: None)  # not what this drives
     pending = list(results)
@@ -1127,7 +1127,10 @@ def test_a_warm_server_that_stopped_answering_is_restarted(monkeypatch):
     the desk came back as Japanese and was typed. Nothing on screen said the fast path was gone.
     """
     starts, stops = _drive_listener(monkeypatch, [_clip(False), _clip(False), _clip(False)])
-    assert stops == [1]  # bounced once, at the second cold clip
+    # Bounced once, at the second cold clip — and ONLY the big server's port. Taking the live
+    # server with it left every later partial on the big model until the next daemon restart.
+    assert stops == [dictate.port()]
+    assert dictate.partial_port() not in stops
     assert len(starts) == 2  # the one at daemon start, and the one that brought it back
 
 
@@ -1760,6 +1763,45 @@ def test_the_log_says_whether_streaming_typed_or_merely_ran():
     assert dictate.stream_note(ran) == "stream 4x → 0 typed, 3 read nothing"
     worked = dictate.Stream(threading.Event(), "hello", passes=9, blank=1, typed=8)
     assert dictate.stream_note(worked) == "stream 9x → 8 typed, 1 read nothing"
+
+
+def test_an_impostor_on_the_port_is_never_handed_the_audio(monkeypatch):
+    """Both ports are predictable, and a socket that accepts a connection proves nothing about who
+    is on the other end of it. Anything but a whisper-server would be sent recorded speech and
+    believed about what was said.
+    """
+    dictate._OWNERSHIP.clear()
+    monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
+
+    class _Nobody:
+        stdout = ""  # pgrep found no whisper-server holding the port
+
+    monkeypatch.setattr(dictate.subprocess, "run", lambda *_a, **_k: _Nobody())
+    assert dictate.ours(dictate.partial_port()) is False
+    assert dictate.partial_at() == 0  # so the partials go to the big server, not to the impostor
+    assert dictate.start_server(at=dictate.partial_port()) is False  # and it is never adopted
+
+    dictate._OWNERSHIP.clear()
+
+    class _Whisper:
+        stdout = "4242\n"
+
+    monkeypatch.setattr(dictate.subprocess, "run", lambda *_a, **_k: _Whisper())
+    assert dictate.ours(dictate.partial_port()) is True
+    assert dictate.partial_at() == dictate.partial_port()
+
+
+def test_a_port_that_leaves_no_room_for_the_live_server_is_refused(monkeypatch):
+    """65535 puts the live server on 65536, which cannot bind — and nothing would say why."""
+    monkeypatch.setattr(cli.service, "restart", lambda: False)
+    assert cli.main(["config", "set", "port", "65535"]) == 2
+    assert "port" not in config.load()
+    assert cli.main(["config", "set", "port", str(dictate.MAX_PORT)]) == 0
+    assert dictate.partial_port() == 65535
+    # And a config hand-edited past the ceiling degrades to the default rather than to an
+    # unbindable pair, because `port` is read on the daemon's hot path and must never raise.
+    config.set_value("port", 65535)
+    assert dictate.port() == dictate.DEFAULT_PORT
 
 
 # --- installing is updating -----------------------------------------------------------------------

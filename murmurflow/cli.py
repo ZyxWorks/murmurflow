@@ -679,8 +679,15 @@ def _reject(key: str, value: object) -> str:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value >= 0:
             return f"`{key}` is a peak level in dBFS below zero, e.g. -30 or -40, not `{text}`."
     elif key == "port":
-        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
-            return f"`{key}` is a TCP port between 1 and 65535, not `{text}`."
+        # The ceiling is one BELOW the last port, because the live server takes the next one up:
+        # 65535 would put it on 65536, which cannot bind, and every partial would fall back to the
+        # big model with nothing anywhere saying why.
+        top = dictate.MAX_PORT
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= top:
+            return (
+                f"`{key}` is a TCP port between 1 and {top}, not `{text}` — the live model's "
+                f"server takes the port one above this one."
+            )
     elif key == "language":
         code = dictate.language_code(text)
         if code != "auto" and not (len(code) == 2 and code.isalpha()):

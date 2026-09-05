@@ -144,12 +144,19 @@ def _cfg() -> dict[str, object]:
         return {}
 
 
+#: The highest ``port`` that leaves room for the live server one above it. 65535 would put the
+#: second server on 65536, which is not a port: it fails to bind, `partial_at` finds nothing there
+#: and every partial silently falls back to the big model.
+MAX_PORT = 65534
+
+
 def port() -> int:
     """The loopback port for the warm whisper-server (``port``)."""
     try:
-        return int(str(_cfg().get("port", "") or DEFAULT_PORT))
+        chosen = int(str(_cfg().get("port", "") or DEFAULT_PORT))
     except (TypeError, ValueError):
         return DEFAULT_PORT
+    return chosen if 1 <= chosen <= MAX_PORT else DEFAULT_PORT
 
 
 def input_name() -> str:
@@ -585,6 +592,44 @@ def server_up(at: int = 0) -> bool:
         return False
 
 
+#: How long an ownership answer is trusted for. See :func:`ours` — the question is "who holds this
+#: port", which changes only when a process starts or dies, and asking it costs a `pgrep`.
+OWNERSHIP_SECONDS = 30.0
+
+_OWNERSHIP: dict[int, tuple[float, bool]] = {}
+
+
+def ours(at: int) -> bool:
+    """Is the thing listening on ``at`` a whisper-server, rather than whatever got there first.
+
+    **Because the answer decides where recorded audio is sent.** Both ports are predictable — one
+    is a documented default, the other is one above it — and any local process can bind them first
+    and then receive every clip, and answer with text that gets typed at the cursor. A socket that
+    accepts a connection proves nothing about who is on the other end of it.
+
+    So the port has to be held by a `whisper-server` process. Only one process can bind a port, so
+    finding one there IS the answer. Cached for :data:`OWNERSHIP_SECONDS` because this sits on the
+    partial path, which asks it about once a second, and `pgrep` is a process spawn.
+    """
+    now = time.monotonic()
+    cached = _OWNERSHIP.get(at)
+    if cached is not None and now - cached[0] < OWNERSHIP_SECONDS:
+        return cached[1]
+    try:
+        found = subprocess.run(
+            ["pgrep", "-f", f"whisper-server.*--port {at}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        verdict = bool(found.stdout.split())
+    except (OSError, subprocess.SubprocessError):
+        verdict = False  # cannot tell: fail CLOSED, because the cost of being wrong is the audio
+    _OWNERSHIP[at] = (now, verdict)
+    return verdict
+
+
 def server_answers() -> tuple[bool, str]:
     """Does the warm server actually TRANSCRIBE — ``(ok, what went wrong)``. Never raises.
 
@@ -680,7 +725,9 @@ def start_server(*, wait: float = 60.0, model: str = "", at: int = 0) -> bool:
     "empty between sentences" promise there still holds.
     """
     if server_up(at):
-        return True
+        # Adopted only if a whisper-server is what is holding the port — see :func:`ours`. Anything
+        # else answering there would be handed recorded audio and believed about what was said.
+        return ours(at)
     cmd = serve_command(model, at)
     if cmd is None:
         return False
@@ -713,8 +760,12 @@ def start_partial_server(*, wait: float = 60.0) -> bool:
     return bool(model) and start_server(wait=wait, model=model, at=partial_port())
 
 
-def stop_server() -> int:
+def stop_server(at: int = 0) -> int:
     """Stop the warm whisper-server this install started. Returns how many were stopped.
+
+    ``at`` stops ONE of them. The bounce that heals a wedged main server passes it, because taking
+    the live server down as collateral and never bringing it back left every partial after the
+    first bounce on the big model, silently, until the next daemon restart.
 
     ``start_server`` detaches it with ``start_new_session=True`` so it outlives the listener, which
     is the whole point while dictation is installed — and a leak the moment it is not: 1.8 GB
@@ -722,7 +773,7 @@ def stop_server() -> int:
     OUR two ports, because a whisper-server on any other port belongs to somebody else.
     """
     stopped = 0
-    for which in (port(), partial_port()):
+    for which in (port(), partial_port()) if at == 0 else (at,):
         try:
             found = subprocess.run(
                 ["pgrep", "-f", f"whisper-server.*--port {which}"],
@@ -1628,11 +1679,11 @@ def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
 def partial_at() -> int:
     """The port the partials should ask: the small server when it is up, else the big one.
 
-    Checked per pass rather than once, and cheaply (one loopback connect), because the small server
-    can be missing at start-up and appear later, or die mid-afternoon. Falling back to the big
-    server is slower and never wrong, which is the right way round for something that types.
+    Checked per pass rather than once, because the small server can be missing at start-up and
+    appear later, or die mid-afternoon. Falling back to the big server is slower and never wrong,
+    which is the right way round for something that types.
     """
-    return partial_port() if server_up(partial_port()) else 0
+    return partial_port() if ours(partial_port()) and server_up(partial_port()) else 0
 
 
 def stream_note(stream: Stream | None) -> str:
@@ -2532,7 +2583,10 @@ def listen_loop(
         cold_streak[0] = 0
 
         def bounce() -> None:
-            stop_server()
+            # THIS PORT ONLY. Bouncing both took the live server down as collateral and never
+            # brought it back, so every partial after the first bounce ran on the big model,
+            # silently, until the next daemon restart.
+            stop_server(port())
             emit("[!] the warm whisper-server stopped answering — restarting it")
             emit(
                 f"whisper warm again on :{port()}"

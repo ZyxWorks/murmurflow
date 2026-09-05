@@ -1591,6 +1591,53 @@ def test_streaming_stands_down_while_the_trigger_is_held():
     assert dictate.streaming() is True
 
 
+def test_a_partial_in_a_language_you_do_not_speak_is_never_typed(monkeypatch, tmp_path):
+    """`finish` can refuse a transcript in a language you do not speak. It cannot refuse one that
+    is already at the cursor, and there is no un-paste — so the gate has to be on the partial too.
+    """
+    config.set_value("languages", ["de", "en"])
+    live = tmp_path / "live.wav"
+    live.write_bytes(b"RIFF")
+    monkeypatch.setattr(dictate, "audio_seconds", lambda _p: 3.0)
+    monkeypatch.setattr(dictate, "peak_dbfs", lambda _p: -14.0)
+    monkeypatch.setattr(dictate, "repair_wav", lambda _p: False)
+
+    monkeypatch.setattr(
+        dictate, "transcribe_warm", lambda *a, **k: dictate.Heard("guten Tag", 0.99, "de", True)
+    )
+    assert dictate._partial(live, tmp_path / "snap.wav").text == "guten Tag"
+
+    monkeypatch.setattr(
+        dictate, "transcribe_warm", lambda *a, **k: dictate.Heard("ご視聴", 0.99, "ja", True)
+    )
+    assert dictate._partial(live, tmp_path / "snap.wav").text == ""
+
+
+def test_a_lent_trigger_does_not_open_the_microphone_early(monkeypatch):
+    """A pause promises the key is not being listened to. Pre-roll runs BEFORE `on_press` gets to
+    check, so without its own check a paused daemon still opened the microphone on every press.
+    """
+    opened: list[str] = []
+    taps: list[object] = []
+    monkeypatch.setattr(dictate, "available", lambda: (True, ""))
+    monkeypatch.setattr(dictate, "claim_listener", lambda: 0)
+    monkeypatch.setattr(dictate, "reap_orphans", lambda: 0)
+    monkeypatch.setattr(dictate, "resolve_input", lambda: ("0", "a mic"))
+    monkeypatch.setattr(dictate, "start_server", lambda **_k: True)
+    monkeypatch.setattr(dictate, "preroll", lambda: opened.append("mic"))
+    monkeypatch.setattr(dictate, "paused", lambda: (True, "a huddle"))
+    monkeypatch.setattr(
+        dictate, "bind_trigger", lambda *_a, on_tap=None, **_k: taps.append(on_tap) or "driven"
+    )
+    dictate.listen_loop()
+    taps[0]("press")
+    assert opened == []
+
+    monkeypatch.setattr(dictate, "paused", lambda: (False, ""))
+    taps[0]("press")
+    assert opened == ["mic"]
+
+
 def test_a_partial_pins_the_language_the_first_pass_heard(monkeypatch, tmp_path):
     """Detecting the language is 0.75s of every 2.2s pass, and one clip does not change language.
 

@@ -1545,6 +1545,9 @@ def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
     seeking around a growing file is a race nobody needs. A copy torn mid-sample costs one clicky
     sample at the very end, which is inside the part this never commits anyway.
 
+    Gated exactly as :func:`finish` gates the final transcript — level, confidence, hallucination
+    AND language — because a partial is typed at the cursor and cannot be taken back.
+
     Warm server only, never the cold ``whisper-cli`` fallback. A cold pass costs seconds and would
     be spawned once a second for the length of the clip: a wedged warm server would turn streaming
     into a CPU fire that also makes the FINAL transcription slower. No warm server, no streaming.
@@ -1560,6 +1563,14 @@ def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
             return Heard("")
         heard = transcribe_warm(snapshot, timeout=STREAM_TIMEOUT, language=language)
         if not heard.text or heard.confidence < SPEECH_CONFIDENCE or is_hallucination(heard.text):
+            return Heard("")
+        # AND THE LANGUAGE GATE, which the final transcription has always had and this did not.
+        # `finish` can refuse a transcript decoded as a language the user does not speak — that is
+        # what a fluent invented sentence looks like — but it cannot refuse one that is already at
+        # the cursor, and there is no un-paste. A gate that only guards the last pass guards
+        # nothing once the earlier passes type.
+        spoken = spoken_languages()
+        if spoken and heard.language and heard.language not in spoken:
             return Heard("")
         return heard._replace(text=tidy(heard.text))
     except Exception:  # noqa: BLE001 — a partial that fails is a partial nobody sees, never a crash
@@ -2449,8 +2460,12 @@ def listen_loop(
 
         On the PRESS and not the release, because every millisecond here is a millisecond of the
         first word: the device needs ~0.6s and the rest of the gesture only supplies ~0.5s of it.
+
+        A LENT trigger opens nothing. This runs before `on_press` gets to check, so without the
+        check here a paused daemon still opened the microphone for up to
+        :data:`PREROLL_SECONDS` on every press of a key it had promised not to listen to.
         """
-        if what == "press" and not mine:
+        if what == "press" and not mine and not paused()[0]:
             preroll()
 
     def on_press() -> None:

@@ -31,6 +31,10 @@ def _isolated_home(tmp_path, monkeypatch):
     """Every test gets its own ~/.murmurflow. This is the whole isolation the suite needs."""
     monkeypatch.setenv(config.HOME_ENV, str(tmp_path))
     monkeypatch.setenv("MURMURFLOW_NO_AUDIO", "1")  # never make a sound in CI
+    # Who holds a port is cached across calls, and the cache is module state. On a DEVELOPER's Mac
+    # a real whisper-server is on that port, so a stale True leaked into other tests and hid a
+    # failure that only CI — where nothing is listening — could see.
+    dictate._OWNERSHIP.clear()
     return tmp_path
 
 
@@ -1749,6 +1753,7 @@ def test_the_live_server_gets_its_own_model_and_its_own_port(monkeypatch):
 
 def test_a_missing_live_server_sends_the_partials_to_the_big_one(monkeypatch):
     """Slower, and never wrong. It is what they did before the small server existed."""
+    monkeypatch.setattr(dictate, "ours", lambda _at: True)  # who holds the port is a separate test
     monkeypatch.setattr(dictate, "server_up", lambda _at=0: False)
     assert dictate.partial_at() == 0  # 0 means "the default port", i.e. the big server
     monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
@@ -1770,7 +1775,6 @@ def test_an_impostor_on_the_port_is_never_handed_the_audio(monkeypatch):
     is on the other end of it. Anything but a whisper-server would be sent recorded speech and
     believed about what was said.
     """
-    dictate._OWNERSHIP.clear()
     monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
 
     class _Nobody:

@@ -1631,6 +1631,12 @@ def stable_prefix(previous: str, current: str) -> str:
     already had, because it now knows how the sentence ends. Pasting each pass's tail therefore
     types a guess that the next pass often withdraws, and nothing can un-type it.
 
+    **When you stop talking, everything lands** — the one exception to the held-back last word, and
+    it is the whole reason the rule needs one. The audio keeps growing while you are silent and the
+    transcript does not, so two passes reading the SAME words over MORE audio prove the last word
+    is no longer touching the end. Without that exception the final word of every dictation waited
+    for the key release, which is exactly the word a person is watching for.
+
     Two passes agreeing on a word is the cheap, standard test for "this one is settled" (the
     local-agreement rule from the streaming-whisper literature; it needs no model change and no
     timestamps). The final word of the agreed run is dropped as well: it is the one still touching
@@ -1653,11 +1659,19 @@ def stable_prefix(previous: str, current: str) -> str:
     words = current.split()
     if not previous:
         return " ".join(words[: max(0, len(words) - STREAM_HOLDBACK_WORDS)])
+    prior = previous.split()
     settled = 0
-    for before, after in zip(previous.split(), words, strict=False):
+    for before, after in zip(prior, words, strict=False):
         if _key(before) != _key(after):
             break
         settled += 1
+    # ... unless the transcript STOPPED GROWING. The last word is held because it is the one
+    # touching the end of the audio, so it is the one that can still grow a suffix. Two passes
+    # that agreed on the WHOLE transcript, over audio that got longer between them, mean the extra
+    # audio was silence: nothing is touching the end any more. Without this the final word of every
+    # dictation waits for the key release, which is the one word a person is watching for.
+    if settled == len(words) == len(prior):
+        return " ".join(words)
     return " ".join(words[: min(settled, max(0, len(words) - 1))])
 
 

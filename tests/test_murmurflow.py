@@ -1593,6 +1593,18 @@ def test_only_the_words_two_passes_agreed_on_are_settled():
     assert dictate.stable_prefix("the quick brown", "the quick green fox") == "the quick"
 
 
+def test_the_last_word_lands_once_the_transcript_stops_growing():
+    # Silence at the end of the clip: the audio grew, the words did not. Held back forever, the
+    # last word only ever arrived when the key was released.
+    assert (
+        dictate.stable_prefix("the quick brown fox", "the quick brown fox") == "the quick brown fox"
+    )
+    # Still growing: the last word is still the one whisper may revise, so it still waits.
+    assert dictate.stable_prefix("the quick brown", "the quick brown fox") == "the quick brown"
+    # Shrank (whisper dropped a word it had): not a settled tail, so the old rule holds.
+    assert dictate.stable_prefix("the quick brown fox", "the quick brown") == "the quick"
+
+
 def test_punctuation_and_capitals_are_not_a_disagreement():
     # "okay so we" becomes "Okay, so we" the moment whisper sees the end of the sentence. Treating
     # that as a changed word would stall the stream on every clip that ends in a full stop.

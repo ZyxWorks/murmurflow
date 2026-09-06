@@ -84,11 +84,17 @@ input_permitted = impl.input_permitted
 #: One line telling the user how to grant it, or ``""`` when there is nothing to grant.
 permission_hint = impl.permission_hint
 
+#: Type text straight into the focused app, without the clipboard. Returns whatever did NOT go out,
+#: so a caller can fall back to :func:`inject` for exactly that much and no more. The whole string
+#: back means the platform does not do this at all.
+type_text = impl.type_text
+
 # --- sound --------------------------------------------------------------------------------------
 
-#: Play the one sound this tool makes — the microphone is live — without blocking and without ever
-#: raising. No player, no sound, no crash.
+#: The two sounds this tool makes, without blocking and without ever raising. No player, no sound,
+#: no crash. Ready = the microphone is live, start talking. Done = it just closed, stop talking.
 play_ready = impl.play_ready
+play_done = impl.play_done
 
 # --- service ------------------------------------------------------------------------------------
 

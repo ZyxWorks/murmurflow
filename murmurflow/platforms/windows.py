@@ -430,18 +430,42 @@ def permission_hint() -> str:
     return ""
 
 
+# --- typing ---------------------------------------------------------------------------------
+
+
+def type_text(text: str) -> str:
+    """The whole string back, so Windows keeps the clipboard paste it has always used.
+
+    The macOS version exists because the clipboard round trip is half the streaming cycle THERE —
+    an AppleScript that saves the pasteboard, sends Cmd-V, waits and restores. `SendInput` with
+    `KEYEVENTF_UNICODE` is the equivalent and would be worth having, but it is a second ctypes
+    surface to get right on a platform nobody here can test on, and the paste already works.
+    """
+    return text
+
+
 # --- the one sound ------------------------------------------------------------------------------
 
 
-def play_ready() -> None:
-    """Say the microphone is live, once, without blocking. ``winsound`` is stdlib here.
+def _beep(which: str) -> None:
+    """One system sound, without blocking. ``winsound`` is stdlib here.
 
-    ``MessageBeep`` and not a wav: Windows names its sounds by event rather than by path, so there
+    ``MessageBeep`` and not a wav: Windows names its sounds by EVENT rather than by path, so there
     is no file to point at, and the alternative is shipping and caching one of our own for a tick.
     """
     with contextlib.suppress(Exception):
         winsound = importlib.import_module("winsound")
-        winsound.MessageBeep(winsound.MB_OK)
+        winsound.MessageBeep(getattr(winsound, which))
+
+
+def play_ready() -> None:
+    """The microphone is live: start talking."""
+    _beep("MB_OK")
+
+
+def play_done() -> None:
+    """The microphone just closed: stop talking."""
+    _beep("MB_ICONASTERISK")
 
 
 # --- service --------------------------------------------------------------------------------

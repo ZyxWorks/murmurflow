@@ -291,22 +291,28 @@
   </section>
 
   <section>
-    <h2>Fast enough to think in</h2>
+    <h2>The words arrive while you talk</h2>
+    <p class="punch">Tap twice and start speaking. The first words land at your cursor after about
+    <strong>a second and a half</strong>, and the rest keep up as you go &mdash; a word or two
+    every four tenths of a second. When you stop, there is almost nothing left to arrive.</p>
     <div class="scroll">
       <table>
         <thead><tr><th>step</th><th>seconds</th></tr></thead>
         <tbody>
+          <tr><td>first words at your cursor</td><td>1.5</td></tr>
+          <tr><td>a new word or two, thereafter</td><td>0.43</td></tr>
+          <tr><td>still to arrive when you stop talking</td><td>9 of 195 characters</td></tr>
           <tr><td>first transcription after boot, cold</td><td>13.3</td></tr>
-          <tr><td>first transcription, warm server</td><td>2.3</td></tr>
           <tr><td>microphone open, first ever</td><td>9.9</td></tr>
-          <tr><td>microphone open, thereafter</td><td>0.3</td></tr>
+          <tr><td>speech lost at the start of a clip</td><td>0.04</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="note">M4 Pro, macOS 26, large-v3-turbo, an 11 second clip. The warm server earns its
-    place on the first sentence after a boot, which is the one a person forms their opinion on, so
-    the daemon pays that cost at login while nobody is waiting. Measure your own before believing
-    any of these, including ours.</p>
+    <p class="note">M4 Pro, macOS 26, one 10.5 second sentence. Two models do it: a small one
+    answers the live pass while you are still talking, and <code>large-v3-turbo</code> writes the
+    transcript you keep. The words are typed as key events rather than pasted, which is the
+    difference between a lump every second and a word every four tenths. Measure your own before
+    believing any of these, including ours.</p>
   </section>
 
   <section>
@@ -314,6 +320,7 @@
     <ul>
       <li><strong>No compiled helper.</strong> Key state is polled through stdlib <code>ctypes</code>. No Xcode, no signing, no notarization.</li>
       <li><strong>No always-on microphone.</strong> Nothing listens between sentences. The words that arrive while you talk are decoded from the clip you are already recording.</li>
+      <li><strong>No wall of settings.</strong> Two sounds, no presets: one tick when the microphone opens, one when it closes. The words on screen say the rest.</li>
       <li><strong>No LLM on the hot path</strong>, unless you ask for one.</li>
       <li><strong>No Linux.</strong> Wayland exposes no global hotkey API at all, so the answer is honest rather than half working.</li>
     </ul>
@@ -324,9 +331,10 @@
     <p>Your voice is transcribed by your own machine and <strong>the recording is discarded the
     moment that is done</strong>, before anything else happens to it. The microphone closes with
     the key, and it cannot be left open.</p>
-    <p>The transcript is never inspected, filtered, or written down. It goes to your clipboard,
-    then your cursor, and your previous clipboard contents are put back. Nothing here makes a
-    network request except the one-off model download.</p>
+    <p>The transcript is never inspected, filtered, or written down. The words that arrive while
+    you talk are typed straight in and never touch your clipboard at all; the final transcript goes
+    through it and puts your previous contents back. Nothing here makes a network request except
+    the one-off model download.</p>
     <p class="after"><a href="https://github.com/ZyxWorks/murmurflow#readme">The source is
     public, and so is every claim on this page.</a></p>
   </section>

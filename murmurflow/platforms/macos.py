@@ -197,6 +197,19 @@ def _load() -> ctypes.CDLL:
         lib.CGEventSourceFlagsState.restype = ctypes.c_uint64
         lib.CGEventSourceSecondsSinceLastEventType.argtypes = [ctypes.c_int32, ctypes.c_uint32]
         lib.CGEventSourceSecondsSinceLastEventType.restype = ctypes.c_double
+        # ...and the three that TYPE. Same framework, same ctypes, no new dependency.
+        lib.CGEventCreateKeyboardEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_bool]
+        lib.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
+        lib.CGEventKeyboardSetUnicodeString.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.c_void_p,
+        ]
+        lib.CGEventKeyboardSetUnicodeString.restype = None
+        lib.CGEventSetFlags.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+        lib.CGEventSetFlags.restype = None
+        lib.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+        lib.CGEventPost.restype = None
     except (OSError, AttributeError) as exc:
         raise _Unavailable(f"CoreGraphics key-state API unavailable: {exc}") from exc
     _LIB = lib
@@ -402,26 +415,127 @@ def inject(text: str, settle: float) -> tuple[bool, str, str]:
     return False, f"paste failed: {hint}.", ""
 
 
+# --- typing, for text that arrives while you are still talking ------------------------------------
+#
+# THE CLIPBOARD ROUND TRIP IS HALF THE STREAMING CYCLE. `inject` below saves the pasteboard, writes
+# the text, sends Cmd-V, waits for the target to read it and puts the old contents back — measured
+# at ~500ms, against ~420ms to actually decode the audio. So the words arrived in two-and-three-word
+# lumps about once a second, and the report was the obvious one: "it is lagging behind".
+#
+# A unicode key event carries the characters ITSELF. Nothing touches the pasteboard, nothing has to
+# settle, and there is no Cmd-V to be caught by a held modifier. Measured on the same machine:
+# 2.6ms for a 25-character chunk, 190x cheaper than the paste it replaces.
+#
+# And it is safe on a German keyboard, which is the reason the clipboard was chosen in the first
+# place. `keystroke "text"` in AppleScript sends KEYCODES, which the target re-maps through its own
+# layout and mangles every umlaut. `CGEventKeyboardSetUnicodeString` sends the characters, so
+# "Förderung" arrives as "Förderung" on any layout there is.
+#
+# ponytail: streamed chunks only. The FINAL transcript still goes through the clipboard, because it
+# can be two thousand characters at once and because its paste reports back what the target actually
+# received — see `_paste_note`, which is the whole diagnosis for "only half my sentence arrived".
+
+#: kCGSessionEventTap — post into this login session, ahead of the app that has focus.
+_SESSION_TAP = 1
+
+#: CoreFoundation, for the one thing ctypes cannot do for us: releasing an event we created. Without
+#: it every streamed chunk leaks a CFTypeRef, a hundred times a dictation, in a process that runs
+#: from login to shutdown.
+_CF = ctypes.CDLL(ctypes.util.find_library("CoreFoundation") or "CoreFoundation")
+_CF.CFRelease.argtypes = [ctypes.c_void_p]
+_CF.CFRelease.restype = None
+
+#: UTF-16 units per event. CGEventKeyboardSetUnicodeString takes an arbitrary count, but long
+#: strings are unreliable in practice, so the text is posted in small pieces.
+_TYPE_CHUNK = 16
+
+
+def _chunk_end(units: ctypes.Array[ctypes.c_uint16], start: int, total: int) -> int:
+    """Where the piece beginning at ``start`` ends — never between the halves of one character.
+
+    A non-BMP character (an emoji) is two UTF-16 units, and both have to reach
+    ``CGEventKeyboardSetUnicodeString`` in the same string. Split across two events the app is
+    handed half a character and drops it, silently, while everything reports success.
+    """
+    end = min(start + _TYPE_CHUNK, total)
+    if end < total and end - 1 > start and 0xD800 <= units[end - 1] <= 0xDBFF:
+        end -= 1  # a high surrogate at the seam: let its other half come with it, next time round
+    return end
+
+
+def type_text(text: str) -> str:
+    """Type ``text`` into the focused app as unicode key events. Returns what did NOT go out.
+
+    ``""`` means all of it landed; the whole string back means none of it did, and the caller falls
+    back to the clipboard — this needs the same Accessibility grant a paste does, and a machine
+    that cannot post events must still dictate.
+
+    **The remainder, and not a bool.** The text goes out in pieces, so a failure halfway has
+    already put some of it on screen. A caller told only "that did not work" would paste the whole
+    chunk over the top of the half that landed, and the words in the middle would appear twice.
+    """
+    if not text:
+        return ""
+    try:
+        lib = _load()
+    except _Unavailable:
+        return text
+    units = text.encode("utf-16-le", errors="ignore")
+    buffer = (ctypes.c_uint16 * (len(units) // 2)).from_buffer_copy(units)
+    total = len(buffer)
+    start = 0
+    try:
+        while start < total:
+            end = _chunk_end(buffer, start, total)
+            payload = (ctypes.c_uint16 * (end - start))(*buffer[start:end])
+            for pressed in (True, False):
+                event = lib.CGEventCreateKeyboardEvent(None, 0, pressed)
+                if not event:
+                    return units[start * 2 :].decode("utf-16-le", errors="ignore")
+                # No modifiers, whatever the hands are doing. The characters are carried by the
+                # event, so nothing here is a shortcut that a held Control could turn into one.
+                lib.CGEventSetFlags(event, 0)
+                lib.CGEventKeyboardSetUnicodeString(event, len(payload), payload)
+                lib.CGEventPost(_SESSION_TAP, event)
+                _CF.CFRelease(event)
+            start = end
+    except Exception:  # noqa: BLE001 — a failed keystroke falls back to the paste, never crashes
+        return units[start * 2 :].decode("utf-16-le", errors="ignore")
+    return ""
+
+
 # --- the one sound ------------------------------------------------------------------------------
 
-#: The Mac's own "ready" tick. A system sound rather than a generated tone: it is one people have
-#: heard for twenty years, it needs no file shipped or cached, and it follows the alert-volume
-#: slider, which nothing we synthesise can see.
+#: The Mac's own two ticks. System sounds rather than generated tones: people have heard these for
+#: twenty years, they need no file shipped or cached, and they follow the alert-volume slider, which
+#: nothing we synthesise can see. Tink opens, Pop closes — the pair macOS itself uses for exactly
+#: this, one bright and one blunt, so which is which needs no learning.
 READY_SOUND = "/System/Library/Sounds/Tink.aiff"
+DONE_SOUND = "/System/Library/Sounds/Pop.aiff"
 
 
-def play_ready() -> None:
-    """Say the microphone is live, once, without blocking. Silence, never a crash, if it cannot."""
+def _play(path: str) -> None:
+    """Play one sound without blocking. Silence, never a crash, if it cannot."""
     player = shutil.which("afplay")
-    if not player or not Path(READY_SOUND).is_file():
+    if not player or not Path(path).is_file():
         return
     with contextlib.suppress(OSError, subprocess.SubprocessError):
         subprocess.Popen(
-            [player, READY_SOUND],
+            [player, path],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+
+
+def play_ready() -> None:
+    """The microphone is live: start talking."""
+    _play(READY_SOUND)
+
+
+def play_done() -> None:
+    """The microphone just closed: stop talking. NOT "the text has arrived" — the text says that."""
+    _play(DONE_SOUND)
 
 
 def input_permitted() -> bool:

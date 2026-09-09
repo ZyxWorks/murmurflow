@@ -27,7 +27,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from murmurflow import cli, config, dictate, service, whisper
+from murmurflow import cli, config, dictate, platforms, service, whisper
 
 
 @pytest.fixture(autouse=True)
@@ -1140,7 +1140,7 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=T
     monkeypatch.setattr(dictate, "resolve_input", lambda: ("0", "a mic"))
     monkeypatch.setattr(dictate, "paused", lambda: (False, ""))
     monkeypatch.setattr(dictate, "start_server", lambda **_k: bool(starts.append(1)) or warm_starts)
-    monkeypatch.setattr(dictate, "stop_server", lambda at=0: bool(stops.append(at)) or 1)
+    monkeypatch.setattr(dictate, "stop_server", lambda: bool(stops.append(1)) or 1)
     monkeypatch.setattr(dictate, "preroll_claim", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
     monkeypatch.setattr(dictate, "stream_start", lambda _rec: None)  # not what this drives
     # The ready cue waits for the device to hand over its first buffer, and `_Inline` above runs
@@ -1178,10 +1178,7 @@ def test_a_warm_server_that_stopped_answering_is_restarted(monkeypatch):
     the desk came back as Japanese and was typed. Nothing on screen said the fast path was gone.
     """
     starts, stops = _drive_listener(monkeypatch, [_clip(False), _clip(False), _clip(False)])
-    # Bounced once, at the second cold clip — and ONLY the big server's port. Taking the live
-    # server with it left every later partial on the big model until the next daemon restart.
-    assert stops == [dictate.port()]
-    assert dictate.partial_port() not in stops
+    assert len(stops) == 1  # bounced once, at the second cold clip, and not at the first
     assert len(starts) == 2  # the one at daemon start, and the one that brought it back
 
 
@@ -1595,6 +1592,27 @@ def test_the_shipped_ceiling_leaves_months_of_real_use_in_the_file():
     assert dictate.LOG_KEEP_BYTES < dictate.LOG_MAX_BYTES
 
 
+def test_the_suite_can_never_type_on_the_real_keyboard():
+    """The suite typed into the operator's screen for a whole day. See `tests/conftest.py`.
+
+    Two tests drive `_stream_loop` with a fixed `Heard` and monkeypatch `dictate._inject`, believing
+    the clipboard was the way out to the machine. `dictate.place` tries `platforms.type_text` FIRST,
+    and that is a real CGEvent with nothing in front of it — so both fixtures were typed into
+    whatever window had focus, back to back and with no space between them:
+
+        hello there my friend and also yougokigen you desu ne totemo ii tenki
+
+    Reported as "I keep getting this same random paste everywhere, even tho I'm not using
+    murmurflow". The giveaway was that it was byte-identical every time: a hallucination is
+    different every time, a fixture is not.
+    """
+    assert platforms.type_text.__module__ != "murmurflow.platforms", (
+        "tests/conftest.py no longer shuts the keyboard door — the suite can type on the real "
+        "machine again"
+    )
+    assert platforms.type_text("anything at all") == ""
+
+
 # --- streaming ---------------------------------------------------------------------------------
 
 
@@ -1679,37 +1697,6 @@ def test_a_forgotten_key_still_gets_its_words(monkeypatch):
     """
     starts, _ = _drive_listener(monkeypatch, [_clip(True)], hold=0.05, release=False)
     assert starts == [1]  # the daemon started its server and then rescued the clip on its own
-
-
-def test_the_end_is_not_transcribed_twice_when_the_live_pass_already_read_it(monkeypatch, tmp_path):
-    """The 8 seconds at the end of a long dictation, and the tail that landed after he had sent.
-
-    From the operator's own log: a 73.7s clip spent 3.2s in the final transcription, 69.0s spent
-    6.0s, 79.1s spent 7.8s — and each of those rows says `→ streamed`, meaning that pass produced
-    nothing that was not already on screen. He had stopped, read his sentence and sent it; the
-    tail then arrived eight seconds later in whatever he was looking at by then.
-    """
-    clip = tmp_path / "c.wav"
-    clip.write_bytes(b"\x00" * (44 + dictate.BYTES_PER_SECOND * 30))
-    live = dictate.Heard("what the live pass already read", 0.99, "en", warm=True)
-    stream = dictate.Stream(threading.Event())
-
-    # Nothing read yet: there is nothing to reuse.
-    assert dictate.whole_clip_read(stream, clip, 30.0) is None
-    assert dictate.whole_clip_read(None, clip, 30.0) is None
-
-    # It read 29.9 of the 30 seconds — too little left to hold a word.
-    stream.read = (live, 29.9)
-    assert dictate.whole_clip_read(stream, clip, 30.0) is live
-
-    # It read 20 of 30, and the ten seconds it never saw are SILENT: still the whole transcript.
-    stream.read = (live, 20.0)
-    monkeypatch.setattr(dictate, "tail_dbfs", lambda _wav, _seconds: -90.0)
-    assert dictate.whole_clip_read(stream, clip, 30.0) is live
-
-    # Same ten seconds, but somebody was talking in them. Now the shortcut must refuse.
-    monkeypatch.setattr(dictate, "tail_dbfs", lambda _wav, _seconds: -12.0)
-    assert dictate.whole_clip_read(stream, clip, 30.0) is None
 
 
 def test_the_last_seconds_of_a_clip_still_being_recorded_can_be_read(tmp_path):
@@ -2063,17 +2050,18 @@ def test_a_lent_trigger_does_not_open_the_microphone_early(monkeypatch):
     assert opened == ["mic"]
 
 
-def test_a_partial_pins_the_language_the_first_pass_heard(monkeypatch, tmp_path):
-    """Detecting the language is 0.75s of every 2.2s pass, and one clip does not change language.
+def test_a_partial_never_pins_the_language(monkeypatch, tmp_path):
+    """The pin saved ~0.75s a pass and cost the gate that refuses invented speech.
 
-    The pin is only ever taken from a pass that already cleared the confidence gate, and the FINAL
-    transcription is never pinned — so the "is that one of yours" gate still judges the real clip.
+    whisper-server reports back whatever language it was TOLD to decode, so a pass pinned to what
+    the first second heard reported that language by construction, whatever it had actually
+    decoded. The gate was blind for the rest of the clip — and a partial is PASTED.
     """
     config.set_value("languages", ["de", "en"])
-    asked: list[str] = []
+    asked: list[tuple] = []
 
-    def _partial(_live, _snapshot, language=""):
-        asked.append(language)
+    def _partial(_live, _snapshot, *args):
+        asked.append(args)
         return dictate.Heard("hello there my friend and also you", 0.99, "en", warm=True)
 
     monkeypatch.setattr(dictate, "_partial", _partial)
@@ -2092,8 +2080,8 @@ def test_a_partial_pins_the_language_the_first_pass_heard(monkeypatch, tmp_path)
         time.sleep(0.01)
     stream.done.set()
     thread.join(timeout=2)
-    assert asked[0] == ""  # the first pass has to detect it
-    assert asked[1] == "en" and asked[2] == "en"  # and nothing after it pays for that again
+    assert len(asked) >= 3
+    assert all(extra == () for extra in asked)  # every pass detects it for itself, forever
 
 
 def test_a_language_you_do_not_speak_is_never_pinned(monkeypatch, tmp_path):
@@ -2130,46 +2118,74 @@ def test_a_language_you_do_not_speak_is_never_pinned(monkeypatch, tmp_path):
 # --- the live pass has its own small model ----------------------------------------------------
 
 
-def test_the_live_model_is_a_small_one_and_never_the_transcript_model(tmp_path, monkeypatch):
-    """`model` is the transcript you keep; the live pass is a different job with a different cost.
+def test_one_model_does_both_jobs(tmp_path, monkeypatch):
+    """There was a second, small model that typed live while the big one wrote the final.
 
-    They must not share a knob: pinning the transcript to a small model is a decision about
-    accuracy, and it must not silently also become the decision about the live pass, or vice versa.
+    It was retired when the live pass began typing PUNCTUATION rather than only words: the marks
+    it chose are the marks the operator keeps, and there the two models are not close. One model,
+    one server, one queue.
     """
     models = config.home_root() / "models"
     models.mkdir(parents=True, exist_ok=True)
     (models / "ggml-large-v3-turbo.bin").write_bytes(b"x")
-    (models / "ggml-base.bin").write_bytes(b"x")
-    (models / "ggml-small.bin").write_bytes(b"x")
-    # THE DEFAULT IS THE BIG MODEL, i.e. no live model at all — the live pass types the
-    # punctuation the operator keeps, and the two models are not close there.
-    assert whisper.partial_model() == ""
-    config.set_value("livePass", "small")
-    assert whisper.partial_model().endswith("ggml-small.bin")  # small beats base: measured German
-    (models / "ggml-small.bin").unlink()
-    assert whisper.partial_model().endswith("ggml-base.bin")  # base is the fallback below small
-    assert whisper.model().endswith("ggml-large-v3-turbo.bin")  # and the transcript is unmoved
+    assert whisper.model().endswith("ggml-large-v3-turbo.bin")
+    assert not hasattr(whisper, "partial_model")
+    assert not hasattr(dictate, "partial_port")
+    assert not hasattr(dictate, "partial_at")
+    assert not hasattr(dictate, "start_partial_server")
 
-    # An explicit `model` override still names the transcript model, and only that one.
+    # An explicit `model` override names it, and there is nothing else for it to collide with.
     config.set_value("model", str(models / "ggml-base.bin"))
+    (models / "ggml-base.bin").write_bytes(b"x")
     assert whisper.model().endswith("ggml-base.bin")
-    assert whisper.partial_model().endswith("ggml-base.bin")
 
 
-def test_the_live_server_gets_its_own_model_and_its_own_port(monkeypatch):
-    """Its own PROCESS is the point, not just its own model: whisper-server answers one request at
-    a time, so a partial sharing the queue is time the FINAL transcription spends waiting.
+def test_silence_on_the_end_of_a_clip_is_cut_before_whisper_can_invent_into_it(tmp_path):
+    """Whisper invents words when it is handed audio with nothing in it. Measured, three ways:
+
+        speech alone                 "...but just in this text box,"
+        + 20s of digital silence     "...but just in this text box, Thank you."
+        + 20s of faint room noise    "...but just in this text box.."
+
+    So the invention is the silence, not the speech, the model or the prompt. Reported as "a lot
+    of gibberish in a different language" — romanised Japanese appended to a real English sentence
+    — and it reached the cursor because the clip had ended with fifteen seconds of nothing.
     """
-    monkeypatch.setattr(dictate, "resolve_bin", lambda _n: "/usr/bin/whisper-server")
-    config.set_value("port", 8479)
-    command = dictate.serve_command("/models/ggml-small.bin", dictate.partial_port())
-    assert command is not None
-    assert "/models/ggml-small.bin" in command
-    assert "8480" in command
-    assert dictate.partial_port() == 8480
+    rate = dictate.SAMPLE_RATE
+
+    def clip(name, tail_seconds):
+        path = tmp_path / name
+        with wave.open(str(path), "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(rate)
+            tone = b"".join(struct.pack("<h", int(8000 * math.sin(i / 8))) for i in range(rate * 3))
+            handle.writeframes(tone + b"\x00" * int(rate * tail_seconds) * 2)
+        return path
+
+    long_tail = clip("tail.wav", 20)
+    assert dictate.trim_trailing_quiet(long_tail) is True
+    # The speech survives with its decay, and the twenty seconds whisper would have invented into
+    # are gone.
+    assert 3.0 <= dictate.audio_seconds(long_tail) <= 3.0 + dictate.TRIM_KEEP_SECONDS + 0.2
+
+    # Nothing to cut: a clip that is speech all the way to its end is returned untouched.
+    speech = clip("speech.wav", 0)
+    assert dictate.trim_trailing_quiet(speech) is False
+
+    # And a clip that is quiet ALL the way through is not ours to judge — `finish` has two level
+    # gates that say so properly, and truncating it to nothing would take the evidence away.
+    silent = tmp_path / "silent.wav"
+    with wave.open(str(silent), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(b"\x00" * rate * 4)
+    assert dictate.trim_trailing_quiet(silent) is False
+    assert dictate.audio_seconds(silent) == 2.0
 
 
-def test_every_clip_is_its_own_clip_on_both_servers(monkeypatch):
+def test_every_clip_is_its_own_clip(monkeypatch):
     """whisper.cpp keeps decoded text as context, and a SERVER keeps it across REQUESTS.
 
     So the previous dictation primes the next one, and under streaming — ~100 overlapping passes
@@ -2179,21 +2195,9 @@ def test_every_clip_is_its_own_clip_on_both_servers(monkeypatch):
     same two runs came back character for character identical.
     """
     monkeypatch.setattr(dictate, "resolve_bin", lambda _n: "/usr/bin/whisper-server")
-    for command in (
-        dictate.serve_command("/models/ggml-large-v3-turbo.bin"),
-        dictate.serve_command("/models/ggml-small.bin", dictate.partial_port()),
-    ):
-        assert command is not None
-        assert command[command.index("-mc") + 1] == "0"
-
-
-def test_a_missing_live_server_sends_the_partials_to_the_big_one(monkeypatch):
-    """Slower, and never wrong. It is what they did before the small server existed."""
-    monkeypatch.setattr(dictate, "ours", lambda _at: True)  # who holds the port is a separate test
-    monkeypatch.setattr(dictate, "server_up", lambda _at=0: False)
-    assert dictate.partial_at() == 0  # 0 means "the default port", i.e. the big server
-    monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
-    assert dictate.partial_at() == dictate.partial_port()
+    command = dictate.serve_command("/models/ggml-large-v3-turbo.bin")
+    assert command is not None
+    assert command[command.index("-mc") + 1] == "0"
 
 
 def test_the_log_says_whether_streaming_typed_or_merely_ran():
@@ -2207,19 +2211,18 @@ def test_the_log_says_whether_streaming_typed_or_merely_ran():
 
 
 def test_an_impostor_on_the_port_is_never_handed_the_audio(monkeypatch):
-    """Both ports are predictable, and a socket that accepts a connection proves nothing about who
-    is on the other end of it. Anything but a whisper-server would be sent recorded speech and
+    """The port is predictable, and a socket that accepts a connection proves nothing about who is
+    on the other end of it. Anything but a whisper-server would be sent recorded speech and
     believed about what was said.
     """
-    monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
+    monkeypatch.setattr(dictate, "server_up", lambda: True)
 
     class _Nobody:
         stdout = ""  # pgrep found no whisper-server holding the port
 
     monkeypatch.setattr(dictate.subprocess, "run", lambda *_a, **_k: _Nobody())
-    assert dictate.ours(dictate.partial_port()) is False
-    assert dictate.partial_at() == 0  # so the partials go to the big server, not to the impostor
-    assert dictate.start_server(at=dictate.partial_port()) is False  # and it is never adopted
+    assert dictate.ours() is False
+    assert dictate.start_server() is False  # and it is never adopted
 
     dictate._OWNERSHIP.clear()
 
@@ -2227,8 +2230,7 @@ def test_an_impostor_on_the_port_is_never_handed_the_audio(monkeypatch):
         stdout = "4242\n"
 
     monkeypatch.setattr(dictate.subprocess, "run", lambda *_a, **_k: _Whisper())
-    assert dictate.ours(dictate.partial_port()) is True
-    assert dictate.partial_at() == dictate.partial_port()
+    assert dictate.ours() is True
 
 
 def test_zero_means_the_main_port_here_as_it_does_everywhere_else(monkeypatch):
@@ -2252,13 +2254,16 @@ def test_zero_means_the_main_port_here_as_it_does_everywhere_else(monkeypatch):
     assert asked == [f"whisper-server.*--port {dictate.port()}"], "asked about the wrong port"
 
 
-def test_a_port_that_leaves_no_room_for_the_live_server_is_refused(monkeypatch):
-    """65535 puts the live server on 65536, which cannot bind — and nothing would say why."""
+def test_a_port_that_leaves_no_room_for_the_sweep_above_it_is_refused(monkeypatch):
+    """`stop_server` sweeps the port above ours to reap the live server an older MurmurFlow ran.
+
+    Nothing of ours listens there any more, but 65535 would make that sweep ask about 65536, which
+    is not a port.
+    """
     monkeypatch.setattr(cli.service, "restart", lambda: False)
     assert cli.main(["config", "set", "port", "65535"]) == 2
     assert "port" not in config.load()
     assert cli.main(["config", "set", "port", str(dictate.MAX_PORT)]) == 0
-    assert dictate.partial_port() == 65535
     # And a config hand-edited past the ceiling degrades to the default rather than to an
     # unbindable pair, because `port` is read on the daemon's hot path and must never raise.
     config.set_value("port", 65535)

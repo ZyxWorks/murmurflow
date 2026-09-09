@@ -43,30 +43,6 @@ MODEL_PREFERENCE: tuple[str, ...] = (
     "ggml-base.en.bin",
 )
 
-# The model that answers the LIVE PARTIALS while you are still talking, best first — and it is a
-# SMALL one on purpose. Measured on an M4 Pro against a warm server, same clip, same prompt:
-# large-v3-turbo answers a partial in 2.2-2.4s, `ggml-small` in 0.35-0.44s, `ggml-base` in 0.15-0.23s.
-#
-# The speed is only half of why this exists. whisper-server answers ONE request at a time, so a
-# partial still decoding when you stop talking is time the FINAL transcription spends queued behind
-# it — measured live at 1-2.3s added to the end of every sentence, which is exactly the moment
-# somebody is waiting. A model that answers in 0.4s cannot cost more than 0.4s of that.
-#
-# `small` and not `base`, and that is a measurement rather than caution: on the same German clip
-# base typed "das" where the speaker said "dass" and dropped a plural, while small returned
-# character-for-character what large-v3-turbo did. A partial is PASTED and there is no un-paste, so
-# a model that quietly rewords is not cheaper, it is wrong. `.en` variants rank below their
-# multilingual twins for the same reason as in MODEL_PREFERENCE.
-PARTIAL_PREFERENCE: tuple[str, ...] = (
-    "ggml-small.bin",
-    "ggml-small.en.bin",
-    "ggml-base.bin",
-    "ggml-base.en.bin",
-)
-
-#: What `murmurflow setup` fetches for the partials. ~488 MB, next to the ~1.6 GB main model.
-DEFAULT_PARTIAL_MODEL = "ggml-small.bin"
-
 # Where a ggml model may live, in search order. `~/.murmurflow/models/` is ours; the others are what
 # `brew install whisper-cpp` lays down.
 _MODEL_DIRS: tuple[str, ...] = (
@@ -111,43 +87,6 @@ def model() -> str:
     if configured and Path(configured).expanduser().is_file():
         return str(Path(configured).expanduser())
     for name in MODEL_PREFERENCE:  # best model first, wherever it lives
-        for directory in _search_dirs():
-            candidate = directory / name
-            if candidate.is_file():
-                return str(candidate)
-    return ""
-
-
-def partial_model() -> str:
-    """Path to a SMALL model for the live partials, or ``''`` when none is installed.
-
-    Empty is a working answer and not a failure: the partials then go to the same warm server the
-    final transcription uses, exactly as they did before this existed. Slower, and never wrong.
-
-    Deliberately ignores the ``model`` config override, which names the model that writes what you
-    keep. Pinning that to a small model is a choice about the transcript; it must not also silently
-    become the choice about the partials, and vice versa.
-
-    **The default is now the BIG model, i.e. no small model at all, and that is a measurement.**
-    Once a live pass could type PUNCTUATION (`dictate.missing_mark`), the model answering the live
-    pass stopped deciding only the words and started deciding the marks the operator keeps — and
-    the two models are not close there. Replayed through the whole stream loop on one real 38s
-    clip, against the big model's own whole-clip transcript:
-
-        live = small   13.9% different   "...in the end like when I just stopped my control it
-                                          just added a lot of gibberish I'm not sure and that came"
-        live = big     11.4% different   "...in the end, like when I just stopped my control, it
-                                          just added a lot of gibberish, I'm not sure. And that
-                                          came after a few seconds, after I already sent..."
-
-    The percentages understate it; the sentences are the finding. The operator's call, given both
-    ("I would rather have it qualitatively high rather than faster"). ``livePass: "small"`` puts
-    the fast one back, and the cost of the default is real: a pass over a long clip costs seconds
-    rather than ~1, so the words arrive in bigger lumps the longer you talk.
-    """
-    if str(config.load().get("livePass", "big")).strip().lower() != "small":
-        return ""
-    for name in PARTIAL_PREFERENCE:
         for directory in _search_dirs():
             candidate = directory / name
             if candidate.is_file():

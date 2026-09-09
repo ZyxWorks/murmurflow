@@ -1613,6 +1613,99 @@ def test_the_suite_can_never_type_on_the_real_keyboard():
     assert platforms.type_text("anything at all") == ""
 
 
+def _tap_the_key(monkeypatch, script, *, is_recording=None):
+    """Drive the real `listen_double_tap` loop over a scripted key sequence.
+
+    ``script`` is a list of ``(held, seconds_since_the_last_step)``; the loop's clock and its key
+    reader are both replaced, so a double-tap takes microseconds and no real key is touched.
+    """
+    from murmurflow import hotkey
+
+    clock = [0.0]
+    steps = list(script)
+    seen: list[str] = []
+
+    def _down(_trigger):
+        if not steps:
+            raise SystemExit
+        held, gap = steps.pop(0)
+        clock[0] += gap
+        return held
+
+    monkeypatch.setattr(hotkey.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(hotkey.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(hotkey, "is_trigger_down", _down)
+    monkeypatch.setattr(hotkey, "seconds_since_keydown", lambda: 99.0)  # never a chord
+    with contextlib.suppress(SystemExit):
+        hotkey.listen_double_tap(
+            lambda: seen.append("START"),
+            lambda: seen.append("STOP"),
+            on_tap=seen.append,
+            is_recording=is_recording,
+        )
+    return seen
+
+
+def test_a_microphone_that_closed_itself_does_not_cost_the_next_double_tap(monkeypatch):
+    """Reported as "when the microphone closes automatically, the double press control doesn't reset".
+
+    `recording` was the loop's only record of whether anything was running, and the microphone can
+    now close itself — after fifteen seconds of silence, or the two-minute cap. The clip was gone
+    and the loop still believed it was running, so the next tap was spent being a STOP for a clip
+    that had already stopped, and the double-tap only worked on the try after that.
+    """
+    tap = [(True, 0.01), (False, 0.01)]
+    live = [False]  # what `mine` would say: nothing is recording yet
+
+    def is_recording():
+        return live[0]
+
+    # Two taps start it. Then the clip "closes itself", and two more taps must START again —
+    # not be spent as a stop for something that is already over.
+    def _started():
+        seen.append("START")
+        live[0] = True
+
+    from murmurflow import hotkey
+
+    clock = [0.0]
+    steps = [*tap, *tap, *tap, *tap]
+    seen: list[str] = []
+
+    def _down(_trigger):
+        if not steps:
+            raise SystemExit
+        held, gap = steps.pop(0)
+        clock[0] += gap
+        # Between the two pairs, with the clip already started: the watchdog finishes it.
+        if "START" in seen and len(steps) == 3:
+            live[0] = False
+        return held
+
+    monkeypatch.setattr(hotkey.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(hotkey.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(hotkey, "is_trigger_down", _down)
+    monkeypatch.setattr(hotkey, "seconds_since_keydown", lambda: 99.0)
+    with contextlib.suppress(SystemExit):
+        hotkey.listen_double_tap(
+            _started,
+            lambda: seen.append("STOP"),
+            on_tap=seen.append,
+            is_recording=is_recording,
+        )
+    assert seen.count("START") == 2, seen  # both double-taps started a clip
+    assert "STOP" not in seen  # and no tap was spent stopping one that had already ended
+    assert "ended" in seen  # the loop noticed, without being told by a tap
+
+
+def test_without_the_callback_the_gesture_is_exactly_what_it_was(monkeypatch):
+    """`is_recording` is optional, and a loop given none behaves as it always did: tap, tap, start."""
+    tap = [(True, 0.01), (False, 0.01)]
+    seen = _tap_the_key(monkeypatch, [*tap, *tap, *tap])
+    assert seen.count("START") == 1
+    assert seen.count("STOP") == 1  # the third tap stops it, because nothing else can
+
+
 # --- streaming ---------------------------------------------------------------------------------
 
 

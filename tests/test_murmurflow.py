@@ -13,11 +13,14 @@ import contextlib
 import io
 import itertools
 import json
+import math
 import os
+import struct
 import sys
 import threading
 import time
 import types
+import wave
 from pathlib import Path
 
 import pytest
@@ -1111,7 +1114,7 @@ def test_the_peak_is_the_loudest_sample_in_either_direction(tmp_path):
 # --- a warm server that answers wrongly is bounced ------------------------------------------------
 
 
-def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=True):
+def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=True, quiet=0):
     """Run `listen_loop` over a fixed list of dictations. Returns (server starts, server stops).
 
     ``hold`` is `maxHold`, and it is 0 — OFF — for every caller but the one testing it. The
@@ -1146,6 +1149,7 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=T
     monkeypatch.setattr(dictate, "current", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
     monkeypatch.setattr(dictate, "cue_ready", lambda: cues.append(1))
     config.set_value("maxHold", hold)
+    config.set_value("silenceStop", quiet)
     pending = list(results)
     monkeypatch.setattr(dictate, "finish", lambda _rec: pending.pop(0))
 
@@ -1675,6 +1679,54 @@ def test_a_forgotten_key_still_gets_its_words(monkeypatch):
     """
     starts, _ = _drive_listener(monkeypatch, [_clip(True)], hold=0.05, release=False)
     assert starts == [1]  # the daemon started its server and then rescued the clip on its own
+
+
+def test_the_last_seconds_of_a_clip_still_being_recorded_can_be_read(tmp_path):
+    """`wave` cannot answer this and that is the whole reason it exists.
+
+    While ffmpeg is appending, the RIFF header still holds the lengths it was born with — zero —
+    so every header-respecting reader sees an empty file. Every byte past the header is a sample,
+    so "the last ten seconds" is a seek from the END.
+    """
+    clip = tmp_path / "growing.wav"
+    with wave.open(str(clip), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(dictate.SAMPLE_RATE)
+        tone = b"".join(
+            struct.pack("<h", int(8000 * math.sin(i / 8))) for i in range(dictate.SAMPLE_RATE * 10)
+        )
+        handle.writeframes(tone + b"\x00" * (dictate.SAMPLE_RATE * 10 * 2))
+    assert dictate.tail_dbfs(clip, 5) == float("-inf")  # the last five seconds are silence
+    assert dictate.tail_dbfs(clip, 15) > -20  # fifteen reaches back into the speech
+    # A clip too short to have been quiet that long has NO OPINION, and 0.0 is well above any
+    # floor — a fresh recording must never read as silence and close itself.
+    assert dictate.tail_dbfs(clip, 60) == 0.0
+    assert dictate.tail_dbfs(clip, 0) == 0.0
+    assert dictate.tail_dbfs(tmp_path / "nothing.wav", 5) == 0.0
+    assert dictate.tail_dbfs(clip, 5) < dictate.quiet_floor()  # what the watchdog actually asks
+
+
+def test_the_microphone_closes_itself_after_a_stretch_of_silence(monkeypatch):
+    """ "We should close the microphone after not talking for 15 seconds or something like that."
+
+    Fifteen and not the two or three that dictation apps use: the gesture is a TAP, so nothing is
+    telling the microphone you are still there, and this operator thinks mid-sentence. A clip cut
+    at three seconds would end half his sentences mid-thought, with the rest spoken into a closed
+    microphone — worse than the forgotten microphone being fixed, because that one loses nothing.
+    """
+    assert dictate.silence_stop_seconds() == dictate.SILENCE_STOP_SECONDS == 15.0
+    config.set_value("silenceStop", 8)
+    assert dictate.silence_stop_seconds() == 8.0
+    config.set_value("silenceStop", 0)
+    assert dictate.silence_stop_seconds() == 0.0  # switched off
+    config.set_value("silenceStop", -1)
+    assert dictate.silence_stop_seconds() == dictate.SILENCE_STOP_SECONDS  # never a negative
+    config.set_value("silenceStop", 0)
+    # Driven through the real listener: never a tap, never the 120s cap, only silence.
+    monkeypatch.setattr(dictate, "tail_dbfs", lambda _wav, _seconds: -90.0)
+    starts, _ = _drive_listener(monkeypatch, [_clip(True)], hold=0, quiet=0.05, release=False)
+    assert starts == [1]  # the clip was finished, by silence alone, with the hold cap OFF
 
 
 def test_the_microphone_closes_itself_when_the_second_tap_never_comes(monkeypatch):

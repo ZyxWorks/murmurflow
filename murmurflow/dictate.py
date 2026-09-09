@@ -1043,6 +1043,20 @@ MAX_CLIP_SECONDS = 600
 # real dictation measured on this machine is ~68s; `maxHold` moves it.
 AUTO_STOP_SECONDS = 120.0
 
+# How long the microphone stays open with nothing being said before the daemon closes it and types
+# what it has. The operator asked for it and left the number to me ("I don't know what is a good
+# timing, you have to decide that yourself"), so: fifteen seconds.
+#
+# Dictation apps that stop on silence sit around two to three, and two to three is WRONG HERE. The
+# gesture is a tap, not a held key, so nothing is telling the microphone you are still there; and
+# this operator thinks mid-sentence — the pauses that produced every punctuation bug in this file
+# were real, and a clip cut at three seconds would have ended half of them mid-thought, with the
+# rest of the sentence spoken into a closed microphone. That failure is worse than the one being
+# fixed, because a forgotten microphone loses nothing and a truncated sentence loses the sentence.
+# Fifteen is longer than any pause measured here and still closes a forgotten one in a quarter of
+# a minute rather than two. `silenceStop` moves it; 0 switches it off.
+SILENCE_STOP_SECONDS = 15.0
+
 # What whisper emits when handed near-silence: it does not return "", it confidently returns one of
 # its training-set boilerplate lines. Untrapped, these get TYPED INTO YOUR DOCUMENT, which
 # is the worst failure this tool has — silence should produce nothing, never words you did not
@@ -2115,6 +2129,14 @@ def auto_stop_seconds() -> float:
     return AUTO_STOP_SECONDS
 
 
+def silence_stop_seconds() -> float:
+    """How long a silent microphone stays open. ``silenceStop`` overrides; ``0`` switches it off."""
+    raw = _cfg().get("silenceStop")
+    if isinstance(raw, (int, float)) and float(raw) >= 0:
+        return float(raw)
+    return SILENCE_STOP_SECONDS
+
+
 def quiet_floor() -> float:
     """The level below which a clip is a room, not a sentence. ``quietFloor`` overrides."""
     raw = _cfg().get("quietFloor")
@@ -2143,6 +2165,18 @@ def peak_dbfs(wav: Path) -> float:
             frames = handle.readframes(handle.getnframes())
     except Exception:  # noqa: BLE001 — a diagnostic must never break a dictation
         return 0.0
+    return _peak_dbfs(frames)
+
+
+#: The recorder's own format — see the `-ar`/`-ac` flags in :func:`start`. 16 kHz mono 16-bit is
+#: 32000 bytes of file per second of audio, which is what lets :func:`tail_dbfs` find "the last ten
+#: seconds" by seeking from the END of a file whose header has not been written yet.
+SAMPLE_RATE = 16000
+BYTES_PER_SECOND = SAMPLE_RATE * 2
+
+
+def _peak_dbfs(frames: bytes) -> float:
+    """Peak of 16-bit PCM ``frames`` in dBFS. ``-inf`` for silence or nothing."""
     if not frames:
         return float("-inf")
     samples = array.array("h")
@@ -2157,6 +2191,33 @@ def peak_dbfs(wav: Path) -> float:
     if peak == 0:
         return float("-inf")
     return 20 * math.log10(min(peak, 32768) / 32768.0)
+
+
+def tail_dbfs(wav: Path, seconds: float) -> float:
+    """Peak of the LAST ``seconds`` of a clip that is STILL BEING RECORDED. ``0.0`` = no opinion.
+
+    Read by seeking from the end of the file rather than through :mod:`wave`, because while ffmpeg
+    is still appending, the RIFF header holds the lengths it was born with — zero — so every
+    header-respecting reader sees an empty file (this is what :func:`repair_wav` exists to undo,
+    and it may not be run against the file the recorder is writing).
+
+    Every byte past the header is a sample, so "the last ten seconds" is the last
+    ``10 * BYTES_PER_SECOND`` bytes, and a seek is the whole implementation. A clip that has not
+    yet run that long has no opinion — ``0.0``, the same "no opinion" :func:`peak_dbfs` returns for
+    a format it will not judge, which is well above any real floor and so is never read as silence.
+    """
+    want = int(seconds * BYTES_PER_SECOND)
+    if want <= 0:
+        return 0.0
+    try:
+        size = wav.stat().st_size
+        if size < want + 44:  # 44 = the standard PCM wav header ffmpeg writes
+            return 0.0  # not enough audio yet to have been quiet for that long
+        with wav.open("rb") as handle:
+            handle.seek(size - want)
+            return _peak_dbfs(handle.read(want))
+    except OSError:
+        return 0.0
 
 
 def audio_seconds(wav: Path) -> float:
@@ -2995,16 +3056,23 @@ def listen_loop(
         watching the trigger key, so anything that blocks there is a listener that misses a tap.
         """
         limit = auto_stop_seconds()
-        if limit <= 0:
+        quiet = silence_stop_seconds()
+        if limit <= 0 and quiet <= 0:
             return
-        deadline = time.monotonic() + limit
-        while time.monotonic() < deadline:
+        deadline = time.monotonic() + (limit if limit > 0 else float("inf"))
+        why = ""
+        while not why:
             if not mine or mine[0] is not rec:
                 return  # a tap, or an abort, already ended it
-            time.sleep(0.5)
+            if time.monotonic() >= deadline:
+                why = f"after {limit:.0f}s"
+            elif quiet > 0 and tail_dbfs(rec.wav, quiet) < quiet_floor():
+                why = f"after {quiet:.0f}s of silence"
+            else:
+                time.sleep(0.5)
         if claim(rec) is None:
             return
-        emit(f"[--] closed the microphone after {limit:.0f}s — you did not tap to stop")
+        emit(f"[--] closed the microphone {why} — you did not tap to stop")
         _land(finish(rec))
 
     def _land(result: Result) -> None:

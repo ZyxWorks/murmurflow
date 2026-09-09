@@ -782,7 +782,16 @@ def start_partial_server(*, wait: float = 60.0) -> bool:
     this existed. See :func:`whisper.partial_model`.
     """
     model = whisper.partial_model()
-    return bool(model) and start_server(wait=wait, model=model, at=partial_port())
+    if not model:
+        # AND STOP THE ONE A PREVIOUS RUN LEFT, which is not tidiness. `partial_at` sends the
+        # partials to whatever is answering on the live port, so a small server still up from
+        # before `livePass` changed keeps on answering them — the setting would appear to do
+        # nothing until the machine was restarted, and 488 MB would sit there while it did.
+        # Only one that is up AND ours: this must never be a blind pkill on a port we do not hold.
+        if ours(partial_port()) and server_up(partial_port()):
+            stop_server(partial_port())
+        return False
+    return start_server(wait=wait, model=model, at=partial_port())
 
 
 def stop_server(at: int = 0) -> int:
@@ -3017,8 +3026,9 @@ def listen_loop(
         )
     else:
         emit(
-            "the words arrive while you talk — in ~2s lumps, because the big model is answering "
-            "the live pass too. `murmurflow setup small` gets the fast one (~488 MB, ~5x quicker)"
+            f"the words arrive while you talk ({Path(whisper.model()).stem} on the live pass, so "
+            "they come in bigger lumps the longer you talk). `murmurflow config set livePass small`"
+            " is the fast one, with thinner punctuation"
         )
 
     #: Consecutive clips that took the cold path while a warm server was supposed to be answering.

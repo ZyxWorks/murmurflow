@@ -703,6 +703,24 @@ def serve_command(model: str = "", at: int = 0) -> list[str] | None:
         # filtering them afterwards. `is_hallucination` stays as the backstop: -sns reduces these
         # but does not eliminate them.
         "-sns",
+        # EVERY CLIP IS ITS OWN CLIP. whisper.cpp keeps the text it decoded as context for what it
+        # decodes next, and a SERVER keeps it across REQUESTS — so yesterday's sentence primes
+        # today's, and under streaming, where one dictation is ~100 overlapping passes over the
+        # same growing audio, it primes itself with a hundred near-copies of what it just said.
+        # Measured on a 145s clip, same audio, same prompt, twice in a row: 543 characters one
+        # run and 1108 the next, one of them collapsing into "And. Your. Job as a founder." nine
+        # times over. That is the report — "a lot of points in between, it cuts the logic of the
+        # sentence" — and it is also why the same words came out well before the stream existed.
+        # `-mc 0` stores no text context, and the same two runs then came back CHARACTER FOR
+        # CHARACTER identical, in whole clauses, with no repetition: "...that fits your workflow,
+        # that you connect with that company, you like how they do things, and then go from there."
+        #
+        # What it costs is real and small: past 30s whisper decodes each window without the
+        # previous window's words to lean on. A dictation is one window, the vocabulary prompt is
+        # sent per request and still applies, and an unstable transcript is not worth a smoother
+        # seam at 0:30.
+        "-mc",
+        "0",
     ]
 
 

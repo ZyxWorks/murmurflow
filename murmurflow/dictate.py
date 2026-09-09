@@ -1671,8 +1671,37 @@ def stable_prefix(previous: str, current: str) -> str:
     # audio was silence: nothing is touching the end any more. Without this the final word of every
     # dictation waits for the key release, which is the one word a person is watching for.
     if settled == len(words) == len(prior):
-        return " ".join(words)
+        # ...WITHOUT the mark on its last word, which is the other half of the same guess. A pause
+        # is silence, and silence is how whisper decides a sentence ENDED: "work on my" becomes
+        # "work on my..." and two passes over that silence agree on it word for word, so the rule
+        # above commits it. Then the speaker carries on and there is a full stop in the middle of
+        # his sentence — reported as "a lot of points in between, and it cuts the logic of the
+        # sentence". Whisper itself takes the mark back on the next pass, once it can hear that
+        # the sentence went on; only the typing cannot be taken back, so the mark is the one thing
+        # not typed. The real one at the very end still lands: `stream_tail` brings it along with
+        # the final transcript. Only THIS branch strips, because only this branch commits a word
+        # with nothing but silence behind it — a mark in the growing branch had real audio after
+        # it and is a sentence the speaker actually finished.
+        return _TRAILING_MARK.sub("", " ".join(words))
     return " ".join(words[: min(settled, max(0, len(words) - 1))])
+
+
+#: What a pass puts at the end of what it has heard so far. Every one of these is whisper's answer
+#: to "is the sentence over", and during a pause the answer is wrong — see :func:`stable_prefix`.
+_TRAILING_MARK = re.compile(r"[.,;:!?\u2026\u2013\u2014-]+$")
+
+
+def _end_mark(pasted: str, final: str, rest: list[str]) -> str:
+    """``rest`` as a tail — or, when it is empty, the sentence's last mark if it is still missing.
+
+    :func:`stable_prefix` never types the mark that touches the end of the audio, so a dictation
+    whose every word streamed would otherwise end with no full stop at all. At the key release the
+    clip really is over, so that mark is real and this is the only thing left to type.
+    """
+    if rest:
+        return " ".join(rest)
+    mark = _TRAILING_MARK.search(final.rstrip())
+    return "" if not mark or pasted.rstrip().endswith(mark.group()) else mark.group()
 
 
 def stream_tail(pasted: str, final: str) -> str:
@@ -1707,13 +1736,19 @@ def stream_tail(pasted: str, final: str) -> str:
     words = final.split()
     keys = [_key(word) for word in words]
     if keys[: len(already)] == already:
-        return " ".join(words[len(already) :])
+        return _end_mark(pasted, final, words[len(already) :])
     matcher = difflib.SequenceMatcher(a=already, b=keys, autojunk=False)
     matched = [block for block in matcher.get_matching_blocks() if block.size]
-    if not matched:
-        return " ".join(words[len(already) :])  # nothing corresponds: trust the count, lose nothing
+    if not matched:  # nothing corresponds: trust the count, lose nothing
+        return _end_mark(pasted, final, words[len(already) :])
     reached = matched[-1]
-    return " ".join(words[reached.b + reached.size :])
+    # Words on screen PAST the alignment are ones the final pass said differently. The tail that
+    # follows them is not new text, it is the same words again in the better model's wording, and
+    # typing it puts both on screen — reported as "it just adds another word at the end", which is
+    # exactly what one reworded last word looks like ("the design" + "designs"). One dropped for
+    # one left over: the rewording is skipped and anything genuinely beyond the screen still lands.
+    reworded = len(already) - (reached.a + reached.size)
+    return _end_mark(pasted, final, words[reached.b + reached.size + reworded :])
 
 
 def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
@@ -2219,7 +2254,9 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
         return Result(
             text, seconds, elapsed_ms, True, "", level, captured, "→ streamed", heard.warm, live
         )
-    ok, problem, note = inject(f" {tail}" if pasted else tail)
+    # No space in front of a tail that is nothing but the sentence's final mark ( "word ." ).
+    spaced = pasted and not _TRAILING_MARK.fullmatch(tail)
+    ok, problem, note = inject(f" {tail}" if spaced else tail)
     return Result(text, seconds, elapsed_ms, ok, problem, level, captured, note, heard.warm, live)
 
 

@@ -11,20 +11,27 @@
 //   * elastic collisions. Two ghosts knocking each other sideways is motion with INTENT in it, and
 //     the eye follows intent. A sky moves because you are on a planet that turns; nothing in it
 //     hits anything.
-//   * per-mark rotation. Brand law, and the loudest of the three: `brand/CLAUDE.md` fixes the
-//     geometry forever and says never rotated. Fifty tumbling logos is a screensaver.
+//   * per-mark rotation IN THE PLANE. Fifty logos spinning like a loading spinner is a
+//     screensaver, and `brand/CLAUDE.md` fixes the geometry forever. A TURN IN 3D IS NOT THAT AND
+//     IS NOW WHAT THIS FILE DOES - see AXES below: the mark is an xyz axis, so the object is fixed
+//     and only the angle you see it from moves. The geometry is never re-drawn.
 //
-// SO: A JITTERED GRID, THREE SIZES, A SLOW DRIFT AND A TWINKLE. Placement is a grid because the
+// SO: A JITTERED GRID, THREE SIZES, A SLOW DRIFT, A TWINKLE AND A SLOW TURN IN 3D. Placement is a grid because the
 // alternative is clusters and empty quadrants — the failure mode of every random field, and the
 // one thing a real star field never has. Jitter inside the cell is what stops it reading AS a
 // grid. Constant area per star, so a phone and a 5K display are the same sky at the same density
 // rather than the same COUNT at two densities.
 //
-// AND ONE LIGHT SOURCE. A sun by day, a moon by night, drawn by the consumer (they are two CSS
-// radial gradients, which is the one thing CSS does better than a canvas) and handed to `set()` as
-// a position. This file only uses it to LIGHT the field: stars near the body gain a little
-// brightness and a little glow, falling off with distance. That is the whole reason the night
-// version reads as a sky with a moon in it rather than as dots beside a circle.
+// A STAR IS A CRISP GLYPH AND NOTHING ELSE (SKY-QUIET-1, operator, 2026-08-27).
+//
+// It used to carry a radial wash behind it, and to gain brightness and glow from the body passing
+// nearby. Both are deleted. Over a real screen the wash read as a smudge behind every mark and the
+// body's light read as a lamp somebody had left on: "the light from the stars is a little too much
+// for some reason... it looks a little too kitschy". A field of hairline glyphs at 5-14% is the
+// same language as the eight marks that carry text, which is the point.
+//
+// So this file no longer knows where the sun or the moon is at all. `paint` still ACCEPTS a `body`
+// so the two copied-out consumers do not break on an extra key, and does nothing with it.
 //
 // STILL ONE MODULE, STILL COPIED OUT. `zyx`'s dashboard, `zyxworks-site` and MurmurFlow's landing
 // page all run this file; `make brand-field` overwrites the other two from this one. A React repo
@@ -52,11 +59,50 @@ export function mulberry32(seed) {
 // draw exactly this; a backdrop drawing a DIFFERENT three-stroke glyph was a second mark on one
 // screen, which is the thing brand law is for.
 const JOINT = [60, 60];
-const TIPS = [
-  [60, 30],
-  [30, 82],
-  [94, 74],
+
+// AND THE MARK IS AN XYZ AXIS, SO IT TURNS ON ONE (operator, 2026-08-27: "I want this xyz thingy
+// to rotate in the xyz axis, right? Cause Zyx is an xyz axis").
+//
+// These are the brand's own three strokes lifted back into 3D. Drop the z and you get
+// (60,30) (30,82) (94,74) EXACTLY - so nothing is re-drawn and nothing is a new glyph. The z each
+// stroke carries is the one that makes the three mutually PERPENDICULAR, which is what makes the
+// mark a real axis triad rather than three lines that happen to meet: solved once from
+// `v1.v2 + z1*z2 = 0` and its two siblings (z1*z2 = 660, z1*z3 = 420, z2*z3 = 712), and pinned by
+// `check-registry.mjs` so nobody has to re-derive it.
+//
+// The turn is a SWAY of about 11 degrees, never a spin. An axis rotated far enough to point at the
+// viewer foreshortens to a dot, and a field of marks blinking out is the screensaver again.
+const AXES = [
+  [0, -30, 19.731],
+  [-30, 22, 33.449],
+  [34, 14, 21.286],
 ];
+
+/** How far a star's mark may turn, in radians: yaw about the vertical, pitch about the horizontal. */
+export const TURN = [0.3, 0.18];
+
+/** The three tips of the mark as seen from `yaw`/`pitch`, projected by dropping z. At (0, 0) this
+    returns the brand geometry to the pixel. Pure, so a check can walk it without a canvas. */
+export function tipsAt(yaw, pitch) {
+  const cy = Math.cos(yaw);
+  const sy = Math.sin(yaw);
+  const cp = Math.cos(pitch);
+  const sp = Math.sin(pitch);
+  return AXES.map(([x, y, z]) => {
+    const rx = x * cy + z * sy;
+    const rz = z * cy - x * sy;
+    return [JOINT[0] + rx, JOINT[1] + y * cp - rz * sp];
+  });
+}
+
+/** Where a star's mark is pointing right now. Same two-summed-sines shape as the drift, so the
+    angle never repeats visibly and never looks like a motor. */
+export function turnedAt(star, seconds) {
+  return [
+    TURN[0] * Math.sin(seconds * star.fr * 6.283 + star.pr),
+    TURN[1] * Math.sin(seconds * star.fq * 6.283 + star.pq),
+  ];
+}
 
 /** Three sizes, and the stroke steps with them — the brand's small-mark rule (9 -> 12 -> 14 at
     120 units). At a flat 9 the 15px star is a smudge and the 29px one is a logo. */
@@ -105,9 +151,6 @@ export const INK = { dark: "246, 245, 241", light: "11, 12, 16" };
     field vanish completely. */
 const DAY_GAIN = 1.85;
 
-/** How far the body's light reaches, as a fraction of the frame's diagonal. */
-const HALO_REACH = 0.52;
-
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 /**
@@ -150,6 +193,12 @@ export function createField(w, h, { seed = 20260827, keepOut = [] } = {}) {
         // brightness wobble is what makes it a light. Slow, and never below 0.72 of its own base.
         ft: 0.03 + rand() * 0.05,
         pt: rand() * Math.PI * 2,
+        // The turn. 25-90 second periods, deliberately slower than the twinkle and slower than the
+        // drift: the nearest thing to it in the real world is a planet turning, not a mobile.
+        fr: 0.011 + rand() * 0.029,
+        pr: rand() * Math.PI * 2,
+        fq: 0.011 + rand() * 0.022,
+        pq: rand() * Math.PI * 2,
       });
     }
   }
@@ -198,28 +247,17 @@ export function driftedAt(star, seconds, amp = 7) {
   ];
 }
 
-/** How much of the body's light reaches a point. 1 at the disc, 0 at `HALO_REACH` of the frame's
-    diagonal, linear in between — the handoff's own falloff. */
-function lightAt(x, y, body, w, h) {
-  if (!body) return 0;
-  const reach = Math.hypot(w, h) * HALO_REACH;
-  return clamp(1 - Math.hypot(x - body.x, y - body.y) / reach, 0, 1);
-}
-
 /**
  * DRAW ONE FRAME.
  *
- *   `theme` "dark" | "light"     which ink, and whether there is glow and dust at all
- *   `body`  {x, y} | null        where the sun or moon is, in CSS pixels
+ *   `theme` "dark" | "light"     which ink, and whether there is dust at all
  *   `dusk`  0…1                  how far into civil twilight; fades the night field up
  *
- * Day and night are not the same picture with a colour swapped. At night the moon LIGHTS the
- * field — every star carries a glow, and the ones near the disc carry more. By day the sun DIMS
- * it: no glow at all (a white wash around a dark mark on a warm-white page reads as a printing
- * fault), a much higher base alpha, and stars inside the sun's wash lose a little rather than
- * being erased.
+ * Day and night are the same picture in two inks and two alphas. Ink on warm-white needs far more
+ * of it to read at all (`DAY_GAIN`), and the far-field dust is night-only because on a light
+ * surface it only muddies it. There is no glow in either — see the head of this file.
  */
-export function paint(ctx, field, w, h, { seconds = 0, theme = "dark", body = null, dusk = 1 } = {}) {
+export function paint(ctx, field, w, h, { seconds = 0, theme = "dark", dusk = 1 } = {}) {
   const night = theme !== "light";
   const rgb = night ? INK.dark : INK.light;
   ctx.clearRect(0, 0, w, h);
@@ -237,37 +275,10 @@ export function paint(ctx, field, w, h, { seconds = 0, theme = "dark", body = nu
 
   for (const s of field.stars) {
     const [x, y] = driftedAt(s, seconds);
-    const lit = lightAt(x, y, body, w, h);
     const twinkle = 0.86 + 0.14 * Math.sin(seconds * s.ft * 6.283 + s.pt);
-    let alpha;
-    if (night) {
-      alpha = (s.a + 0.035 * lit) * twinkle * dusk;
-    } else {
-      // Floor 0.09: the first draft subtracted a flat 0.05 off a 0.04 base and the whole day field
-      // disappeared. A mark must stay readable everywhere on a light surface.
-      alpha = Math.max(0.09, s.a * DAY_GAIN - 0.02 * lit) * twinkle;
-    }
-
-    if (night) {
-      // The wash. `radial-gradient(circle, currentColor 0%, transparent 52%)` blurred 6px, drawn
-      // as a gradient with a soft shoulder instead — a blur filter on a canvas is a per-frame
-      // readback on some drivers, and a gradient is already the shape a blur was there to make.
-      // Never above 0.11: at the ring it stops being light and becomes an outline.
-      const g = Math.min(0.075, (0.018 + (s.a - 0.048) * 0.34 + 0.022 * lit) * dusk);
-      const rad = s.size * 0.95;
-      const grad = ctx.createRadialGradient(x, y, 0, x, y, rad);
-      grad.addColorStop(0, `rgba(${rgb}, ${g.toFixed(4)})`);
-      // The falloff is a SQUARE, not a shoulder. A stop partway out is a second edge, and the
-      // first version of this drew a visible 44px disc around every star - the exact "reads as a
-      // ring around each mark" the handoff warned about, arrived at from the other direction.
-      grad.addColorStop(0.45, `rgba(${rgb}, ${(g * 0.3).toFixed(4)})`);
-      grad.addColorStop(0.75, `rgba(${rgb}, ${(g * 0.07).toFixed(4)})`);
-      grad.addColorStop(1, `rgba(${rgb}, 0)`);
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(x, y, rad, 0, 6.2832);
-      ctx.fill();
-    }
+    // Floor 0.09 by day: an early draft let a mark fall under it and the whole day field
+    // disappeared. A mark must stay readable everywhere on a light surface.
+    const alpha = night ? s.a * twinkle * dusk : Math.max(0.09, s.a * DAY_GAIN) * twinkle;
 
     const k = s.size / 120;
     ctx.save();
@@ -277,7 +288,7 @@ export function paint(ctx, field, w, h, { seconds = 0, theme = "dark", body = nu
     ctx.strokeStyle = `rgba(${rgb}, ${alpha.toFixed(4)})`;
     ctx.lineWidth = s.stroke;
     ctx.beginPath();
-    for (const [tx, ty] of TIPS) {
+    for (const [tx, ty] of tipsAt(...turnedAt(s, seconds))) {
       ctx.moveTo(JOINT[0], JOINT[1]);
       ctx.lineTo(tx, ty);
     }
@@ -289,9 +300,9 @@ export function paint(ctx, field, w, h, { seconds = 0, theme = "dark", body = nu
 /**
  * Mount the field on a canvas. Returns `{ stop, set }`.
  *
- * `set({theme, body, dusk, keepOut})` is how the consumer moves the light: the sky's own state
- * changes about once a minute, and a repaint on demand is cheaper and simpler than handing this
- * module a clock and a location. Under reduced motion it repaints the one static frame.
+ * `set({theme, dusk, keepOut})` is how the consumer turns the sky over: its state changes about
+ * once a minute, and a repaint on demand is cheaper and simpler than handing this module a clock
+ * and a location. Under reduced motion it repaints the one static frame.
  *
  * THE BUDGET, because it runs forever behind everything. Count is capped by AREA and by
  * `MAX_STARS`; DPR is capped at 2; `visibilitychange` stops the loop outright so a background tab
@@ -310,7 +321,7 @@ export function mount(canvas, { seed = 20260827, reducedMotion, observe = false,
     (typeof window !== "undefined" &&
       !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 
-  let state = { theme: "dark", body: null, dusk: 1, keepOut: [], ...initial };
+  let state = { theme: "dark", dusk: 1, keepOut: [], ...initial };
   let field = null;
   let w = 0;
   let h = 0;
@@ -367,8 +378,8 @@ export function mount(canvas, { seed = 20260827, reducedMotion, observe = false,
   draw();
 
   const api = {
-    /** Move the light, flip the theme, or hand over new keep-out rects. Only a keep-out change
-        re-places the field: everything else is a repaint, so the sky does not reshuffle at dawn. */
+    /** Flip the theme, move through twilight, or hand over new keep-out rects. Only a keep-out
+        change re-places the field: everything else is a repaint, so it does not reshuffle at dawn. */
     set(next = {}) {
       const rebuild = "keepOut" in next && next.keepOut !== state.keepOut;
       state = { ...state, ...next };

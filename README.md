@@ -325,9 +325,9 @@ change: the best model **present** wins.
 murmurflow setup base            # smaller and faster, noticeably worse
 ```
 
-`setup` also fetches `small`, which is not a downgrade of the transcript: it is the separate model
-that answers the live pass while you talk. See
-[how the words arrive](#how-the-words-arrive-while-you-talk).
+ONE model does both jobs — the transcript you keep and the words that arrive while you talk. There
+used to be a second, small one for the live pass; it was retired when the live pass began typing
+punctuation. See [how the words arrive](#how-the-words-arrive-while-you-talk).
 
 Teach it your own words — the cheapest accuracy win there is:
 
@@ -370,24 +370,25 @@ ends — so typing each pass's best guess would type words the next pass withdra
 un-type them. The first pass has nothing to agree with, so it holds back its last four words
 instead.
 
-**Two models, because they do different jobs.** `large-v3-turbo` (~1.6 GB) writes the transcript
-you keep. `small` (~488 MB) answers the live pass while you are still talking, on its own
-whisper-server, on its own port. `murmurflow setup` fetches both.
+**ONE model, and it types the punctuation you keep.** `large-v3-turbo` (~1.6 GB) answers the live
+pass *and* writes the final transcript, on one warm server.
 
-That is not only about speed. **whisper-server answers one request at a time**, so a live pass
-still decoding when you stop talking is time the *final* transcription spends queued behind it —
-measured at 1 to 2.3 seconds added to the end of every sentence, at exactly the moment somebody is
-waiting for it. A separate process cannot queue against itself.
+There used to be a second, small model on its own server, because it answered a pass in ~0.4s
+against ~1.5s. It was retired the day the live pass started typing **marks** as well as words: a
+full stop lands as soon as a later word confirms it, so the model answering the live pass is the
+model that decides the punctuation you keep — and there the two are not close. Replayed through the
+whole streaming loop on one real 38 second clip, against the big model's own whole-clip transcript:
 
-`small` and not `base`, and that is a measurement rather than caution: on the same German clip
-`base` typed *das* where the speaker said *dass* and dropped a plural, while `small` returned
-character-for-character what `large-v3-turbo` did. A live word is pasted and **there is no
-un-paste**, so a model that quietly rewords is not cheaper, it is wrong.
+| live model | differs | what lands on screen |
+|---|---|---|
+| small | 13.9% | `...in the end like when I just stopped my control it just added a lot of gibberish` |
+| **big** | **11.4%** | `...in the end, like when I just stopped my control, it just added a lot of gibberish, I'm not sure. And that came after a few seconds, after I already sent the message` |
+
+The percentages understate it. The sentences are the finding.
 
 **And a live word is TYPED, not pasted.** The clipboard round trip — save the pasteboard, write the
 text, send ⌘V, wait for the target to read it, put the old contents back — costs about 500ms, more
-than decoding the audio did. It was half the cycle, so the words arrived in two- and three-word
-lumps about once a second. A unicode key event carries the characters itself: no pasteboard,
+than decoding the audio did. A unicode key event carries the characters itself: no pasteboard,
 nothing to settle, **2.6ms**.
 
 It is also safe on a German keyboard, which is the reason the clipboard was chosen in the first
@@ -396,30 +397,46 @@ mangles every umlaut, where `CGEventKeyboardSetUnicodeString` sends the characte
 **final** transcript still goes through the clipboard, because it can be two thousand characters at
 once and because its paste reports back what the target actually received.
 
-**Measured** on an M4 Pro, macOS 26, `language` on `auto`, one 10.5 second sentence:
+**Measured** on an M4 Pro, macOS 26, `language` on `auto`:
 
-| | one big model, pasted | live model, pasted | live model, typed |
-|---|---|---|---|
-| one live pass | 2.2s | 0.4s | **0.4s** |
-| the cycle: decode, then place the words | ~2.7s | ~0.9s | **~0.43s** |
-| first words at the cursor | 3.7s | 1.4s | **1.5s** |
-| lumps of text during the sentence | 5 | 12 | **21** |
-| still left to paste when you stop | 62 of 195 | 21 of 195 | **9 of 195 chars** |
+| clip length so far | one live pass |
+|---|---|
+| 2s | 1.47s |
+| 10s | 1.50s |
+| 20s | 1.49s |
+| 30s | 2.35s |
+| 45s | 2.38s |
 
-So it is **a word or two every 0.4 seconds**, not letter-by-letter captioning. Letters would be
-cosmetic: no word is known any sooner than the pass that decodes it. Past 30 seconds of speech
-whisper.cpp's padding becomes a second 30s window and the cycle doubles, so a long dictation lags
-further behind than a short one.
+So the words arrive in **lumps of a second and a half**, and in bigger lumps the longer you talk —
+past 30 seconds whisper.cpp's padding becomes a second 30s window. That is the price of the
+punctuation, and it is a setting:
 
-Without the live model everything still works — the live pass goes to the big server, in ~2s lumps,
-as it did before. `murmurflow doctor` says which one you are on, and every clip's line in the daemon
-log ends with what streaming actually did: `stream 21x → 20 typed`.
+```sh
+murmurflow config set livePass small   # faster lumps, thinner punctuation
+```
 
-**Detecting the language is a whole extra encoder pass** — 0.75s of every 2.2s, measured — and one
-clip does not change language halfway through, so every pass after the first pins itself to what
-the first one heard. It costs nothing: the pin is only taken from a pass that already cleared the
-confidence gate, only to a language on your `languages` list when you have one, and the **final**
-transcription is never pinned, so the language gate still judges the real clip.
+`murmurflow doctor` says which model is answering, and every clip's line in the daemon log ends
+with what streaming actually did: `stream 21x → 20 typed`.
+
+**Nothing is pinned.** Detecting the language costs a whole extra encoder pass, and every pass pays
+it. Pinning the language to what the first second heard saved ~0.75s a pass and cost the gate that
+refuses invented speech: whisper-server reports back whatever language it was *told* to decode, so
+every pass after the first reported the pinned language by construction, whatever it had actually
+decoded. A partial is typed, so the gate that judges it has to be able to see.
+
+**Silence is cut before anything transcribes it.** Whisper invents words when it is handed audio
+with nothing in it. The same 12 seconds of speech, three ways:
+
+| clip | what came back |
+|---|---|
+| speech alone | `...but just in this text box,` |
+| + 20s of digital silence | `...but just in this text box, Thank you.` |
+| + 20s of faint room noise | `...but just in this text box..` |
+
+So the invention is the silence, not the speech. A word list cannot catch it — whisper answers
+silence in a different invented language each time — and neither can whisper's own per-segment
+`no_speech_prob`: the invented "Thank you." came back at **0.000**, sitting among real speech.
+The cure is not to hand the silence over.
 
 Two things to know:
 
@@ -428,8 +445,11 @@ Two things to know:
   ⌥⌘V into whatever app you are in. With `doubleTap false` it stands down, and the daemon says so
   on the line it prints at start-up.
 - **It needs the warm whisper-server.** Partials never fall back to the cold `whisper-cli`: that
-  would spawn a model every 1.2s and make your final transcription slower, not faster. No warm
+  would spawn a model on every pass and make your final transcription slower, not faster. No warm
   server, and the words simply arrive at the end as they always did.
+- **The microphone closes itself.** After 15 seconds with nothing said, or 120 seconds either way,
+  the clip is finished exactly as your second tap would have finished it — the words are typed, not
+  thrown away. `silenceStop` and `maxHold` move both; `0` switches either off.
 - **The last pass can still reword what is already typed.** Usually punctuation or a capital. There
   is no un-paste and deliberately no attempt at one: synthesising backspaces into an app whose
   cursor may have moved since would delete text that was never ours. A word left as first heard is

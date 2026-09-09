@@ -145,9 +145,9 @@ def _cfg() -> dict[str, object]:
         return {}
 
 
-#: The highest ``port`` that leaves room for the live server one above it. 65535 would put the
-#: second server on 65536, which is not a port: it fails to bind, `partial_at` finds nothing there
-#: and every partial silently falls back to the big model.
+#: The highest ``port`` that leaves the one above it free. Nothing of ours listens there any
+#: more, but :func:`stop_server` still sweeps it to reap the small live server an older MurmurFlow
+#: ran, and a port set to 65535 would make that sweep ask about 65536, which is not a port.
 MAX_PORT = 65534
 
 
@@ -570,24 +570,14 @@ def _clear_state_for(pid: int) -> None:
 # --- warm transcription -----------------------------------------------------------------------
 
 
-def partial_port() -> int:
-    """The loopback port for the SECOND warm server, the small one that answers partials.
-
-    Derived from ``port`` rather than configured, because it is not a choice anybody has a reason
-    to make: it is one more than the port they already set, and one setting that can be wrong is
-    better than two.
-    """
-    return port() + 1
+def server_url() -> str:
+    return f"http://127.0.0.1:{port()}"
 
 
-def server_url(at: int = 0) -> str:
-    return f"http://127.0.0.1:{at or port()}"
-
-
-def server_up(at: int = 0) -> bool:
+def server_up() -> bool:
     """True if a warm whisper-server answers on the loopback port."""
     try:
-        with urllib.request.urlopen(f"{server_url(at)}/", timeout=0.5):
+        with urllib.request.urlopen(f"{server_url()}/", timeout=0.5):
             return True
     except (urllib.error.URLError, OSError):
         return False
@@ -600,24 +590,18 @@ OWNERSHIP_SECONDS = 30.0
 _OWNERSHIP: dict[int, tuple[float, bool]] = {}
 
 
-def ours(at: int = 0) -> bool:
-    """Is the thing listening on ``at`` a whisper-server, rather than whatever got there first.
+def ours() -> bool:
+    """Is the thing listening on our port a whisper-server, rather than whatever got there first.
 
-    ``0`` means the main port, the same as it does to :func:`server_url` and :func:`server_up`.
-    It has to: this is called with whatever a caller was given, and a caller that was given the
-    default asked about port ZERO — where nothing is ever listening, so the answer was always no
-    and the daemon started every morning announcing that its own running server was unavailable.
-
-    **Because the answer decides where recorded audio is sent.** Both ports are predictable — one
-    is a documented default, the other is one above it — and any local process can bind them first
-    and then receive every clip, and answer with text that gets typed at the cursor. A socket that
-    accepts a connection proves nothing about who is on the other end of it.
+    **Because the answer decides where recorded audio is sent.** The port is predictable, so any
+    local process can bind it first, receive every clip, and answer with text that gets typed at
+    the cursor. A socket that accepts a connection proves nothing about who is on the other end.
 
     So the port has to be held by a `whisper-server` process. Only one process can bind a port, so
     finding one there IS the answer. Cached for :data:`OWNERSHIP_SECONDS` because this sits on the
     partial path, which asks it about once a second, and `pgrep` is a process spawn.
     """
-    at = at or port()
+    at = port()
     now = time.monotonic()
     cached = _OWNERSHIP.get(at)
     if cached is not None and now - cached[0] < OWNERSHIP_SECONDS:
@@ -678,11 +662,12 @@ def server_answers() -> tuple[bool, str]:
         return False, str(error)[:120]
 
 
-def serve_command(model: str = "", at: int = 0) -> list[str] | None:
+def serve_command(model: str = "") -> list[str] | None:
     """The argv that starts a warm whisper-server, or ``None`` if it cannot be built.
 
-    Defaults to the big model on the main port — the server that writes the transcript you keep.
-    The partials pass their own small model and their own port; see :func:`whisper.partial_model`.
+    ONE server, and it answers both the live passes and the final transcription. There used to be
+    a second one holding a small model for the partials; it was retired when the live pass began
+    typing punctuation, because the marks it chose were the marks the operator kept.
     """
     binary = resolve_bin("whisper-server")
     model = model or whisper.model()
@@ -695,7 +680,7 @@ def serve_command(model: str = "", at: int = 0) -> list[str] | None:
         "--host",
         "127.0.0.1",
         "--port",
-        str(at or port()),
+        str(port()),
         "-t",
         whisper.threads(),
         "--convert",  # let the server transcode anything ffmpeg reads, not just wav
@@ -724,7 +709,7 @@ def serve_command(model: str = "", at: int = 0) -> list[str] | None:
     ]
 
 
-def start_server(*, wait: float = 60.0, model: str = "", at: int = 0) -> bool:
+def start_server(*, wait: float = 60.0) -> bool:
     """Spawn the warm whisper-server if it is not already up; block until it answers.
 
     Loading large-v3-turbo takes a few seconds, which is exactly the cost we are paying ONCE here
@@ -749,11 +734,11 @@ def start_server(*, wait: float = 60.0, model: str = "", at: int = 0) -> bool:
     place recorded voice lives — whisper-server deletes its converted copy when it is done, so the
     "empty between sentences" promise there still holds.
     """
-    if server_up(at):
+    if server_up():
         # Adopted only if a whisper-server is what is holding the port — see :func:`ours`. Anything
         # else answering there would be handed recorded audio and believed about what was said.
-        return ours(at)
-    cmd = serve_command(model, at)
+        return ours()
+    cmd = serve_command()
     if cmd is None:
         return False
     try:
@@ -769,37 +754,18 @@ def start_server(*, wait: float = 60.0, model: str = "", at: int = 0) -> bool:
         return False
     deadline = time.time() + wait
     while time.time() < deadline:
-        if server_up(at):
+        if server_up():
             return True
         time.sleep(0.1)
     return False
 
 
-def start_partial_server(*, wait: float = 60.0) -> bool:
-    """Start the small server that answers the live partials. False when there is no small model.
-
-    False is not a failure: the partials fall back to the big server, which is what they did before
-    this existed. See :func:`whisper.partial_model`.
-    """
-    model = whisper.partial_model()
-    if not model:
-        # AND STOP THE ONE A PREVIOUS RUN LEFT, which is not tidiness. `partial_at` sends the
-        # partials to whatever is answering on the live port, so a small server still up from
-        # before `livePass` changed keeps on answering them — the setting would appear to do
-        # nothing until the machine was restarted, and 488 MB would sit there while it did.
-        # Only one that is up AND ours: this must never be a blind pkill on a port we do not hold.
-        if ours(partial_port()) and server_up(partial_port()):
-            stop_server(partial_port())
-        return False
-    return start_server(wait=wait, model=model, at=partial_port())
-
-
-def stop_server(at: int = 0) -> int:
+def stop_server() -> int:
     """Stop the warm whisper-server this install started. Returns how many were stopped.
 
-    ``at`` stops ONE of them. The bounce that heals a wedged main server passes it, because taking
-    the live server down as collateral and never bringing it back left every partial after the
-    first bounce on the big model, silently, until the next daemon restart.
+    The port ABOVE ours is swept too, and it is not a second server of ours: an older MurmurFlow
+    ran a small model there for the live pass, and a version that no longer starts one must still
+    stop the one it finds, or ~488 MB stays resident until the machine is next restarted.
 
     ``start_server`` detaches it with ``start_new_session=True`` so it outlives the listener, which
     is the whole point while dictation is installed — and a leak the moment it is not: 1.8 GB
@@ -807,7 +773,7 @@ def stop_server(at: int = 0) -> int:
     OUR two ports, because a whisper-server on any other port belongs to somebody else.
     """
     stopped = 0
-    for which in (port(), partial_port()) if at == 0 else (at,):
+    for which in (port(), port() + 1):
         try:
             found = subprocess.run(
                 ["pgrep", "-f", f"whisper-server.*--port {which}"],
@@ -926,7 +892,7 @@ def _confidence(payload: str) -> tuple[str, float, str]:
     return text, float(raw) if isinstance(raw, (int, float)) else 1.0, spoken
 
 
-def transcribe_warm(wav: Path, *, timeout: float = 60.0, language: str = "", at: int = 0) -> Heard:
+def transcribe_warm(wav: Path, *, timeout: float = 60.0, language: str = "") -> Heard:
     """Transcribe via the warm server; empty text if it is not up or errors. Never raises.
 
     Reuses :mod:`whisper`'s language and vocabulary decisions, so every surface that transcribes
@@ -940,9 +906,6 @@ def transcribe_warm(wav: Path, *, timeout: float = 60.0, language: str = "", at:
     on an M4 Pro — and a clip does not change language halfway through, so the partials after the
     first pin themselves to what the first one heard. See :func:`_stream_loop`.
 
-    ``at`` picks WHICH warm server. Default is the big one that writes the transcript you keep; the
-    partials ask the small one on :func:`partial_port`, which answers ~5x faster and, being a
-    different process, is never the reason the final transcription is queued.
     """
     if not wav.is_file():
         return Heard("")
@@ -957,7 +920,7 @@ def transcribe_warm(wav: Path, *, timeout: float = 60.0, language: str = "", at:
     except OSError:
         return Heard("")
     request = urllib.request.Request(
-        f"{server_url(at)}/inference", data=body, headers={"Content-Type": content_type}
+        f"{server_url()}/inference", data=body, headers={"Content-Type": content_type}
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -1580,12 +1543,10 @@ _INJECT_LOCK = threading.Lock()
 #: :data:`STREAM_HOLDBACK_WORDS`), so waiting too little does not make the first words arrive
 #: sooner — it spends a whole pass to find that out.
 #:
-#: One second, and the number moved when the partials got their own small server. While one pass
-#: cost 2.2s, waiting less did not make the words arrive sooner — it spent a whole pass to find out
-#: there was nothing to commit yet, so 1.5 and 1.0 landed the first words at the same moment and
-#: 1.5 landed more of them. A pass now costs ~0.4s (see :func:`whisper.partial_model`), so the
-#: cheap first look is worth taking: measured end to end on the same 10.7s clip, 1.0 puts the first
-#: word on screen at 1.37s against 1.88s.
+#: One second. While a pass cost 2.2s, waiting less did not make the words arrive sooner — it
+#: spent a whole pass to find out there was nothing to commit yet, so 1.5 and 1.0 landed the first
+#: words at the same moment and 1.5 landed more of them. A pass costs ~1.5s on the big model under
+#: 30s of audio (measured), so the cheap first look is worth taking.
 STREAM_FIRST_SECONDS = 1.0
 
 #: Minimum gap between passes, measured from the START of the previous one. A pass costs about the
@@ -1616,7 +1577,7 @@ STREAM_HOLDBACK_WORDS = 4
 #: because whisper-server answers one request at a time: a partial still decoding when the key is
 #: released is time the FINAL transcription spends queued behind it, i.e. straight onto the latency
 #: this whole product is about.
-STREAM_TIMEOUT = 10.0
+STREAM_TIMEOUT = 30.0
 
 
 @dataclass
@@ -1638,12 +1599,6 @@ class Stream:
     blank: int = 0
     #: Chunks actually pasted at the cursor.
     typed: int = 0
-    #: The last pass that cleared every gate, and the seconds of audio it had read — what lets
-    #: `finish` skip its own transcription (see :func:`whole_clip_read`). ONE attribute holding
-    #: both, because they are read from another thread while this one is still writing them: as
-    #: two fields a reader could take the new length beside the older transcript, decide the clip
-    #: was fully read and drop whatever was said in between. One store, one read, no window.
-    read: tuple[Heard, float] | None = None
 
 
 #: In-flight streams, keyed by the wav they are transcribing. A dict and not an attribute on
@@ -1878,7 +1833,7 @@ def missing_mark(pasted: str, settled: str) -> str:
     return mark.group()
 
 
-def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
+def _partial(live: Path, snapshot: Path) -> Heard:
     """Transcribe the audio captured SO FAR. Empty text if there is nothing worth reading. Never raises.
 
     The live wav is COPIED and the copy is what gets read, for two reasons that are both about not
@@ -1901,12 +1856,11 @@ def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
         return Heard("")
     try:
         repair_wav(snapshot)
+        trim_trailing_quiet(snapshot)
         captured = audio_seconds(snapshot)
         if captured < MIN_CLIP_SECONDS or peak_dbfs(snapshot) < quiet_floor():
             return Heard("")
-        heard = transcribe_warm(
-            snapshot, timeout=STREAM_TIMEOUT, language=language, at=partial_at()
-        )
+        heard = transcribe_warm(snapshot, timeout=STREAM_TIMEOUT)
         if not heard.text or heard.confidence < SPEECH_CONFIDENCE or is_hallucination(heard.text):
             return Heard("")
         # AND THE LANGUAGE GATE, which the final transcription has always had and this did not.
@@ -1922,16 +1876,6 @@ def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
         return Heard("")
     finally:
         snapshot.unlink(missing_ok=True)
-
-
-def partial_at() -> int:
-    """The port the partials should ask: the small server when it is up, else the big one.
-
-    Checked per pass rather than once, because the small server can be missing at start-up and
-    appear later, or die mid-afternoon. Falling back to the big server is slower and never wrong,
-    which is the right way round for something that types.
-    """
-    return partial_port() if ours(partial_port()) and server_up(partial_port()) else 0
 
 
 def stream_note(stream: Stream | None) -> str:
@@ -1990,25 +1934,20 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
     """The streaming thread: decode what has been said, paste what is settled, repeat."""
     snapshot = rec.wav.with_name(f"{rec.wav.stem}-partial.wav")
     previous = ""
-    #: The language the first accepted pass heard, pinned onto every pass after it. Worth ~0.75s of
-    #: every ~2.2s pass, because `auto` runs a whole extra encoder pass to answer a question whose
-    #: answer cannot change halfway through one clip. Only ever set from a pass that already
-    #: cleared the confidence gate in `_partial`, and only to a language the user says they speak
-    #: when they have said — a partial pinned to a language nobody in the room is speaking would
-    #: come back as fluent translation, and two of those in a row would agree and get typed.
-    #: The FINAL transcription is never pinned, so the language gate still judges the real clip.
-    pinned = ""
-    spoken = spoken_languages()
+    # THE LANGUAGE IS NOT PINNED, and the ~0.75s a pin saved is the price of the gate that
+    # catches invented speech. `auto` runs an extra encoder pass to answer "which language is
+    # this", and the answer is what `_partial` refuses on — so pinning it to what the FIRST pass
+    # heard made every pass after that one report the pinned language by construction, whatever it
+    # had actually decoded. The gate was blind for the whole clip after its first second, and a
+    # partial is PASTED. Reported as "a lot of gibberish in a different language ... I don't know
+    # how it got there". The final transcription was never pinned for exactly this reason; a pass
+    # that types is owed the same.
     if stream.done.wait(STREAM_FIRST_SECONDS):
         return
     while not stream.done.is_set():
         started = time.monotonic()
         stream.passes += 1
-        # BEFORE the pass, and off the file SIZE: every byte past the header is a sample, and the
-        # header of a file ffmpeg is still writing says the clip is empty. Under-reporting here is
-        # safe — it only makes `whole_clip_read` refuse — where over-reporting would drop speech.
-        covered = seconds_on_disk(rec.wav)
-        found = _partial(rec.wav, snapshot, pinned)
+        found = _partial(rec.wav, snapshot)
         heard = found.text
         # A pass that read nothing — still below the quiet floor, a hallucination thrown out, the
         # server busy — is not a pass that DISAGREED. Keeping the last real reading as `previous`
@@ -2018,9 +1957,6 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
             stream.blank += 1
             stream.done.wait(max(0.0, STREAM_EVERY_SECONDS - (time.monotonic() - started)))
             continue
-        if not pinned and found.language and (not spoken or found.language in spoken):
-            pinned = found.language
-        stream.read = (found, covered)
         settled = stable_prefix(previous, heard)
         previous = heard
         chunk = stream_tail(stream.text, settled) if settled else ""
@@ -2045,41 +1981,6 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
                     stream.text = f"{stream.text}{landed}".strip()
                     stream.typed += 1
         stream.done.wait(max(0.0, STREAM_EVERY_SECONDS - (time.monotonic() - started)))
-
-
-def whole_clip_read(stream: Stream | None, wav: Path, captured: float) -> Heard | None:
-    """The live pass's own transcript, when it already read the whole clip. Else ``None``.
-
-    **This is the 8 seconds at the end of a long dictation.** Measured from the operator's own log:
-    a 73.7s clip spent 3.2s in the final transcription, a 69.0s clip 6.0s, a 79.1s clip 7.8s — and
-    the row for each says ``→ streamed``, meaning that pass produced NOTHING that was not already
-    on screen. Worse than wasted: he had stopped, read his sentence, sent it, and the tail then
-    landed eight seconds later in whatever he was looking at by then ("it just added a lot of
-    gibberish ... after I already sent the message").
-
-    A partial only ever reads the audio captured SO FAR, so the question is what was said after the
-    last one. If that is silence, the last partial read the whole clip and its transcript is the
-    transcript — the same model, the same audio, the same gates. `covered` is measured from the
-    file's SIZE before the pass rather than after, so it under-reports and this refuses more often
-    than it strictly must, which is the right way for a shortcut to be wrong.
-
-    ``AHEAD_SECONDS`` is not a tolerance for missing speech: below it there is not enough audio for
-    :func:`tail_dbfs` to have an opinion, and a quarter of a second cannot hold a word.
-    """
-    if stream is None or stream.read is None:
-        return None
-    heard, covered = stream.read
-    if not heard.text:
-        return None
-    ahead = max(0.0, captured - covered)
-    if ahead > AHEAD_SECONDS and tail_dbfs(wav, ahead) >= quiet_floor():
-        return None  # something was said after the last pass looked
-    return heard
-
-
-#: How much unread audio at the end of a clip is too little to hold a word. See
-#: :func:`whole_clip_read`.
-AHEAD_SECONDS = 0.25
 
 
 def stop_streaming(wav: Path) -> Stream | None:
@@ -2248,17 +2149,66 @@ def _peak_dbfs(frames: bytes) -> float:
     return 20 * math.log10(min(peak, 32768) / 32768.0)
 
 
-def seconds_on_disk(wav: Path) -> float:
-    """How many seconds of audio a clip STILL BEING RECORDED holds. ``0.0`` if it cannot be read.
+#: Silence left on the end of a clip, in blocks this long, is cut before anything transcribes it.
+#: Small enough to find the end of the last word closely, large enough that one loud sample of
+#: keyboard noise does not hold a whole minute of nothing in place.
+TRIM_BLOCK_SECONDS = 0.2
 
-    The same arithmetic as :func:`tail_dbfs` and for the same reason: while ffmpeg is appending,
-    the RIFF header still says the file is empty, so :func:`audio_seconds` answers 0 for a clip
-    that is minutes long.
+#: ...and this much is kept after the last block that had sound in it. A word's decay is part of
+#: the word, and whisper reads a hard cut at the end of a syllable as a different syllable.
+TRIM_KEEP_SECONDS = 0.4
+
+
+def trim_trailing_quiet(wav: Path) -> bool:
+    """Cut silence off the end of a clip. True if anything was cut. Never raises.
+
+    **Whisper invents words when it is handed audio with nothing in it**, and this is the fix for
+    it — measured, after two that were not. The same 12 seconds of speech, three ways:
+
+        speech alone                 "...but just in this text box,"
+        + 20s of digital silence     "...but just in this text box, Thank you."
+        + 20s of faint room noise    "...but just in this text box.."
+
+    So the invention is not a property of the speech, the model or the prompt. It is the silence,
+    and the cure is not to hand it over. Reported as "a lot of gibberish in a different language",
+    which was romanised Japanese appended to a real English sentence, and it reached the cursor
+    because he had not tapped to stop — so the clip ended with fifteen seconds of nothing.
+
+    What was tried first and REFUSED, both measured: no word list can catch it (this file already
+    said so — whisper answers silence in a different invented language each time), and whisper's
+    own per-segment `no_speech_prob`/`avg_logprob` do not either. The invented " Thank you." came
+    back at `no_speech_prob` **0.000** and `avg_logprob` -0.28, sitting among real speech at -0.05
+    to -0.12: confidently wrong, with no threshold between them that does not also cut real quiet
+    speech.
+
+    Nothing is cut when the clip is quiet all the way through — that is a clip with no speech in
+    it, and the level gates in :func:`finish` are what should judge it and say so.
     """
+    block = int(TRIM_BLOCK_SECONDS * BYTES_PER_SECOND)
     try:
-        return max(0.0, (wav.stat().st_size - 44) / BYTES_PER_SECOND)
+        size = wav.stat().st_size
+        with wav.open("rb") as handle:
+            handle.seek(44)
+            audio = handle.read()
     except OSError:
-        return 0.0
+        return False
+    floor = quiet_floor()
+    last = -1
+    for index in range(len(audio) // block):
+        if _peak_dbfs(audio[index * block : (index + 1) * block]) >= floor:
+            last = index
+    if last < 0:
+        return False  # nothing above the floor anywhere: not ours to judge
+    keep = 44 + (last + 1) * block + int(TRIM_KEEP_SECONDS * BYTES_PER_SECOND)
+    if keep >= size:
+        return False
+    try:
+        with wav.open("r+b") as handle:
+            handle.truncate(keep)
+    except OSError:
+        return False
+    repair_wav(wav)  # the RIFF header still claims the length it had before the cut
+    return True
 
 
 def tail_dbfs(wav: Path, seconds: float) -> float:
@@ -2409,6 +2359,10 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     # surface goes through this function, so cueing at the seam is also the only way they stay in
     # step. After the two ways this can still be a non-event, so nothing chimes at a brushed key.
     cue_done()
+    # BEFORE the level gates and the transcribe: silence on the end is what whisper invents into,
+    # and a clip closed by the silence watchdog ends with fifteen seconds of it. See
+    # :func:`trim_trailing_quiet`.
+    trim_trailing_quiet(wav)
     level = peak_dbfs(wav)
     captured = audio_seconds(wav)
 
@@ -2450,10 +2404,7 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
 
     started = time.monotonic()
     try:
-        # The live pass may already have read this exact audio with this exact model. If nothing
-        # was said after it looked, transcribing again buys a copy of what is on screen for the
-        # seconds the operator is standing there waiting — see :func:`whole_clip_read`.
-        heard = whole_clip_read(stream, wav, captured) or transcribe(wav)
+        heard = transcribe(wav)
         raw = heard.text
     finally:
         retire()
@@ -3007,10 +2958,6 @@ def listen_loop(
         emit(f"whisper warm on :{port()}")
     else:
         emit("whisper-server unavailable — falling back to cold whisper-cli (~1s slower)")
-    # THE SECOND SERVER, and it is what makes the live words live. On a THREAD, because loading it
-    # is seconds during which nobody can dictate — the big server is already up by here, so the
-    # first sentence works whether or not this has finished, only more slowly.
-    threading.Thread(target=start_partial_server, daemon=True).start()
     # Streaming is on unless something PHYSICALLY stops it, and the daemon names which — a feature
     # that is silently absent is the worst kind, because there is nothing anywhere to read.
     if not double_tap_mode():
@@ -3020,16 +2967,8 @@ def listen_loop(
         )
     elif not warm_expected:
         emit("[!] no warm server answered — partials are warm-only, so the words arrive at the end")
-    elif whisper.partial_model():
-        emit(
-            f"the words arrive while you talk ({Path(whisper.partial_model()).stem} on the live pass)"
-        )
     else:
-        emit(
-            f"the words arrive while you talk ({Path(whisper.model()).stem} on the live pass, so "
-            "they come in bigger lumps the longer you talk). `murmurflow config set livePass small`"
-            " is the fast one, with thinner punctuation"
-        )
+        emit(f"the words arrive while you talk ({Path(whisper.model()).stem} on the live pass)")
 
     #: Consecutive clips that took the cold path while a warm server was supposed to be answering.
     cold_streak = [0]
@@ -3053,10 +2992,7 @@ def listen_loop(
         cold_streak[0] = 0
 
         def bounce() -> None:
-            # THIS PORT ONLY. Bouncing both took the live server down as collateral and never
-            # brought it back, so every partial after the first bounce ran on the big model,
-            # silently, until the next daemon restart.
-            stop_server(port())
+            stop_server()
             emit("[!] the warm whisper-server stopped answering — restarting it")
             emit(
                 f"whisper warm again on :{port()}"

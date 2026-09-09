@@ -13,11 +13,14 @@ import contextlib
 import io
 import itertools
 import json
+import math
 import os
+import struct
 import sys
 import threading
 import time
 import types
+import wave
 from pathlib import Path
 
 import pytest
@@ -1111,7 +1114,7 @@ def test_the_peak_is_the_loudest_sample_in_either_direction(tmp_path):
 # --- a warm server that answers wrongly is bounced ------------------------------------------------
 
 
-def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=True):
+def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=True, quiet=0):
     """Run `listen_loop` over a fixed list of dictations. Returns (server starts, server stops).
 
     ``hold`` is `maxHold`, and it is 0 — OFF — for every caller but the one testing it. The
@@ -1146,6 +1149,7 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=T
     monkeypatch.setattr(dictate, "current", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
     monkeypatch.setattr(dictate, "cue_ready", lambda: cues.append(1))
     config.set_value("maxHold", hold)
+    config.set_value("silenceStop", quiet)
     pending = list(results)
     monkeypatch.setattr(dictate, "finish", lambda _rec: pending.pop(0))
 
@@ -1677,6 +1681,54 @@ def test_a_forgotten_key_still_gets_its_words(monkeypatch):
     assert starts == [1]  # the daemon started its server and then rescued the clip on its own
 
 
+def test_the_last_seconds_of_a_clip_still_being_recorded_can_be_read(tmp_path):
+    """`wave` cannot answer this and that is the whole reason it exists.
+
+    While ffmpeg is appending, the RIFF header still holds the lengths it was born with — zero —
+    so every header-respecting reader sees an empty file. Every byte past the header is a sample,
+    so "the last ten seconds" is a seek from the END.
+    """
+    clip = tmp_path / "growing.wav"
+    with wave.open(str(clip), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(dictate.SAMPLE_RATE)
+        tone = b"".join(
+            struct.pack("<h", int(8000 * math.sin(i / 8))) for i in range(dictate.SAMPLE_RATE * 10)
+        )
+        handle.writeframes(tone + b"\x00" * (dictate.SAMPLE_RATE * 10 * 2))
+    assert dictate.tail_dbfs(clip, 5) == float("-inf")  # the last five seconds are silence
+    assert dictate.tail_dbfs(clip, 15) > -20  # fifteen reaches back into the speech
+    # A clip too short to have been quiet that long has NO OPINION, and 0.0 is well above any
+    # floor — a fresh recording must never read as silence and close itself.
+    assert dictate.tail_dbfs(clip, 60) == 0.0
+    assert dictate.tail_dbfs(clip, 0) == 0.0
+    assert dictate.tail_dbfs(tmp_path / "nothing.wav", 5) == 0.0
+    assert dictate.tail_dbfs(clip, 5) < dictate.quiet_floor()  # what the watchdog actually asks
+
+
+def test_the_microphone_closes_itself_after_a_stretch_of_silence(monkeypatch):
+    """ "We should close the microphone after not talking for 15 seconds or something like that."
+
+    Fifteen and not the two or three that dictation apps use: the gesture is a TAP, so nothing is
+    telling the microphone you are still there, and this operator thinks mid-sentence. A clip cut
+    at three seconds would end half his sentences mid-thought, with the rest spoken into a closed
+    microphone — worse than the forgotten microphone being fixed, because that one loses nothing.
+    """
+    assert dictate.silence_stop_seconds() == dictate.SILENCE_STOP_SECONDS == 15.0
+    config.set_value("silenceStop", 8)
+    assert dictate.silence_stop_seconds() == 8.0
+    config.set_value("silenceStop", 0)
+    assert dictate.silence_stop_seconds() == 0.0  # switched off
+    config.set_value("silenceStop", -1)
+    assert dictate.silence_stop_seconds() == dictate.SILENCE_STOP_SECONDS  # never a negative
+    config.set_value("silenceStop", 0)
+    # Driven through the real listener: never a tap, never the 120s cap, only silence.
+    monkeypatch.setattr(dictate, "tail_dbfs", lambda _wav, _seconds: -90.0)
+    starts, _ = _drive_listener(monkeypatch, [_clip(True)], hold=0, quiet=0.05, release=False)
+    assert starts == [1]  # the clip was finished, by silence alone, with the hold cap OFF
+
+
 def test_the_microphone_closes_itself_when_the_second_tap_never_comes(monkeypatch):
     """ "What happens a lot of times is that I forget to close the microphone."
 
@@ -1695,6 +1747,57 @@ def test_the_microphone_closes_itself_when_the_second_tap_never_comes(monkeypatc
     assert dictate.MAX_CLIP_SECONDS == 600
 
 
+def _drive_stream(passes):
+    """What lands on screen when the live pass reads ``passes``, one after another.
+
+    The same four calls `_stream_loop` makes, in the same order, so a sequence that broke a real
+    dictation can be replayed as a test. Kept beside the tests that use it rather than inside them:
+    four copies of the loop drift, and a copy that drifts stops testing the loop.
+    """
+    screen = previous = ""
+    for heard in passes:
+        settled = dictate.stable_prefix(previous, heard)
+        previous = heard
+        chunk = dictate.stream_tail(screen, settled) if settled else ""
+        mark = dictate.missing_mark(screen, settled) if chunk else ""
+        if chunk:
+            screen = f"{screen}{mark} {chunk}".strip() if screen else chunk
+    return screen
+
+
+def test_the_mark_lands_once_a_later_word_confirms_it():
+    """Reported as "there was a break before, but no punctuation".
+
+    A mark rides on the word in front of it, and that word is never typed with its mark while it
+    still touches the end of the audio — a pause is how whisper decides a sentence ended, and it
+    takes that back the moment the speaker carries on. So the word landed bare and nothing could
+    put the mark on afterwards. A later pass answers it: real speech follows and whisper STILL
+    ends the sentence there, so the mark goes on, joined to the word it belongs to.
+    """
+    reference = "I did not say the three times. I did, however, say really three times."
+    screen = _drive_stream(
+        [
+            "I did not say the three times",
+            "I did not say the three times",  # the break
+            "I did not say the three times.",  # whisper ends the sentence
+            "I did not say the three times.",
+            "I did not say the three times. I",  # he carries on
+            "I did not say the three times. I did however say",
+            "I did not say the three times. I did, however, say really",
+            reference,
+            reference,
+        ]
+    )
+    # ...plus the one thing only the key release can know: the mark that ends the clip.
+    landed = screen + dictate.end_mark(screen, reference)
+    assert landed == reference  # streamed, and identical to the whole-clip transcript
+    # And the fixes it must not undo, driven through the same loop.
+    assert _drive_stream(["Could you please work on my", "Could you please work on my..."] * 2) == (
+        "Could you please work on my"
+    )
+    assert "The The" not in _drive_stream(["Well, yeah. The The The"] * 3)
+
+
 def test_a_pause_never_types_a_lone_full_stop_where_the_next_word_goes():
     """Reported as "it puts a period instead of the word" after a short break.
 
@@ -1704,24 +1807,21 @@ def test_a_pause_never_types_a_lone_full_stop_where_the_next_word_goes():
     screen with no letters in it, so the next alignment read it as something the final pass had
     reworded and dropped a real word to pay for it. The word this ate, in the report, was "But".
     """
-    screen, previous = "", ""
-    for heard in (
-        "and then I ran the command",
-        "and then I ran the command",  # the pause: the transcript stops growing
-        "and then I ran the command.",  # whisper decides the sentence ended
-        "and then I ran the command.",
-        "and then I ran the command. But",  # he speaks again
-        "and then I ran the command. But when I say",
-        "and then I ran the command. But when I say",
-    ):
-        settled = dictate.stable_prefix(previous, heard)
-        previous = heard
-        chunk = dictate.stream_tail(screen, settled) if settled else ""
-        if chunk:
-            screen = f"{screen} {chunk}".strip() if screen else chunk
-    assert " ." not in screen
-    assert "But" in screen
-    assert screen == "and then I ran the command But when I say"
+    screen = _drive_stream(
+        [
+            "and then I ran the command",
+            "and then I ran the command",  # the pause: the transcript stops growing
+            "and then I ran the command.",  # whisper decides the sentence ended
+            "and then I ran the command.",
+            "and then I ran the command. But",  # he speaks again
+            "and then I ran the command. But when I say",
+            "and then I ran the command. But when I say",
+        ]
+    )
+    assert " ." not in screen  # never a mark standing on its own
+    assert "But" in screen  # and never a word paid to the alignment for one
+    # The full stop DOES land, because "But" settled behind it and confirmed it.
+    assert screen == "and then I ran the command. But when I say"
 
 
 def test_a_pause_does_not_put_a_full_stop_in_the_middle_of_the_sentence():

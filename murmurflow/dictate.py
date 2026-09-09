@@ -1034,6 +1034,15 @@ NO_SPEECH = "I didn't hear anything"
 # enough that an orphaned recorder costs ~20 MB and ten minutes of open microphone instead of hours.
 MAX_CLIP_SECONDS = 600
 
+# How long the daemon lets a clip run before it closes the microphone ITSELF and types what was
+# said. `MAX_CLIP_SECONDS` above is the recorder's own fuse and stays where it is: it bounds an
+# ORPHAN, one nobody is waiting for, and it throws the audio away. This one is the opposite case —
+# the operator is right there, he simply forgot the second tap ("what happens a lot of times is
+# that I forget to close the microphone"), and the right answer is not to discard two minutes of
+# his voice but to finish the clip exactly as the tap would have. Two minutes because the longest
+# real dictation measured on this machine is ~68s; `maxHold` moves it.
+AUTO_STOP_SECONDS = 120.0
+
 # What whisper emits when handed near-silence: it does not return "", it confidently returns one of
 # its training-set boilerplate lines. Untrapped, these get TYPED INTO YOUR DOCUMENT, which
 # is the worst failure this tool has — silence should produce nothing, never words you did not
@@ -1676,7 +1685,7 @@ def stable_prefix(previous: str, current: str) -> str:
     """
     words = current.split()
     if not previous:
-        return " ".join(words[: max(0, len(words) - STREAM_HOLDBACK_WORDS)])
+        return " ".join(_undoubled(words[: max(0, len(words) - STREAM_HOLDBACK_WORDS)]))
     prior = previous.split()
     settled = 0
     for before, after in zip(prior, words, strict=False):
@@ -1700,13 +1709,34 @@ def stable_prefix(previous: str, current: str) -> str:
         # the final transcript. Only THIS branch strips, because only this branch commits a word
         # with nothing but silence behind it — a mark in the growing branch had real audio after
         # it and is a sentence the speaker actually finished.
-        return _TRAILING_MARK.sub("", " ".join(words))
-    return " ".join(words[: min(settled, max(0, len(words) - 1))])
+        return _TRAILING_MARK.sub("", " ".join(_undoubled(words)))
+    return " ".join(_undoubled(words[: min(settled, max(0, len(words) - 1))]))
 
 
 #: What a pass puts at the end of what it has heard so far. Every one of these is whisper's answer
 #: to "is the sentence over", and during a pause the answer is wrong — see :func:`stable_prefix`.
 _TRAILING_MARK = re.compile(r"[.,;:!?\u2026\u2013\u2014-]+$")
+
+
+def _undoubled(settled: list[str]) -> list[str]:
+    """``settled`` without a word repeated at its very end. Never touches anything earlier.
+
+    Whisper repeats a short word into a silence. Hold after saying "the" and the transcript grows
+    "The", "The The", "The The The" over audio in which nothing was said — and every one of those
+    is two passes agreeing, so :func:`stable_prefix` commits it and it is at the cursor. Reported
+    exactly: "I did not say *the* three times."
+
+    A repeat is only refused while it is still the LAST word, which is the only place invention
+    happens — a word touching the end of the audio, with nothing after it to be wrong about. A
+    person who really does say a word twice is not being corrected, only delayed: the moment a
+    different word follows, the pair is no longer at the end and both commit. The operator's own
+    "really, really, really works well" survives for that reason, and it is the test beside this.
+    And if the clip simply ENDS on a doubled word, the final pass types it — it is exactly the
+    tail :func:`stream_tail` computes.
+    """
+    while len(settled) >= 2 and _key(settled[-1]) == _key(settled[-2]):
+        settled = settled[:-1]
+    return settled
 
 
 def end_mark(pasted: str, final: str) -> str:
@@ -2030,6 +2060,14 @@ def spoken_languages() -> frozenset[str]:
 # far-field microphone in a big room is a different machine from this one, so `quietFloor`
 # overrides it rather than leaving somebody with a tool that never hears them and no way to say so.
 QUIET_DBFS = -30.0
+
+
+def auto_stop_seconds() -> float:
+    """How long a forgotten microphone stays open. ``maxHold`` overrides; ``0`` switches it off."""
+    raw = _cfg().get("maxHold")
+    if isinstance(raw, (int, float)) and float(raw) >= 0:
+        return float(raw)
+    return AUTO_STOP_SECONDS
 
 
 def quiet_floor() -> float:
@@ -2854,6 +2892,17 @@ def listen_loop(
     # and a stale clip from a crashed run are both visible — so the daemon finishes only the
     # Recording it started itself rather than whatever happens to be in flight.
     mine: list[Recording] = []
+    #: Held for the instant a clip is claimed. `on_release`, `on_abort` and the forgotten-key
+    #: watchdog all end the same recording, and without this a tap landing while the watchdog was
+    #: deciding transcribed one clip twice.
+    claiming = threading.Lock()
+
+    def claim(rec: Recording | None = None) -> Recording | None:
+        """Take the in-flight recording, or ``None`` if something else already took it."""
+        with claiming:
+            if not mine or (rec is not None and mine[0] is not rec):
+                return None
+            return mine.pop()
 
     def _say_ready(rec: Recording) -> None:
         """Sound the one cue, once the microphone is genuinely live and the clip is still alive."""
@@ -2888,15 +2937,32 @@ def listen_loop(
         if rec is not None:
             mine.append(rec)
             stream_start(rec)
+            threading.Thread(target=_forgot, args=(rec,), daemon=True).start()
             # ON A THREAD, never inline: `ready` blocks until the device hands over its first
             # buffer, and this runs on the poll loop, which is the only thing watching the key.
             # Usually instant — the pre-roll opened the microphone a quarter of a second ago.
             threading.Thread(target=_say_ready, args=(rec,), daemon=True).start()
 
-    def on_release() -> None:
-        if not mine:
-            return  # nothing of OURS was recording
-        result = finish(mine.pop())
+    def _forgot(rec: Recording) -> None:
+        """Close the microphone for a clip nobody tapped to stop, and type what was said.
+
+        A thread per clip and not a timer in the poll loop: the poll loop is the only thing
+        watching the trigger key, so anything that blocks there is a listener that misses a tap.
+        """
+        limit = auto_stop_seconds()
+        if limit <= 0:
+            return
+        deadline = time.monotonic() + limit
+        while time.monotonic() < deadline:
+            if not mine or mine[0] is not rec:
+                return  # a tap, or an abort, already ended it
+            time.sleep(0.5)
+        if claim(rec) is None:
+            return
+        emit(f"[--] closed the microphone after {limit:.0f}s — you did not tap to stop")
+        _land(finish(rec))
+
+    def _land(result: Result) -> None:
         watch_warm(result.warm)
         if result.problem:
             emit(f"[!] {result.problem}")
@@ -2905,11 +2971,17 @@ def listen_loop(
         # One stat per dictation, off the felt path: the text is already at the cursor by now.
         trim_log()
 
+    def on_release() -> None:
+        rec = claim()
+        if rec is None:
+            return  # nothing of OURS was recording, or the watchdog got there first
+        _land(finish(rec))
+
     def on_abort() -> None:
         """A keyboard shortcut, not speech: throw the audio away without transcribing it."""
-        if not mine:
-            return  # same ownership rule as on_release
-        rec = mine.pop()
+        rec = claim()
+        if rec is None:
+            return
         # Whatever streaming already typed stays typed — there is no un-paste (see `stream_tail`) —
         # but nothing more is added to it. An abort throws away the AUDIO, which is what it is for.
         stop_streaming(rec.wav)

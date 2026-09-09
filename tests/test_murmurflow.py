@@ -1111,8 +1111,14 @@ def test_the_peak_is_the_loudest_sample_in_either_direction(tmp_path):
 # --- a warm server that answers wrongly is bounced ------------------------------------------------
 
 
-def _drive_listener(monkeypatch, results, *, warm_starts=True):
-    """Run `listen_loop` over a fixed list of dictations. Returns (server starts, server stops)."""
+def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=True):
+    """Run `listen_loop` over a fixed list of dictations. Returns (server starts, server stops).
+
+    ``hold`` is `maxHold`, and it is 0 — OFF — for every caller but the one testing it. The
+    forgotten-key watchdog is a thread that waits out the whole hold, and `_Inline` below runs
+    every thread inline, so leaving the default on would park this harness for two minutes per
+    clip. ``release=False`` presses without the second tap, which is the case the watchdog is for.
+    """
     starts: list[int] = []
     stops: list[int] = []
     cues: list[int] = []
@@ -1139,13 +1145,15 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True):
     monkeypatch.setattr(dictate, "ready", lambda _rec, timeout=0.0: True)
     monkeypatch.setattr(dictate, "current", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
     monkeypatch.setattr(dictate, "cue_ready", lambda: cues.append(1))
+    config.set_value("maxHold", hold)
     pending = list(results)
     monkeypatch.setattr(dictate, "finish", lambda _rec: pending.pop(0))
 
     def _bind(on_press, on_release, **_kwargs):
         for _ in range(len(results)):
             on_press()
-            on_release()
+            if release:
+                on_release()
         return "driven"
 
     monkeypatch.setattr(dictate, "bind_trigger", _bind)
@@ -1632,6 +1640,59 @@ def test_a_fully_streamed_sentence_leaves_only_its_final_mark_to_paste():
     assert dictate.end_mark("all of it", "All of it.") == "."  # at the release: the mark is real
     assert dictate.end_mark("all of it.", "All of it.") == ""
     assert dictate.end_mark("all of it", "All of it") == ""
+
+
+def test_a_word_whisper_repeats_into_a_silence_is_not_typed():
+    """Reported as "I did not say *the* three times. I did however say *really* three times."
+
+    Whisper repeats a short word into a silence: hold after saying "the" and the transcript grows
+    "The", "The The", "The The The" over audio in which nothing was said. Every one of those is
+    two passes agreeing, so it used to commit and land at the cursor.
+    """
+    assert dictate.stable_prefix("Well, yeah. The The", "Well, yeah. The The") == "Well, yeah. The"
+    assert dictate.stable_prefix("The The The", "The The The") == "The"
+
+
+def test_a_word_the_speaker_really_did_repeat_still_lands():
+    """The other half of the same report, and the reason the guard is only ever at the END.
+
+    A repeat is refused only while it is still the last word — the one place invention happens.
+    The moment a different word follows, the pair is no longer at the end and both commit.
+    """
+    assert (
+        dictate.stable_prefix("really really really works", "really really really works well")
+        == "really really really works"
+    )
+    # And a clip that simply ENDS on a doubled word loses nothing: it is the tail `finish` types.
+    assert dictate.stream_tail("so it is", "so it is is") == "is"
+
+
+def test_a_forgotten_key_still_gets_its_words(monkeypatch):
+    """The second tap never comes, and the clip is finished anyway — not thrown away.
+
+    Driven through the real `listen_loop`: one press, no release. `_drive_listener` asserts the
+    pending results were consumed, so reaching the end at all is the proof that `finish` ran.
+    """
+    starts, _ = _drive_listener(monkeypatch, [_clip(True)], hold=0.05, release=False)
+    assert starts == [1]  # the daemon started its server and then rescued the clip on its own
+
+
+def test_the_microphone_closes_itself_when_the_second_tap_never_comes(monkeypatch):
+    """ "What happens a lot of times is that I forget to close the microphone."
+
+    The recorder's own `-t` fuse is not this: that one bounds an ORPHAN and throws the audio away.
+    Here the operator is present and simply forgot the second tap, so the clip is finished exactly
+    as the tap would have finished it.
+    """
+    assert dictate.auto_stop_seconds() == dictate.AUTO_STOP_SECONDS == 120.0
+    config.set_value("maxHold", 90)
+    assert dictate.auto_stop_seconds() == 90.0
+    config.set_value("maxHold", 0)
+    assert dictate.auto_stop_seconds() == 0.0  # switched off, and never a negative
+    config.set_value("maxHold", -5)
+    assert dictate.auto_stop_seconds() == dictate.AUTO_STOP_SECONDS
+    # The fuse that bounds an orphan is a different number and stays where it is.
+    assert dictate.MAX_CLIP_SECONDS == 600
 
 
 def test_a_pause_never_types_a_lone_full_stop_where_the_next_word_goes():

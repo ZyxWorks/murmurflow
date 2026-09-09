@@ -1625,8 +1625,40 @@ def test_the_tail_is_what_is_not_at_the_cursor_yet():
     assert dictate.stream_tail("", "the whole thing") == "the whole thing"
 
 
-def test_a_fully_streamed_sentence_leaves_nothing_to_paste():
-    assert dictate.stream_tail("all of it", "All of it.") == ""
+def test_a_fully_streamed_sentence_leaves_only_its_final_mark_to_paste():
+    # The words are all on screen; the full stop is not, because `stable_prefix` never types the
+    # mark touching the end of the audio. At the key release the clip really is over, so it lands.
+    assert dictate.stream_tail("all of it", "All of it.") == "."
+    assert dictate.stream_tail("all of it.", "All of it.") == ""
+    assert dictate.stream_tail("all of it", "All of it") == ""
+
+
+def test_a_pause_does_not_put_a_full_stop_in_the_middle_of_the_sentence():
+    """Reported as "a lot of points in between... it cuts the logic of the sentence".
+
+    A pause is silence, and silence is how whisper decides a sentence ended. The transcript stops
+    growing while the audio does not, two passes agree word for word, and the stopped-growing rule
+    commits the run — with the guessed mark on it. Then the speaker carries on.
+    """
+    assert dictate.stable_prefix("work on my...", "work on my...") == "work on my"
+    assert dictate.stable_prefix("okay so.", "okay so.") == "okay so"
+    # A mark with real audio behind it is a sentence he actually finished: the growing branch
+    # keeps it, so ordinary dictated full stops are not eaten.
+    assert dictate.stable_prefix("i did it. then i", "i did it. then i left") == "i did it. then i"
+
+
+def test_the_final_pass_rewording_the_last_word_does_not_add_one():
+    """Reported as "it just adds another word at the end" when the key is pressed.
+
+    The live pass runs a smaller model than the final one, so the two disagree about the last word
+    more often than about any other. Everything past the alignment is already on screen: the
+    better model's version of it is not new text, it is the same word twice.
+    """
+    assert dictate.stream_tail("i like the design", "I like the designs") == ""
+    assert (
+        dictate.stream_tail("i like the design", "I like the designs and then we left")
+        == "and then we left"
+    )
 
 
 def test_a_reworded_prefix_neither_doubles_nor_loses_the_rest():

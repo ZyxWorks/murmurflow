@@ -51,7 +51,6 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -59,11 +58,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
-import uuid
 import wave
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
 
 from . import config, platforms, speech, whisper
 
@@ -88,13 +85,19 @@ from .speech import (  # noqa: F401
     TOO_SHORT,
     TRIM_BLOCK_SECONDS,
     TRIM_KEEP_SECONDS,
+    Heard,
+    Recording,
+    Setup,
     audio_seconds,
     data_offset,
     is_hallucination,
     join_segments,
+    language_code,
+    multipart,
     peak_dbfs,
     repair_punctuation,
     repair_wav,
+    resolve_bin,
     strip_trailing_hallucination,
     tail_dbfs,
 )
@@ -102,7 +105,6 @@ from .speech import (  # noqa: F401
 # Homebrew's bin dirs. launchd hands an agent a minimal PATH that excludes them, so a bare
 # shutil.which() finds nothing when the listener runs from a plist while working fine in a shell
 # (the TUNNEL-PATH-1 lesson, generalized here rather than re-learned).
-_FALLBACK_BIN_DIRS: tuple[str, ...] = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
 
 # The mic to actually speak into. A default CoreAudio device is often an aggregate
 # ("Push3 + Z1 + Volt2" — a music interface), so ":default" would record the wrong input entirely.
@@ -123,21 +125,6 @@ _STATE_NAME = "dictate.json"
 # zombie. ``None`` whenever the recorder belongs to another process (the `toggle` shape, where one
 # CLI invocation starts the capture and a second one stops it).
 _PROC: subprocess.Popen[bytes] | None = None
-
-
-def resolve_bin(name: str) -> str:
-    """Absolute path to ``name``, searching PATH then Homebrew's dirs; ``''`` if absent.
-
-    Never raises. The fallback dirs matter only under launchd (see :data:`_FALLBACK_BIN_DIRS`).
-    """
-    found = shutil.which(name)
-    if found:
-        return found
-    for directory in _FALLBACK_BIN_DIRS:
-        candidate = Path(directory) / name
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
-    return ""
 
 
 def available() -> tuple[bool, str]:
@@ -271,18 +258,8 @@ def resolve_input() -> tuple[str, str]:
     global _INPUT_CACHE, _INPUT_CACHED_AT
     if _INPUT_CACHE is not None and time.monotonic() - _INPUT_CACHED_AT < INPUT_CACHE_SECONDS:
         return _INPUT_CACHE
-    want = input_name().lower()
     devices = list_inputs()
-    resolved = (platforms.default_input(), "system default")
-    for index, name in devices:
-        if want and want in name.lower():
-            resolved = (str(index), name)
-            break
-    else:
-        for index, name in devices:  # name miss: prefer a real mic over an aggregate interface
-            if "microphone" in name.lower() or "mikrofon" in name.lower():
-                resolved = (str(index), name)
-                break
+    resolved = speech.pick_input(input_name(), devices, default=platforms.default_input())
     if devices:  # never cache a failed enumeration — ffmpeg may simply not have been ready
         _INPUT_CACHE, _INPUT_CACHED_AT = resolved, time.monotonic()
     return resolved
@@ -291,313 +268,11 @@ def resolve_input() -> tuple[str, str]:
 # --- capture ----------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Recording:
-    """An in-flight capture: the ffmpeg pid and the wav it is writing."""
-
-    pid: int
-    wav: Path
-    started_at: float
-
-    @property
-    def seconds(self) -> float:
-        return max(0.0, time.time() - self.started_at)
-
-
-def current() -> Recording | None:
-    """The in-flight recording, or ``None``. Stale markers (dead pid) are cleaned up and ignored."""
-    path = state_path()
-    try:
-        raw = json.loads(path.read_text("utf-8"))
-        rec = Recording(int(raw["pid"]), Path(raw["wav"]), float(raw["started_at"]))
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    try:
-        os.kill(rec.pid, 0)  # signal 0 = liveness probe, kills nothing
-    except (OSError, ProcessLookupError):
-        path.unlink(missing_ok=True)
-        return None
-    return rec
-
-
-def start() -> Recording | None:
-    """Begin capturing the mic to a fresh 16kHz mono wav; ``None`` if already recording or unable.
-
-    Returns as soon as ffmpeg is spawned — CoreAudio needs ~300ms more before the first sample
-    actually lands (measured; it is a device-start floor, not an ffmpeg tax, so a compiled helper
-    would not beat it). Callers that cue the user should cue on :func:`ready`, not on this
-    return, or the first word is clipped.
-    """
-    if current() is not None:
-        return None
-    ffmpeg = resolve_bin("ffmpeg")
-    if not ffmpeg:
-        return None
-    index, _ = resolve_input()
-    wav = _scratch_dir() / f"dictate-{int(time.time())}-{uuid.uuid4().hex[:8]}.wav"
-    cmd = [
-        ffmpeg,
-        "-nostdin",
-        "-loglevel",
-        "error",
-        # A HARD CEILING on one clip, and it is a privacy control, not a convenience. ffmpeg is
-        # spawned with `start_new_session=True` so it survives its parent: kill the daemon (launchd
-        # restart, a crash, `kickstart -k`) while a clip is running and nothing ever stops it. Found
-        # live in development — THREE orphaned recorders, 4.5 hours each, 1.4 GB of recorded
-        # voice on disk and the microphone hot the whole time, which is the exact incident this
-        # product exists not to cause. `-t` makes the recorder bound its own life, with no
-        # supervisor needed and nothing to remember.
-        "-t",
-        str(MAX_CLIP_SECONDS),
-        *platforms.capture_args(index),
-        # ffmpeg's avfoundation input keeps exactly ONE pending audio buffer and releases the
-        # previous one whenever a new buffer arrives before its reader has taken it, so a little
-        # scheduling jitter silently costs samples. Measured here: ~11% of every capture, on the
-        # built-in mic, on an aggregate interface AND on a pure-software loopback with no hardware
-        # clock at all — so it is the input device implementation, not the microphone. It is also
-        # unreachable from the CLI: identical loss whether ffmpeg resamples and converts or copies
-        # raw bytes, and `-thread_queue_size` changes nothing.
-        #
-        # The damage is not the missing samples themselves but WHERE the hole goes. ffmpeg takes
-        # the timestamps from the buffers it did get, so the gap is spliced out and the whole
-        # sentence is handed to whisper ~11% too fast. `async=1` fills the gaps instead of closing
-        # them, which keeps the clip on real time (measured 87% -> 98% of the hold) and stops
-        # speech being sped up. It cannot bring the lost samples back; recovering those means
-        # leaving avfoundation for a ctypes CoreAudio recorder, which is not worth it while
-        # transcripts are this good.
-        "-af",
-        "aresample=async=1",
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        # Write every packet straight through instead of buffering. Without this ffmpeg holds ~2s
-        # of audio in memory before the file grows, so `ready()` cannot tell that the mic went live
-        # until long after it did — so the "start talking" cue arrives two seconds late, by which
-        # point half the sentence has already been said into a microphone that was not listening.
-        "-flush_packets",
-        "1",
-        "-y",
-        str(wav),
-    ]
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,  # survive the caller; we stop it explicitly by pid
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    global _PROC
-    _PROC = proc  # so stop() can REAP it — see the zombie note there
-    rec = Recording(proc.pid, wav, time.time())
-    with contextlib.suppress(OSError):
-        state_path().write_text(
-            json.dumps({"pid": rec.pid, "wav": str(rec.wav), "started_at": rec.started_at}),
-            "utf-8",
-        )
-    return rec
-
-
-def ready(rec: Recording, *, timeout: float = 2.0) -> bool:
-    """Block until the wav has actual audio frames in it (or ``timeout``). ``True`` if it does.
-
-    The ~300ms CoreAudio start-up is invisible only if the cue fires when the mic is
-    genuinely live. A 44-byte wav is a header with no samples yet.
-    """
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            if rec.wav.stat().st_size > 1024:
-                return True
-        except OSError:
-            pass
-        time.sleep(0.02)
-    return False
-
-
-def _exited(pid: int) -> bool:
-    """True once the recorder with ``pid`` is really gone — zombies included.
-
-    ``os.kill(pid, 0)`` is NOT enough: a child that has exited but not been reaped is a zombie, and
-    signalling a zombie SUCCEEDS. Polling it therefore never observes the exit, which cost a flat
-    two seconds on every single dictation (measured: ffmpeg itself is gone in ~34ms) before the
-    loop gave up and SIGKILLed a process that had been dead the whole time. When the recorder is
-    our own child we reap it with ``waitpid``; when it is not (``toggle`` starts it in one CLI
-    invocation and stops it in another) no zombie can exist for us, so signal-0 is accurate.
-    """
-    proc = _PROC
-    if proc is not None and proc.pid == pid:
-        return proc.poll() is not None
-    try:
-        os.waitpid(pid, os.WNOHANG)
-    except ChildProcessError:
-        pass  # not our child: signal-0 below is authoritative
-    except OSError:
-        return True
-    try:
-        os.kill(pid, 0)
-    except (OSError, ProcessLookupError):
-        return True
-    return False
-
-
 #: What a wav header is when nothing else is in it: `RIFF....WAVE` + a 16-byte `fmt ` chunk.
 #: A FLOOR, never the answer — see :func:`data_offset`.
-def stop(rec: Recording | None = None) -> Path | None:
-    """Stop the in-flight capture and return the finished wav (``None`` if nothing was recording).
-
-    SIGINT (not SIGKILL) so ffmpeg writes the RIFF trailer — a killed ffmpeg leaves a wav whose
-    header claims zero length and whisper decodes it as silence. This sits directly on the felt
-    latency (it runs the instant the key is released), so exit is detected by REAPING
-    the child rather than polling it — see :func:`_exited`.
-    """
-    global _PROC
-    rec = rec or current()
-    if rec is None:
-        return None
-    with contextlib.suppress(OSError, ProcessLookupError):
-        os.kill(rec.pid, signal.SIGINT)
-    deadline = time.time() + 2.0
-    while time.time() < deadline:
-        if _exited(rec.pid):
-            break
-        time.sleep(0.01)
-    else:  # never exited — force it, the trailer is lost but a truncated wav still decodes
-        with contextlib.suppress(OSError, ProcessLookupError):
-            os.kill(rec.pid, signal.SIGKILL)
-    if _PROC is not None and _PROC.pid == rec.pid:
-        _PROC = None
-    _clear_state_for(rec.pid)
-    if not rec.wav.is_file():
-        return None
-    repair_wav(rec.wav)  # a recorder that had to be killed still leaves a decodable clip
-    return rec.wav
-
-
-def reap_orphans() -> int:
-    """Stop every recorder left behind by a previous run, and delete its audio. Returns how many.
-
-    A recorder is spawned with ``start_new_session=True`` so it outlives the call that started it —
-    which also means it outlives the DAEMON. A launchd restart, a crash or a ``kickstart -k`` in the
-    middle of a clip leaves ffmpeg running forever with the microphone open: found live on the
-    machine as three recorders, 4.5 hours each, 1.4 GB of recorded voice on disk. `-t`
-    (:data:`MAX_CLIP_SECONDS`) bounds the damage; this ends it, because a daemon that is only now
-    starting cannot own a clip from before it existed.
-
-    Matched on the exact scratch-path pattern this module writes, so no other ffmpeg on the machine
-    is ever a candidate. Best-effort and silent on any failure — a reaper must never keep the daemon
-    from starting.
-    """
-    scratch = _scratch_dir()
-    reaped = 0
-    try:
-        pattern = f"-y {scratch}/dictate-"
-        found = subprocess.run(
-            # `--` IS LOad-BEARING, and its absence is why this reaper never reaped anything. The
-            # pattern begins with `-y`, so without the guard pgrep parses it as its own option and
-            # exits with "illegal option -- y" before matching a single process. It failed silently
-            # in exactly the shape this function is written to tolerate — empty stdout, no raise —
-            # so every daemon start reported nothing to reap while an orphan held the microphone
-            # open. Found live: one recorder open since 4:03pm, writing
-            # to a wav that had already been deleted, with the mic indicator lit the whole time.
-            ["pgrep", "-f", "--", pattern],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        pids = [int(line) for line in found.stdout.split() if line.strip().isdigit()]
-        for pid in pids:
-            if pid == os.getpid():
-                continue
-            with contextlib.suppress(OSError, ProcessLookupError):
-                os.kill(pid, signal.SIGINT)  # SIGINT, so the wav still gets its RIFF trailer
-                reaped += 1
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return reaped
-    # The audio goes too: a clip nobody is waiting for has no transcription to outlive, and the
-    # contract is that your voice does not sit on disk (`keepAudio` keeps ONE file,
-    # deliberately, and it is not named like these).
-    with contextlib.suppress(OSError):
-        for wav in scratch.glob("dictate-*.wav"):
-            wav.unlink(missing_ok=True)
-    state_path().unlink(missing_ok=True)
-    return reaped
-
-
-def _clear_state_for(pid: int) -> None:
-    """Drop the in-flight marker, but ONLY if it still describes ``pid``.
-
-    A second surface may answer on a worker thread while a new clip starts, which means the NEXT
-    recording can already be running by the time the previous one is stopped. Unlinking
-    unconditionally orphaned it — ffmpeg still capturing, ``current()`` reporting nothing — so the
-    clip already in flight could never be finished. An unreadable marker is cleared,
-    since a marker nobody can parse is worse than none.
-    """
-    try:
-        raw = json.loads(state_path().read_text("utf-8"))
-        if int(raw["pid"]) != pid:
-            return
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
-    state_path().unlink(missing_ok=True)
 
 
 # --- warm transcription -----------------------------------------------------------------------
-
-
-def server_url() -> str:
-    return f"http://127.0.0.1:{port()}"
-
-
-def server_up() -> bool:
-    """True if a warm whisper-server answers on the loopback port."""
-    try:
-        with urllib.request.urlopen(f"{server_url()}/", timeout=0.5):
-            return True
-    except (urllib.error.URLError, OSError):
-        return False
-
-
-#: How long an ownership answer is trusted for. See :func:`ours` — the question is "who holds this
-#: port", which changes only when a process starts or dies, and asking it costs a `pgrep`.
-OWNERSHIP_SECONDS = 30.0
-
-_OWNERSHIP: dict[int, tuple[float, bool]] = {}
-
-
-def ours() -> bool:
-    """Is the thing listening on our port a whisper-server, rather than whatever got there first.
-
-    **Because the answer decides where recorded audio is sent.** The port is predictable, so any
-    local process can bind it first, receive every clip, and answer with text that gets typed at
-    the cursor. A socket that accepts a connection proves nothing about who is on the other end.
-
-    So the port has to be held by a `whisper-server` process. Only one process can bind a port, so
-    finding one there IS the answer. Cached for :data:`OWNERSHIP_SECONDS` because this sits on the
-    partial path, which asks it about once a second, and `pgrep` is a process spawn.
-    """
-    at = port()
-    now = time.monotonic()
-    cached = _OWNERSHIP.get(at)
-    if cached is not None and now - cached[0] < OWNERSHIP_SECONDS:
-        return cached[1]
-    try:
-        found = subprocess.run(
-            ["pgrep", "-f", f"whisper-server.*--port {at}"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        verdict = bool(found.stdout.split())
-    except (OSError, subprocess.SubprocessError):
-        verdict = False  # cannot tell: fail CLOSED, because the cost of being wrong is the audio
-    _OWNERSHIP[at] = (now, verdict)
-    return verdict
 
 
 def server_answers() -> tuple[bool, str]:
@@ -624,7 +299,7 @@ def server_answers() -> tuple[bool, str]:
                 handle.setsampwidth(2)
                 handle.setframerate(16000)
                 handle.writeframes(b"\x00" * 6400)  # 0.2s of digital silence
-            body, content_type = _multipart(probe, {"response_format": "json", "temperature": "0"})
+            body, content_type = multipart(probe, {"response_format": "json", "temperature": "0"})
             request = urllib.request.Request(
                 f"{server_url()}/inference", data=body, headers={"Content-Type": content_type}
             )
@@ -641,276 +316,98 @@ def server_answers() -> tuple[bool, str]:
         return False, str(error)[:120]
 
 
-def serve_command(model: str = "") -> list[str] | None:
-    """The argv that starts a warm whisper-server, or ``None`` if it cannot be built.
+# --- the recorder, in this install's vocabulary --------------------------------------------------
+#
+# The engine below is byte-identical with zyx's copy and knows nothing about avfoundation or dshow:
+# `capture` is this platform's own input arguments with the device already resolved, which is
+# exactly the seam that made the Windows port four files instead of a fork.
 
-    ONE server, and it answers both the live passes and the final transcription. There used to be
-    a second one holding a small model for the partials; it was retired when the live pass began
-    typing punctuation, because the marks it chose were the marks the operator kept.
+
+def current() -> Recording | None:
+    """The in-flight recording, or ``None``. Stale markers (dead pid) are cleaned up and ignored."""
+    return speech.current(state_path())
+
+
+def start() -> Recording | None:
+    """Capture the mic to a fresh 16kHz mono wav; ``None`` if already recording or unable."""
+    device, _name = resolve_input()
+    return speech.start(
+        ffmpeg=resolve_bin("ffmpeg"),
+        capture=platforms.capture_args(device),
+        scratch=_scratch_dir(),
+        state=state_path(),
+    )
+
+
+def ready(rec: Recording, *, timeout: float = 2.0) -> bool:
+    """Block until the wav has actual audio frames in it (or ``timeout``). ``True`` if it does."""
+    return speech.ready(rec, timeout=timeout)
+
+
+def stop(rec: Recording | None = None) -> Path | None:
+    """Stop the capture and return the finished wav (``None`` if nothing was recording)."""
+    return speech.stop(rec, state=state_path())
+
+
+def reap_orphans() -> int:
+    """Stop every recorder left behind by a previous run, and delete its audio. Returns how many."""
+    return speech.reap_orphans(scratch=_scratch_dir(), state=state_path())
+
+
+def _setup(model: str = "") -> speech.Setup:
+    """This install's answer to every question the shared engine asks. See :class:`speech.Setup`.
+
+    ONE place where MurmurFlow's vocabulary meets the engine's, so nothing below reads a setting and
+    the engine can stay one file - byte-identical with zyx's copy of it.
     """
-    binary = resolve_bin("whisper-server")
-    model = model or whisper.model()
-    if not binary or not model:
-        return None
-    return [
-        binary,
-        "-m",
-        model,
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(port()),
-        "-t",
-        whisper.threads(),
-        "--convert",  # let the server transcode anything ffmpeg reads, not just wav
-        # Stop whisper emitting "*sad*"/"[MUSIC]"-style sound annotations at the SOURCE rather than
-        # filtering them afterwards. `is_hallucination` stays as the backstop: -sns reduces these
-        # but does not eliminate them.
-        "-sns",
-        # EVERY CLIP IS ITS OWN CLIP. whisper.cpp keeps the text it decoded as context for what it
-        # decodes next, and a SERVER keeps it across REQUESTS — so yesterday's sentence primes
-        # today's, and under streaming, where one dictation is ~100 overlapping passes over the
-        # same growing audio, it primes itself with a hundred near-copies of what it just said.
-        # Measured on a 145s clip, same audio, same prompt, twice in a row: 543 characters one
-        # run and 1108 the next, one of them collapsing into "And. Your. Job as a founder." nine
-        # times over. That is the report — "a lot of points in between, it cuts the logic of the
-        # sentence" — and it is also why the same words came out well before the stream existed.
-        # `-mc 0` stores no text context, and the same two runs then came back CHARACTER FOR
-        # CHARACTER identical, in whole clauses, with no repetition: "...that fits your workflow,
-        # that you connect with that company, you like how they do things, and then go from there."
-        #
-        # What it costs is real and small: past 30s whisper decodes each window without the
-        # previous window's words to lean on. A dictation is one window, the vocabulary prompt is
-        # sent per request and still applies, and an unstable transcript is not worth a smoother
-        # seam at 0:30.
-        "-mc",
-        "0",
-    ]
+    return speech.Setup(
+        whisper_server=resolve_bin("whisper-server"),
+        model=model or whisper.model(),
+        threads=whisper.threads(),
+        port=port(),
+        scratch=_scratch_dir(),
+        vocabulary=whisper.vocabulary(),
+        language=whisper.language(),
+    )
+
+
+def server_url() -> str:
+    return speech.server_url(port())
+
+
+def server_up() -> bool:
+    """True if anything answers on the loopback port - see :func:`ours` for WHO."""
+    return speech.server_up(port())
+
+
+def ours() -> bool:
+    """Is a whisper-server what holds our port. See :func:`speech.ours`."""
+    return speech.ours(port())
+
+
+def forget_ownership() -> None:
+    """Drop the cached ownership verdict (a server was just started or stopped)."""
+    speech.forget_ownership()
+
+
+def serve_command(model: str = "") -> list[str] | None:
+    """The argv that starts the warm whisper-server, or ``None`` if it cannot be built."""
+    return speech.serve_command(_setup(model))
 
 
 def start_server(*, wait: float = 60.0) -> bool:
-    """Spawn the warm whisper-server if it is not already up; block until it answers.
-
-    Loading large-v3-turbo takes a few seconds, which is exactly the cost we are paying ONCE here
-    so that every subsequent dictation does not. Returns True if a server is answering.
-
-    **The ``cwd`` is the whole warm path**, and leaving it out is how MurmurFlow quietly lost it.
-    ``--convert`` (see :func:`serve_command`) makes whisper-server shell out to ffmpeg, and ffmpeg
-    writes its converted copy into the server's WORKING DIRECTORY. Started from a shell that
-    directory is the repo and everything works, which is why this survived every manual test. Under
-    the installed agent the daemon inherits ``/`` — not writable — so the conversion fails, the
-    server answers **every single request** with ``500 {"error":"FFmpeg conversion failed."}``, and
-    every clip silently falls through to the cold CLI. Measured live 2026-08-18 with one server on
-    ``/`` and one on a writable dir, same binary, same flags, same model, same request: 500 in 0.03s
-    against a clean transcript in 2.17s.
-
-    Nothing on screen says so. The transcripts still arrive, just slower and — because the cold path
-    carries no server-side prompt and reports no confidence — measurably worse, with the two silence
-    gates weakened to boot. `watch_warm` in :func:`listen_loop` faithfully bounced the server after
-    every second cold clip, all day, into the same broken working directory.
-
-    So the server is started in :func:`_scratch_dir`, which is ours, writable, and already the one
-    place recorded voice lives — whisper-server deletes its converted copy when it is done, so the
-    "empty between sentences" promise there still holds.
-    """
-    if server_up():
-        # Adopted only if a whisper-server is what is holding the port — see :func:`ours`. Anything
-        # else answering there would be handed recorded audio and believed about what was said.
-        return ours()
-    cmd = serve_command()
-    if cmd is None:
-        return False
-    try:
-        subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            cwd=str(_scratch_dir()),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    deadline = time.time() + wait
-    while time.time() < deadline:
-        if server_up():
-            return True
-        time.sleep(0.1)
-    return False
+    """Spawn the warm whisper-server if it is not already up; block until it answers."""
+    return speech.start_server(_setup(), wait=wait)
 
 
 def stop_server() -> int:
-    """Stop the warm whisper-server this install started. Returns how many were stopped.
-
-    The port ABOVE ours is swept too, and it is not a second server of ours: an older MurmurFlow
-    ran a small model there for the live pass, and a version that no longer starts one must still
-    stop the one it finds, or ~488 MB stays resident until the machine is next restarted.
-
-    ``start_server`` detaches it with ``start_new_session=True`` so it outlives the listener, which
-    is the whole point while dictation is installed — and a leak the moment it is not: 1.8 GB
-    resident with nothing left to ask it anything, until the next reboot. BOTH of ours, matched on
-    OUR two ports, because a whisper-server on any other port belongs to somebody else.
-    """
-    stopped = 0
-    for which in (port(), port() + 1):
-        try:
-            found = subprocess.run(
-                ["pgrep", "-f", f"whisper-server.*--port {which}"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        for token in found.stdout.split():
-            with contextlib.suppress(ValueError, ProcessLookupError, PermissionError):
-                os.kill(int(token), signal.SIGTERM)
-                stopped += 1
-    return stopped
-
-
-def _multipart(wav: Path, fields: dict[str, str]) -> tuple[bytes, str]:
-    """Build a multipart/form-data body for whisper-server's ``/inference`` (stdlib only)."""
-    boundary = f"----murmurflow{uuid.uuid4().hex}"
-    parts: list[bytes] = []
-    for key, value in fields.items():
-        parts.append(
-            f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n'
-            f"{value}\r\n".encode()
-        )
-    parts.append(
-        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
-        f'filename="{wav.name}"\r\nContent-Type: audio/wav\r\n\r\n'.encode()
-    )
-    parts.append(wav.read_bytes())
-    parts.append(f"\r\n--{boundary}--\r\n".encode())
-    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
-
-
-# An older whisper-server answers with the language NAME and no `language_probabilities` to read a
-# code off. Only the names anybody actually lists in `languages` need to be here; anything else
-# falls through as itself, and an unrecognised language is compared as whisper spelled it.
-_LANGUAGE_CODES: dict[str, str] = {
-    "english": "en",
-    "german": "de",
-    "french": "fr",
-    "spanish": "es",
-    "italian": "it",
-    "dutch": "nl",
-    "portuguese": "pt",
-    "polish": "pl",
-    "russian": "ru",
-    "japanese": "ja",
-    "chinese": "zh",
-    "korean": "ko",
-}
-
-
-def language_code(name: str) -> str:
-    """``"german"``, ``"German"`` and ``"de"`` are one answer; anything else passes through as itself.
-
-    One seam, so the gate that reads what whisper detected and the gate that reads what the user
-    said they speak can never disagree about what a language is called.
-    """
-    key = str(name).strip().lower()
-    return _LANGUAGE_CODES.get(key, key)
-
-
-class Heard(NamedTuple):
-    """A transcript plus how sure whisper was that it was listening to speech at all.
-
-    ``confidence`` is whisper's own ``detected_language_probability``: how strongly the audio looks
-    like ANY one human language. Speech scores 0.97-0.999 (measured: a 1.2s English slice 0.969, a
-    single "Okay." 0.981, a German sentence 0.999); room tone, pink noise and digital silence score
-    0.32-0.45, because there is no language in them to be sure about. It is ``1.0`` — deliberately
-    "certain" — whenever the signal is unavailable (cold path, forced language, older server), so a
-    missing score can never silently swallow something that was said. See :data:`SPEECH_CONFIDENCE`.
-    """
-
-    text: str
-    confidence: float = 1.0
-    language: str = ""
-    #: Did the WARM server answer this one? A wedged server is invisible otherwise — it answers
-    #: every request with an error, every clip quietly takes the cold path, and the two gates that
-    #: read a confidence and a language are weaker there. That degradation has to be legible in the
-    #: log, or the next person to hit it is also debugging blind. ``None`` = nothing was decoded.
-    warm: bool | None = None
-
-
-def _confidence(payload: str) -> tuple[str, float, str]:
-    """Pull ``(text, detected_language_probability, language)`` out of verbose_json. Never raises.
-
-    ``strict=False`` is load-bearing, not defensive dressing: whisper-server puts the transcript's
-    trailing newline into the JSON string RAW, which is invalid JSON that ``json.loads`` rejects
-    outright. A strict parse fails on exactly the short utterances this gate exists to judge.
-    """
-    try:
-        data = json.loads(payload, strict=False)
-    except (ValueError, TypeError):
-        # Not JSON at all — an older server answering a verbose_json request with plain text. Take
-        # it as the transcript and claim no opinion rather than discarding a real sentence.
-        return payload.strip(), 1.0, ""
-    if not isinstance(data, dict):
-        return payload.strip(), 1.0, ""
-    text = str(data.get("text", "")).strip()
-    raw = data.get("detected_language_probability")
-    # A CODE, NEVER THE NAME. whisper-server reports `"language": "english"` while a person writes
-    # `["de", "en"]` in their config, so the gate below compared "english" against {"de","en"} and
-    # would have rejected every sentence he ever spoke the moment the warm server came back up —
-    # a gate that is inert today and catastrophic tomorrow. `language_probabilities` is keyed by
-    # the codes themselves, so the top key IS the answer with no table to keep in sync.
-    probabilities = data.get("language_probabilities")
-    spoken = ""
-    if isinstance(probabilities, dict) and probabilities:
-        numeric = {k: v for k, v in probabilities.items() if isinstance(v, (int, float))}
-        if numeric:
-            spoken = str(max(numeric, key=lambda k: numeric[k])).strip().lower()
-    if not spoken:
-        spoken = language_code(str(data.get("language", "") or ""))
-    return text, float(raw) if isinstance(raw, (int, float)) else 1.0, spoken
+    """Stop the warm whisper-server this install started. Returns how many were stopped."""
+    return speech.stop_server(port())
 
 
 def transcribe_warm(wav: Path, *, timeout: float = 60.0, language: str = "") -> Heard:
-    """Transcribe via the warm server; empty text if it is not up or errors. Never raises.
-
-    Reuses :mod:`whisper`'s language and vocabulary decisions, so every surface that transcribes
-    hears your own proper nouns the same way.
-
-    Asks for ``verbose_json`` rather than ``text`` purely to get the language score back; the
-    transcript is identical either way.
-
-    ``language`` overrides the configured one for THIS request, and it exists for streaming.
-    Detecting the language is a whole extra encoder pass — measured at 0.75s of every 2.2s request
-    on an M4 Pro — and a clip does not change language halfway through, so the partials after the
-    first pin themselves to what the first one heard. See :func:`_stream_loop`.
-
-    **It asks who holds the port before it sends anything** (:func:`ours`). Adopting a server was
-    guarded and SENDING was not, which is the wrong half: a process that binds :func:`port` first is
-    handed every clip you record and believed about what was in it — and what comes back is TYPED
-    AT YOUR CURSOR. Cached, so this is a dict read on the partial path and a `pgrep` twice a minute.
-    """
-    if not wav.is_file() or not ours():
-        return Heard("")
-    fields = {
-        "response_format": "verbose_json",
-        "language": language or whisper.language(),
-        "prompt": whisper.vocabulary(),
-        "temperature": "0",
-    }
-    try:
-        body, content_type = _multipart(wav, fields)
-    except OSError:
-        return Heard("")
-    request = urllib.request.Request(
-        f"{server_url()}/inference", data=body, headers={"Content-Type": content_type}
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = response.read().decode("utf-8", errors="ignore")
-    except (urllib.error.URLError, OSError, ValueError):
-        return Heard("")
-    return Heard(*_confidence(payload), warm=True)
+    """Transcribe via the warm server; empty text if it is not up or errors. Never raises."""
+    return speech.transcribe_warm(wav, _setup(), timeout=timeout, language=language)
 
 
 def transcribe(wav: Path, *, timeout: float = 60.0) -> Heard:
@@ -2420,7 +1917,7 @@ def listener_pid() -> int:
         pid = int(listener_lock_path().read_text("utf-8").strip())
     except (OSError, ValueError):
         return 0
-    if pid <= 0 or pid == os.getpid() or _exited(pid):
+    if pid <= 0 or pid == os.getpid() or speech._exited(pid):
         return 0
     return pid
 

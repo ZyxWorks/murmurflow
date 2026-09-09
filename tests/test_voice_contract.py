@@ -18,6 +18,8 @@ import inspect
 import json
 from pathlib import Path
 
+import pytest
+
 from murmurflow import dictate, speech
 
 CONTRACT = json.loads(
@@ -41,7 +43,7 @@ def test_every_threshold_still_holds_its_measured_value() -> None:
 def test_the_warm_request_still_asks_whisper_the_same_question() -> None:
     """Read off the source, because the alternative is a live whisper-server in the suite."""
     spec = CONTRACT["whisper_warm_request"]
-    src = inspect.getsource(dictate.transcribe_warm)
+    src = inspect.getsource(speech.transcribe_warm)
     for field in spec["required_fields"]:
         assert f'"{field}"' in src, f"the warm request dropped `{field}`: {spec['why']}"
     assert f'"{spec["response_format"]}"' in src
@@ -58,16 +60,16 @@ def test_the_warm_server_is_started_where_it_can_write() -> None:
     spec = CONTRACT["whisper_server_flags"]
     # Read the SOURCE, not a call: `serve_command()` returns None without a resolvable binary
     # and model, so calling it would pass vacuously on any machine that has neither.
-    src = inspect.getsource(dictate.serve_command)
+    src = inspect.getsource(speech.serve_command)
     for flag in spec["must_contain"]:
         assert f'"{flag}"' in src, f"{flag} missing: {spec['why']}"
     if spec["must_run_with_cwd"]:
-        assert "cwd=" in inspect.getsource(dictate.start_server), spec["why"]
+        assert "cwd=" in inspect.getsource(speech.start_server), spec["why"]
 
 
 def test_capture_still_stays_on_real_time() -> None:
     spec = CONTRACT["ffmpeg_capture"]
-    src = inspect.getsource(dictate.start)
+    src = inspect.getsource(speech.start)
     for token in spec["must_contain"]:
         assert f'"{token}"' in src, f"capture dropped `{token}`: {spec['why']}"
 
@@ -103,28 +105,42 @@ def test_boilerplate_appended_to_a_real_sentence_never_survives_tidy() -> None:
 
 # --- the core itself, not just the measurements -------------------------------------------------
 
-_CORE = Path(__file__).resolve().parents[1] / "murmurflow" / "speech.py"
-_DIGEST = Path(__file__).resolve().parents[1] / "voice-core.sha256"
+#: Every file that is byte-identical in zyx, and the one command that keeps them so.
+SHARED = ("speech.py", "gesture.py")
+_HERE = Path(__file__).resolve().parents[1]
 
 
-def test_the_shared_speech_core_is_the_copy_both_tools_carry() -> None:
+def _core(name: str) -> Path:
+    return _HERE / "murmurflow" / name
+
+
+def _recorded(name: str) -> str:
+    for line in (_HERE / "voice-core.sha256").read_text("utf-8").splitlines():
+        if line.strip().endswith(name):
+            return line.split()[0]
+    raise AssertionError(f"{name} has no digest in voice-core.sha256")
+
+
+@pytest.mark.parametrize("name", SHARED)
+def test_the_shared_files_are_the_copies_both_tools_carry(name: str) -> None:
     """ONE COPY, TWO TOOLS — and a copy nothing checks is two copies again in three weeks.
 
     `voice-contract.json` pins the MEASUREMENTS and it did its job: the thresholds never drifted.
     What drifted was everything around them — a wav header offset, a hallucination table, a
-    trailing-silence trim, a level scan — because "the same code in both repos" was a habit, and
-    habits lose to three weeks and 24 commits.
+    trailing-silence trim, a level scan, and a hold floor that waited its remainder here and the
+    whole floor again there — because "the same code in both repos" was a habit, and habits lose to
+    three weeks and 24 commits.
 
-    So the shared layer is ONE FILE (`murmurflow/speech.py`) and it is byte-identical in zyx. This
-    test cannot see zyx, and does not try to: it checks that the file has not been edited since the
-    two were last made equal. Editing it is fine and expected; editing it and leaving the other copy
-    behind is what this names. The ritual is `make voice-sync`, run from the zyx checkout.
+    So the shared layer is TWO FILES (`speech.py`, the audio and the transcript; `gesture.py`, what
+    a hand does with one key) and both are byte-identical in zyx. This test cannot see zyx and does
+    not try: it checks that neither file has been edited since the two were last made equal. The
+    ritual is `make voice-sync`, run from the zyx checkout.
     """
-    digest = hashlib.sha256(_CORE.read_bytes()).hexdigest()
-    assert digest == _DIGEST.read_text("utf-8").split()[0], (
-        "murmurflow/speech.py changed. It is the SHARED speech core: zyx carries the same file byte "
-        "for byte. Run `make voice-sync` in the zyx checkout (it copies the file and rewrites the "
-        "digest in both repos), then commit both."
+    digest = hashlib.sha256(_core(name).read_bytes()).hexdigest()
+    assert digest == _recorded(name), (
+        f"murmurflow/{name} changed. It is SHARED: zyx carries the same file byte for byte. Run "
+        "`make voice-sync` in the zyx checkout (it copies the file and rewrites the digest in both "
+        "repos), then commit both."
     )
 
 
@@ -135,12 +151,13 @@ def test_nothing_in_the_shared_core_asks_a_question_about_this_install() -> None
     them from different places, so one line of config in `speech` is a line that has to differ — and
     one line that differs is a file that is no longer shared.
     """
-    src = _CORE.read_text("utf-8")
-    for forbidden in ("import config", "config.flag", "_cfg(", "quiet_floor()", "os.environ"):
-        assert forbidden not in src, (
-            f"`{forbidden}` in murmurflow/speech.py: the shared core reads no configuration. "
-            "Take the value as an argument and let each tool answer for its own install."
-        )
+    for name in SHARED:
+        src = _core(name).read_text("utf-8")
+        for forbidden in ("import config", "config.flag", "_cfg(", "quiet_floor()", "os.environ"):
+            assert forbidden not in src, (
+                f"`{forbidden}` in murmurflow/{name}: a shared file reads no configuration. "
+                "Take the value as an argument and let each tool answer for its own install."
+            )
 
 
 def test_the_polite_one_word_sentences_are_not_in_the_shared_table() -> None:

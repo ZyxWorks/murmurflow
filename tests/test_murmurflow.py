@@ -28,7 +28,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from murmurflow import cli, config, dictate, platforms, service, whisper
+from murmurflow import cli, config, dictate, gesture, platforms, service, speech, whisper
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +39,7 @@ def _isolated_home(tmp_path, monkeypatch):
     # Who holds a port is cached across calls, and the cache is module state. On a DEVELOPER's Mac
     # a real whisper-server is on that port, so a stale True leaked into other tests and hid a
     # failure that only CI — where nothing is listening — could see.
-    dictate._OWNERSHIP.clear()
+    dictate.forget_ownership()
     # And an unclaimed pre-roll is module state too: one left behind makes the NEXT test's
     # `preroll` a no-op and its `preroll_claim` wait out the full claim timeout.
     dictate._PREROLL = None
@@ -312,7 +312,7 @@ def test_a_second_listener_is_refused_and_told_who_has_the_key(monkeypatch):
     # The doubled-sound bug: the login agent is live and you run `murmurflow listen` to watch it.
     dictate.listener_lock_path().parent.mkdir(parents=True, exist_ok=True)
     dictate.listener_lock_path().write_text("4242", "utf-8")
-    monkeypatch.setattr(dictate, "_exited", lambda pid: False)  # 4242 is alive
+    monkeypatch.setattr(speech, "_exited", lambda pid: False)  # 4242 is alive
     assert dictate.listener_pid() == 4242
     assert dictate.claim_listener() == 4242
 
@@ -321,7 +321,7 @@ def test_a_lock_left_by_a_crash_never_blocks_the_next_start(monkeypatch):
     # A hard reboot must not leave dictation needing a file deleted by hand.
     dictate.listener_lock_path().parent.mkdir(parents=True, exist_ok=True)
     dictate.listener_lock_path().write_text("4242", "utf-8")
-    monkeypatch.setattr(dictate, "_exited", lambda pid: True)  # 4242 is gone
+    monkeypatch.setattr(speech, "_exited", lambda pid: True)  # 4242 is gone
     assert dictate.listener_pid() == 0
     assert dictate.claim_listener() == 0
     assert dictate.listener_lock_path().read_text("utf-8") == str(os.getpid())
@@ -448,7 +448,7 @@ def test_the_hold_floor_waits_only_the_remainder_of_itself(monkeypatch):
         clock[0] += seconds
 
     monkeypatch.setattr(
-        hotkey, "time", types.SimpleNamespace(monotonic=lambda: clock[0], sleep=fake_sleep)
+        gesture, "time", types.SimpleNamespace(monotonic=lambda: clock[0], sleep=fake_sleep)
     )
     monkeypatch.setattr(hotkey, "seconds_since_keydown", lambda: 99.0)  # never a chord
     down = iter([True, False, False])
@@ -728,9 +728,9 @@ def test_a_language_you_do_not_speak_is_a_hallucination():
 
 def test_the_server_language_is_read_off_the_body_beside_the_score():
     body = json.dumps({"text": "hallo", "detected_language_probability": 0.99, "language": "de"})
-    assert dictate._confidence(body) == ("hallo", 0.99, "de")
+    assert speech.confidence(body) == ("hallo", 0.99, "de")
     # An older server, or the cold path: no opinion, and no opinion is never a refusal.
-    assert dictate._confidence("just text") == ("just text", 1.0, "")
+    assert speech.confidence("just text") == ("just text", 1.0, "")
 
 
 # --- the platform seam ------------------------------------------------------------------------
@@ -956,11 +956,11 @@ def test_the_language_gate_reads_a_code_even_when_the_server_says_a_name(monkeyp
             "language_probabilities": {"en": 0.99, "de": 0.004},
         }
     )
-    text, confidence, spoken = dictate._confidence(payload)
+    text, confidence, spoken = speech.confidence(payload)
     assert (text, spoken) == ("hello there", "en")
     assert confidence == 0.99
     # An older server with no probabilities still resolves through the name table.
-    _, _, older = dictate._confidence(json.dumps({"text": "hallo", "language": "german"}))
+    _, _, older = speech.confidence(json.dumps({"text": "hallo", "language": "german"}))
     assert older == "de"
 
 
@@ -1238,11 +1238,11 @@ def test_the_warm_server_is_started_in_a_writable_directory(monkeypatch, tmp_pat
         seen["cmd"], seen["kwargs"] = cmd, kwargs
         raise OSError("not really spawning anything in a test")
 
-    monkeypatch.setattr(dictate, "server_up", lambda _at=0: False)
+    monkeypatch.setattr(speech, "server_up", lambda _port=0: False)
     monkeypatch.setattr(
-        dictate, "serve_command", lambda _m="", _at=0: ["whisper-server", "--convert"]
+        speech, "serve_command", lambda _setup: ["whisper-server", "--convert"]
     )
-    monkeypatch.setattr(dictate.subprocess, "Popen", _popen)
+    monkeypatch.setattr(speech.subprocess, "Popen", _popen)
     assert dictate.start_server() is False
     cwd = Path(str(seen["kwargs"]["cwd"]))
     assert cwd.is_dir(), "the server must not be spawned into a directory that does not exist"
@@ -1633,8 +1633,8 @@ def _tap_the_key(monkeypatch, script, *, is_recording=None):
         clock[0] += gap
         return held
 
-    monkeypatch.setattr(hotkey.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(hotkey.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(gesture.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(gesture.time, "sleep", lambda _s: None)
     monkeypatch.setattr(hotkey, "is_trigger_down", _down)
     monkeypatch.setattr(hotkey, "seconds_since_keydown", lambda: 99.0)  # never a chord
     with contextlib.suppress(SystemExit):
@@ -1683,8 +1683,8 @@ def test_a_microphone_that_closed_itself_does_not_cost_the_next_double_tap(monke
             live[0] = False
         return held
 
-    monkeypatch.setattr(hotkey.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(hotkey.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(gesture.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(gesture.time, "sleep", lambda _s: None)
     monkeypatch.setattr(hotkey, "is_trigger_down", _down)
     monkeypatch.setattr(hotkey, "seconds_since_keydown", lambda: 99.0)
     with contextlib.suppress(SystemExit):
@@ -2318,7 +2318,7 @@ def test_an_impostor_on_the_port_is_never_handed_the_audio(monkeypatch):
     assert dictate.ours() is False
     assert dictate.start_server() is False  # and it is never adopted
 
-    dictate._OWNERSHIP.clear()
+    dictate.forget_ownership()
 
     class _Whisper:
         stdout = "4242\n"
@@ -2375,7 +2375,7 @@ def _receipt_at(tmp_path, body):
 
 def test_a_local_checkout_is_reinstalled_from_that_checkout(tmp_path, monkeypatch):
     """`git pull` changes the checkout; the daemon runs the COPY uv made. So install re-copies."""
-    monkeypatch.setattr(cli.dictate, "resolve_bin", lambda _n: "/opt/homebrew/bin/uv")
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda _n: "/opt/homebrew/bin/uv")
     checkout = tmp_path / "murmurflow"
     checkout.mkdir()
     receipt = _receipt_at(
@@ -2394,7 +2394,7 @@ def test_a_local_checkout_is_reinstalled_from_that_checkout(tmp_path, monkeypatc
 
 
 def test_an_install_from_git_or_pypi_is_upgraded_instead(tmp_path, monkeypatch):
-    monkeypatch.setattr(cli.dictate, "resolve_bin", lambda _n: "/opt/homebrew/bin/uv")
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda _n: "/opt/homebrew/bin/uv")
     receipt = _receipt_at(tmp_path, '[tool]\nrequirements = [{ name = "murmurflow" }]\n')
     assert cli._update_command(receipt) == ["/opt/homebrew/bin/uv", "tool", "upgrade", "murmurflow"]
 
@@ -2402,9 +2402,9 @@ def test_an_install_from_git_or_pypi_is_upgraded_instead(tmp_path, monkeypatch):
 def test_no_uv_and_a_corrupt_receipt_both_mean_do_not_update(tmp_path, monkeypatch):
     """An update that cannot run is an inconvenience. An `install` that refuses is a dead tool."""
     receipt = _receipt_at(tmp_path, '[tool]\nrequirements = [{ name = "murmurflow" }]\n')
-    monkeypatch.setattr(cli.dictate, "resolve_bin", lambda _n: "")
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda _n: "")
     assert cli._update_command(receipt) is None
-    monkeypatch.setattr(cli.dictate, "resolve_bin", lambda _n: "/opt/homebrew/bin/uv")
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda _n: "/opt/homebrew/bin/uv")
     assert cli._update_command(_receipt_at(tmp_path, "not toml at all {{{")) is None
 
 
@@ -2628,7 +2628,7 @@ def test_recorded_audio_is_never_sent_to_a_port_a_whisper_server_does_not_hold(
     """The port is predictable, so whoever binds it first receives the clip AND types the answer."""
     wav = tmp_path / "clip.wav"
     _ffmpeg_shaped_wav(wav, seconds_loud=0.5, seconds_quiet=0.0)
-    dictate._OWNERSHIP.clear()
+    dictate.forget_ownership()
     monkeypatch.setattr(
         dictate.subprocess, "run", lambda *_a, **_k: SimpleNamespace(stdout="", returncode=1)
     )

@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import config, dictate, hotkey, platforms, service, whisper
+from . import config, dictate, hotkey, platforms, service, speech, whisper
 
 
 def _out(line: str = "") -> None:
@@ -131,7 +131,7 @@ def _update_command(receipt: Path) -> list[str] | None:
     A LOCAL directory is re-installed from that directory, because that is what a `git pull` just
     changed. Anything else (a git URL, PyPI) is an `upgrade`, which re-resolves it for itself.
     """
-    uv = dictate.resolve_bin("uv")
+    uv = speech.resolve_bin("uv")
     if not uv:
         return None
     try:
@@ -323,9 +323,9 @@ def _doctor(*, verbs: bool = False) -> int:
     Ordered the way it actually fails: no recorder, no transcriber, no model, no permission.
     """
     rows: list[tuple[bool, str, str]] = []
-    ffmpeg = dictate.resolve_bin("ffmpeg")
+    ffmpeg = speech.resolve_bin("ffmpeg")
     rows.append((bool(ffmpeg), f"recorder: {ffmpeg or 'ffmpeg NOT FOUND'}", "brew install ffmpeg"))
-    server = dictate.resolve_bin("whisper-server")
+    server = speech.resolve_bin("whisper-server")
     binary = whisper.found_binary()
     rows.append(
         (
@@ -662,7 +662,7 @@ def _reject(key: str, value: object) -> str:
                 f"server takes the port one above this one."
             )
     elif key == "language":
-        code = dictate.language_code(text)
+        code = speech.language_code(text)
         if code != "auto" and not (len(code) == 2 and code.isalpha()):
             return (
                 f"`{text}` is not a language. Use `auto`, or a two-letter code like `en` or `de` "
@@ -673,7 +673,7 @@ def _reject(key: str, value: object) -> str:
         bad = [
             str(v).strip()
             for v in entries
-            if not (len(code := dictate.language_code(str(v))) == 2 and code.isalpha())
+            if not (len(code := speech.language_code(str(v))) == 2 and code.isalpha())
         ]
         if bad:
             return (
@@ -725,16 +725,16 @@ def _warn(key: str, value: object) -> str:
         # Pin `en`, then have `["de"]` in `languages`, and EVERY clip is thrown away as a language
         # you do not speak — the trigger works, the microphone works, and nothing ever appears.
         spoken = dictate.spoken_languages()
-        if spoken and dictate.language_code(text) not in spoken:
+        if spoken and speech.language_code(text) not in spoken:
             return (
                 f"`languages` says you speak {', '.join(sorted(spoken))}, so every clip decoded as "
-                f"{dictate.language_code(text)} would be thrown away. Add it there, or unset it."
+                f"{speech.language_code(text)} would be thrown away. Add it there, or unset it."
             )
     if key == "polishCommand" and text:
         program = ""
         with contextlib.suppress(ValueError, IndexError):
             program = shlex.split(text)[0]
-        if program and not dictate.resolve_bin(program):
+        if program and not speech.resolve_bin(program):
             return (
                 f"`{program}` is not on PATH, so polish would fail and degrade to the plain "
                 "transcript on every sentence."

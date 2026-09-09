@@ -303,6 +303,7 @@ def listen_double_tap(
     tap_max: float = TAP_MAX,
     poll_hz: int = POLL_HZ,
     on_tap: Callable[[str], None] | None = None,
+    is_recording: Callable[[], bool] | None = None,
 ) -> None:
     """Hands-free mode: double-tap the trigger to start talking, tap once to stop.
 
@@ -319,6 +320,14 @@ def listen_double_tap(
     the taps are too far apart, or the chord guard is eating them. The user hit exactly that on
     a newly-bound key ("I can't hear any sound when I double click the right command"), and there
     was nothing anywhere to tell him which of the three it was.
+
+    ``is_recording`` (optional) is how the loop learns that a clip ended WITHOUT a tap. This flag
+    used to be the only record of whether anything was recording, and the microphone can now close
+    itself — after fifteen seconds of silence, or the two-minute cap. The clip was gone and this
+    still believed it was running, so the next tap was spent being a STOP for a clip that had
+    already stopped, and the double-tap only worked on the try after that. Reported as "when the
+    microphone closes automatically, the double press control doesn't reset". Asked once per poll,
+    so the answer is a list lookup, never work.
 
     **One chord is not a start — but two in a row were.** This originally reasoned that "a shortcut
     is one press, and one press is never a start", and applied no chord guard at all. ⌃C then ⌃C in
@@ -342,6 +351,10 @@ def listen_double_tap(
             if recording:
                 _safe(on_stop)
             return
+        if recording and is_recording is not None and not is_recording():
+            # It closed itself. Forget the clip rather than charging the next tap for it.
+            recording, last_tap = False, -999.0
+            saw("ended")
         now = time.monotonic()
         now_held = is_trigger_down(trigger)
         if now_held and not held:

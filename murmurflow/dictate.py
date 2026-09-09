@@ -2662,6 +2662,7 @@ def bind_trigger(
     on_abort: object | None = None,
     should_stop: object | None = None,
     on_tap: object | None = None,
+    is_recording: object | None = None,
 ) -> str:
     """Run the key listener in whichever mode ``doubleTap`` selects. Blocks. Returns a description.
 
@@ -2678,6 +2679,7 @@ def bind_trigger(
             trigger=key,
             should_stop=should_stop if callable(should_stop) else None,
             on_tap=on_tap if callable(on_tap) else None,
+            is_recording=is_recording if callable(is_recording) else None,
         )
         return f"double-tap {key} to start, tap once to stop"
     hotkey.listen(
@@ -3119,4 +3121,7 @@ def listen_loop(
         on_abort=on_abort,
         should_stop=should_stop,
         on_tap=on_tap,
+        # The microphone can close itself now, so the gesture has to be able to find that out
+        # without being told by a tap — see :func:`hotkey.listen_double_tap`.
+        is_recording=lambda: bool(mine),
     )

@@ -1628,9 +1628,39 @@ def test_the_tail_is_what_is_not_at_the_cursor_yet():
 def test_a_fully_streamed_sentence_leaves_only_its_final_mark_to_paste():
     # The words are all on screen; the full stop is not, because `stable_prefix` never types the
     # mark touching the end of the audio. At the key release the clip really is over, so it lands.
-    assert dictate.stream_tail("all of it", "All of it.") == "."
-    assert dictate.stream_tail("all of it.", "All of it.") == ""
-    assert dictate.stream_tail("all of it", "All of it") == ""
+    assert dictate.stream_tail("all of it", "All of it.") == ""  # mid-clip: nothing new to type
+    assert dictate.end_mark("all of it", "All of it.") == "."  # at the release: the mark is real
+    assert dictate.end_mark("all of it.", "All of it.") == ""
+    assert dictate.end_mark("all of it", "All of it") == ""
+
+
+def test_a_pause_never_types_a_lone_full_stop_where_the_next_word_goes():
+    """Reported as "it puts a period instead of the word" after a short break.
+
+    Every pass mid-clip ends where the AUDIO happens to end, so "all the words are on screen and
+    only the mark is missing" is true of every pause. Asking for the mark there put a bare " ." at
+    the cursor exactly where the next word was about to go — and that mark is then a word on
+    screen with no letters in it, so the next alignment read it as something the final pass had
+    reworded and dropped a real word to pay for it. The word this ate, in the report, was "But".
+    """
+    screen, previous = "", ""
+    for heard in (
+        "and then I ran the command",
+        "and then I ran the command",  # the pause: the transcript stops growing
+        "and then I ran the command.",  # whisper decides the sentence ended
+        "and then I ran the command.",
+        "and then I ran the command. But",  # he speaks again
+        "and then I ran the command. But when I say",
+        "and then I ran the command. But when I say",
+    ):
+        settled = dictate.stable_prefix(previous, heard)
+        previous = heard
+        chunk = dictate.stream_tail(screen, settled) if settled else ""
+        if chunk:
+            screen = f"{screen} {chunk}".strip() if screen else chunk
+    assert " ." not in screen
+    assert "But" in screen
+    assert screen == "and then I ran the command But when I say"
 
 
 def test_a_pause_does_not_put_a_full_stop_in_the_middle_of_the_sentence():

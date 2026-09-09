@@ -1709,15 +1709,23 @@ def stable_prefix(previous: str, current: str) -> str:
 _TRAILING_MARK = re.compile(r"[.,;:!?\u2026\u2013\u2014-]+$")
 
 
-def _end_mark(pasted: str, final: str, rest: list[str]) -> str:
-    """``rest`` as a tail — or, when it is empty, the sentence's last mark if it is still missing.
+def end_mark(pasted: str, final: str) -> str:
+    """The sentence's last mark, when every word is typed and only the mark is missing.
 
     :func:`stable_prefix` never types the mark that touches the end of the audio, so a dictation
     whose every word streamed would otherwise end with no full stop at all. At the key release the
     clip really is over, so that mark is real and this is the only thing left to type.
+
+    **Only :func:`finish` may ask this, and putting it inside :func:`stream_tail` typed a lone
+    full stop into the middle of sentences.** A pass mid-clip is a pass whose transcript ends
+    where the AUDIO happens to end, so "only the mark is missing" is true of every pause: the
+    speaker stops after "the command", whisper writes "the command.", the words are all on screen
+    and the mark is not, and a bare " ." lands at the cursor exactly where the next word was
+    about to go. Worse, that mark is then a WORD on screen with no letters in it, so the next
+    alignment counted it as something the final pass had reworded and dropped a real word to pay
+    for it — reported as "it puts a period instead of the word". Whether a clip is over is not
+    something a partial can know, and `finish` is the only caller that does.
     """
-    if rest:
-        return " ".join(rest)
     mark = _TRAILING_MARK.search(final.rstrip())
     return "" if not mark or pasted.rstrip().endswith(mark.group()) else mark.group()
 
@@ -1754,11 +1762,11 @@ def stream_tail(pasted: str, final: str) -> str:
     words = final.split()
     keys = [_key(word) for word in words]
     if keys[: len(already)] == already:
-        return _end_mark(pasted, final, words[len(already) :])
+        return " ".join(words[len(already) :])
     matcher = difflib.SequenceMatcher(a=already, b=keys, autojunk=False)
     matched = [block for block in matcher.get_matching_blocks() if block.size]
     if not matched:  # nothing corresponds: trust the count, lose nothing
-        return _end_mark(pasted, final, words[len(already) :])
+        return " ".join(words[len(already) :])
     reached = matched[-1]
     # Words on screen PAST the alignment are ones the final pass said differently. The tail that
     # follows them is not new text, it is the same words again in the better model's wording, and
@@ -1766,7 +1774,7 @@ def stream_tail(pasted: str, final: str) -> str:
     # exactly what one reworded last word looks like ("the design" + "designs"). One dropped for
     # one left over: the rewording is skipped and anything genuinely beyond the screen still lands.
     reworded = len(already) - (reached.a + reached.size)
-    return _end_mark(pasted, final, words[reached.b + reached.size + reworded :])
+    return " ".join(words[reached.b + reached.size + reworded :])
 
 
 def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
@@ -2265,7 +2273,7 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
         return Result(text, seconds, elapsed_ms, False, "", level, captured, warm=heard.warm)
     pasted = streamed(stream)
     live = stream_note(stream)
-    tail = stream_tail(pasted, text)
+    tail = stream_tail(pasted, text) or (end_mark(pasted, text) if pasted else "")
     if pasted and not tail:
         # Streaming had already typed every word of it, so there is nothing left to paste. That is
         # a dictation that worked perfectly, not the failure "nothing to type" would read as.

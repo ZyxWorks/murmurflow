@@ -22,6 +22,7 @@ import time
 import types
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -2570,3 +2571,70 @@ def test_a_leading_space_survives_into_the_paste(monkeypatch):
 
 def test_whitespace_alone_is_still_nothing_to_type():
     assert dictate.inject("   ")[1] == "nothing to type"
+
+
+def _ffmpeg_shaped_wav(path: Path, seconds_loud: float, seconds_quiet: float) -> None:
+    """A wav shaped like the one `start()` actually writes — LIST chunk and all.
+
+    Measured 2026-09-09 with the recorder's own argv: ffmpeg puts a 26-byte `LIST`/`INFO` chunk
+    between `fmt ` and `data`, so the samples begin at byte 78 and not at the 44 every "skip the
+    header" constant assumed.
+    """
+    audio = (b"\x00\x40" * int(dictate.SAMPLE_RATE * seconds_loud)) + (
+        b"\x00\x00" * int(dictate.SAMPLE_RATE * seconds_quiet)
+    )
+    fmt = (
+        b"fmt "
+        + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")
+        + (1).to_bytes(2, "little")
+        + dictate.SAMPLE_RATE.to_bytes(4, "little")
+        + dictate.BYTES_PER_SECOND.to_bytes(4, "little")
+        + (2).to_bytes(2, "little")
+        + (16).to_bytes(2, "little")
+    )
+    info = (
+        b"LIST"
+        + (26).to_bytes(4, "little")
+        + b"INFOISFT"
+        + (14).to_bytes(4, "little")
+        + b"Lavf61.7.100\x00\x00"
+    )
+    data = b"data" + len(audio).to_bytes(4, "little") + audio
+    body = b"WAVE" + fmt + info + data
+    path.write_bytes(b"RIFF" + len(body).to_bytes(4, "little") + body)
+
+
+def test_the_samples_are_found_where_they_are_and_not_at_a_guessed_44(tmp_path: Path) -> None:
+    """The trim and the tail read seek past "the header", so the header has to be measured."""
+    wav = tmp_path / "ffmpeg-shaped.wav"
+    _ffmpeg_shaped_wav(wav, seconds_loud=1.0, seconds_quiet=4.0)
+    assert dictate.data_offset(wav) == 78
+
+    assert dictate.trim_trailing_quiet(wav) is True
+    kept = (wav.stat().st_size - 78) / dictate.BYTES_PER_SECOND
+    assert 1.0 <= kept <= 1.0 + dictate.TRIM_KEEP_SECONDS + dictate.TRIM_BLOCK_SECONDS
+    with wave.open(str(wav), "rb") as handle:
+        assert handle.getnframes() == (wav.stat().st_size - 78) // 2
+
+    broken = tmp_path / "broken.wav"
+    broken.write_bytes(b"not a wav at all")
+    assert dictate.data_offset(broken) == dictate.MIN_HEADER_BYTES
+
+
+def test_recorded_audio_is_never_sent_to_a_port_a_whisper_server_does_not_hold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The port is predictable, so whoever binds it first receives the clip AND types the answer."""
+    wav = tmp_path / "clip.wav"
+    _ffmpeg_shaped_wav(wav, seconds_loud=0.5, seconds_quiet=0.0)
+    dictate._OWNERSHIP.clear()
+    monkeypatch.setattr(
+        dictate.subprocess, "run", lambda *_a, **_k: SimpleNamespace(stdout="", returncode=1)
+    )
+
+    def _never(*_a: object, **_k: object) -> None:  # pragma: no cover — the point is it is not hit
+        raise AssertionError("audio was sent to a port nothing of ours holds")
+
+    monkeypatch.setattr(dictate.urllib.request, "urlopen", _never)
+    assert dictate.transcribe_warm(wav).text == ""

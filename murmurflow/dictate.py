@@ -414,6 +414,48 @@ def _exited(pid: int) -> bool:
     return False
 
 
+#: What a wav header is when nothing else is in it: `RIFF....WAVE` + a 16-byte `fmt ` chunk.
+#: A FLOOR, never the answer — see :func:`data_offset`.
+MIN_HEADER_BYTES = 44
+
+
+def data_offset(wav: Path) -> int:
+    """Where the samples actually start. :data:`MIN_HEADER_BYTES` when the header cannot be read.
+
+    **44 is a guess and on a real recording it is the wrong one.** Measured 2026-09-09 with
+    :func:`start`'s own argv on macOS: ffmpeg writes a 26-byte ``LIST``/``INFO`` chunk (its own
+    encoder name) between ``fmt `` and ``data``, so the first sample is at byte **78**. Everything
+    that seeks past "the header" by a constant — :func:`trim_trailing_quiet`, :func:`tail_dbfs` —
+    was reading 34 bytes of that metadata as audio and cutting the clip 34 bytes early. Small
+    enough to have gone unnoticed, wrong on every clip.
+
+    Works on a file STILL BEING RECORDED: the chunk headers are written when ffmpeg opens the file,
+    and only the two SIZE fields are left for the exit that may never come — which is what
+    :func:`repair_wav` is for.
+    """
+    try:
+        with wav.open("rb") as handle:
+            if handle.read(4) != b"RIFF":
+                return MIN_HEADER_BYTES
+            handle.seek(8)
+            if handle.read(4) != b"WAVE":
+                return MIN_HEADER_BYTES
+            size = wav.stat().st_size
+            offset = 12
+            while offset + 8 <= size:
+                handle.seek(offset)
+                name = handle.read(4)
+                declared = int.from_bytes(handle.read(4), "little")
+                if name == b"data":
+                    return offset + 8
+                if declared <= 0:
+                    break  # a chunk with no length: the walk cannot go on honestly
+                offset += 8 + declared + (declared % 2)  # chunks are padded to an even length
+    except (OSError, ValueError):
+        pass
+    return MIN_HEADER_BYTES
+
+
 def repair_wav(wav: Path) -> bool:
     """Patch a RIFF header whose lengths were never written. ``True`` if it had to. Never raises.
 
@@ -906,8 +948,12 @@ def transcribe_warm(wav: Path, *, timeout: float = 60.0, language: str = "") -> 
     on an M4 Pro — and a clip does not change language halfway through, so the partials after the
     first pin themselves to what the first one heard. See :func:`_stream_loop`.
 
+    **It asks who holds the port before it sends anything** (:func:`ours`). Adopting a server was
+    guarded and SENDING was not, which is the wrong half: a process that binds :func:`port` first is
+    handed every clip you record and believed about what was in it — and what comes back is TYPED
+    AT YOUR CURSOR. Cached, so this is a dict read on the partial path and a `pgrep` twice a minute.
     """
-    if not wav.is_file():
+    if not wav.is_file() or not ours():
         return Heard("")
     fields = {
         "response_format": "verbose_json",
@@ -2185,10 +2231,11 @@ def trim_trailing_quiet(wav: Path) -> bool:
     it, and the level gates in :func:`finish` are what should judge it and say so.
     """
     block = int(TRIM_BLOCK_SECONDS * BYTES_PER_SECOND)
+    head = data_offset(wav)  # NOT 44: ffmpeg writes a LIST chunk in there too
     try:
         size = wav.stat().st_size
         with wav.open("rb") as handle:
-            handle.seek(44)
+            handle.seek(head)
             audio = handle.read()
     except OSError:
         return False
@@ -2199,7 +2246,7 @@ def trim_trailing_quiet(wav: Path) -> bool:
             last = index
     if last < 0:
         return False  # nothing above the floor anywhere: not ours to judge
-    keep = 44 + (last + 1) * block + int(TRIM_KEEP_SECONDS * BYTES_PER_SECOND)
+    keep = head + (last + 1) * block + int(TRIM_KEEP_SECONDS * BYTES_PER_SECOND)
     if keep >= size:
         return False
     try:
@@ -2229,7 +2276,7 @@ def tail_dbfs(wav: Path, seconds: float) -> float:
         return 0.0
     try:
         size = wav.stat().st_size
-        if size < want + 44:  # 44 = the standard PCM wav header ffmpeg writes
+        if size < want + data_offset(wav):
             return 0.0  # not enough audio yet to have been quiet for that long
         with wav.open("rb") as handle:
             handle.seek(size - want)

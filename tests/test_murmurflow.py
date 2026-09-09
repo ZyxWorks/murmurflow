@@ -1943,6 +1943,24 @@ def test_the_live_server_gets_its_own_model_and_its_own_port(monkeypatch):
     assert dictate.partial_port() == 8480
 
 
+def test_every_clip_is_its_own_clip_on_both_servers(monkeypatch):
+    """whisper.cpp keeps decoded text as context, and a SERVER keeps it across REQUESTS.
+
+    So the previous dictation primes the next one, and under streaming — ~100 overlapping passes
+    over the same growing audio — a clip primes itself with a hundred near-copies of what it just
+    said. Measured on one 145s clip, same audio, same prompt, twice in a row: 543 characters then
+    1108, one run collapsing into "And. Your. Job as a founder." nine times over. With `-mc 0` the
+    same two runs came back character for character identical.
+    """
+    monkeypatch.setattr(dictate, "resolve_bin", lambda _n: "/usr/bin/whisper-server")
+    for command in (
+        dictate.serve_command("/models/ggml-large-v3-turbo.bin"),
+        dictate.serve_command("/models/ggml-small.bin", dictate.partial_port()),
+    ):
+        assert command is not None
+        assert command[command.index("-mc") + 1] == "0"
+
+
 def test_a_missing_live_server_sends_the_partials_to_the_big_one(monkeypatch):
     """Slower, and never wrong. It is what they did before the small server existed."""
     monkeypatch.setattr(dictate, "ours", lambda _at: True)  # who holds the port is a separate test

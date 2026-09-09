@@ -127,7 +127,26 @@ def partial_model() -> str:
     Deliberately ignores the ``model`` config override, which names the model that writes what you
     keep. Pinning that to a small model is a choice about the transcript; it must not also silently
     become the choice about the partials, and vice versa.
+
+    **The default is now the BIG model, i.e. no small model at all, and that is a measurement.**
+    Once a live pass could type PUNCTUATION (`dictate.missing_mark`), the model answering the live
+    pass stopped deciding only the words and started deciding the marks the operator keeps — and
+    the two models are not close there. Replayed through the whole stream loop on one real 38s
+    clip, against the big model's own whole-clip transcript:
+
+        live = small   13.9% different   "...in the end like when I just stopped my control it
+                                          just added a lot of gibberish I'm not sure and that came"
+        live = big     11.4% different   "...in the end, like when I just stopped my control, it
+                                          just added a lot of gibberish, I'm not sure. And that
+                                          came after a few seconds, after I already sent..."
+
+    The percentages understate it; the sentences are the finding. The operator's call, given both
+    ("I would rather have it qualitatively high rather than faster"). ``livePass: "small"`` puts
+    the fast one back, and the cost of the default is real: a pass over a long clip costs seconds
+    rather than ~1, so the words arrive in bigger lumps the longer you talk.
     """
+    if str(config.load().get("livePass", "big")).strip().lower() != "small":
+        return ""
     for name in PARTIAL_PREFERENCE:
         for directory in _search_dirs():
             candidate = directory / name

@@ -1629,6 +1629,12 @@ class Stream:
     blank: int = 0
     #: Chunks actually pasted at the cursor.
     typed: int = 0
+    #: The last pass that cleared every gate, and the seconds of audio it had read — what lets
+    #: `finish` skip its own transcription (see :func:`whole_clip_read`). ONE attribute holding
+    #: both, because they are read from another thread while this one is still writing them: as
+    #: two fields a reader could take the new length beside the older transcript, decide the clip
+    #: was fully read and drop whatever was said in between. One store, one read, no window.
+    read: tuple[Heard, float] | None = None
 
 
 #: In-flight streams, keyed by the wav they are transcribing. A dict and not an attribute on
@@ -1989,6 +1995,10 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
     while not stream.done.is_set():
         started = time.monotonic()
         stream.passes += 1
+        # BEFORE the pass, and off the file SIZE: every byte past the header is a sample, and the
+        # header of a file ffmpeg is still writing says the clip is empty. Under-reporting here is
+        # safe — it only makes `whole_clip_read` refuse — where over-reporting would drop speech.
+        covered = seconds_on_disk(rec.wav)
         found = _partial(rec.wav, snapshot, pinned)
         heard = found.text
         # A pass that read nothing — still below the quiet floor, a hallucination thrown out, the
@@ -2001,6 +2011,7 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
             continue
         if not pinned and found.language and (not spoken or found.language in spoken):
             pinned = found.language
+        stream.read = (found, covered)
         settled = stable_prefix(previous, heard)
         previous = heard
         chunk = stream_tail(stream.text, settled) if settled else ""
@@ -2025,6 +2036,41 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
                     stream.text = f"{stream.text}{landed}".strip()
                     stream.typed += 1
         stream.done.wait(max(0.0, STREAM_EVERY_SECONDS - (time.monotonic() - started)))
+
+
+def whole_clip_read(stream: Stream | None, wav: Path, captured: float) -> Heard | None:
+    """The live pass's own transcript, when it already read the whole clip. Else ``None``.
+
+    **This is the 8 seconds at the end of a long dictation.** Measured from the operator's own log:
+    a 73.7s clip spent 3.2s in the final transcription, a 69.0s clip 6.0s, a 79.1s clip 7.8s — and
+    the row for each says ``→ streamed``, meaning that pass produced NOTHING that was not already
+    on screen. Worse than wasted: he had stopped, read his sentence, sent it, and the tail then
+    landed eight seconds later in whatever he was looking at by then ("it just added a lot of
+    gibberish ... after I already sent the message").
+
+    A partial only ever reads the audio captured SO FAR, so the question is what was said after the
+    last one. If that is silence, the last partial read the whole clip and its transcript is the
+    transcript — the same model, the same audio, the same gates. `covered` is measured from the
+    file's SIZE before the pass rather than after, so it under-reports and this refuses more often
+    than it strictly must, which is the right way for a shortcut to be wrong.
+
+    ``AHEAD_SECONDS`` is not a tolerance for missing speech: below it there is not enough audio for
+    :func:`tail_dbfs` to have an opinion, and a quarter of a second cannot hold a word.
+    """
+    if stream is None or stream.read is None:
+        return None
+    heard, covered = stream.read
+    if not heard.text:
+        return None
+    ahead = max(0.0, captured - covered)
+    if ahead > AHEAD_SECONDS and tail_dbfs(wav, ahead) >= quiet_floor():
+        return None  # something was said after the last pass looked
+    return heard
+
+
+#: How much unread audio at the end of a clip is too little to hold a word. See
+#: :func:`whole_clip_read`.
+AHEAD_SECONDS = 0.25
 
 
 def stop_streaming(wav: Path) -> Stream | None:
@@ -2191,6 +2237,19 @@ def _peak_dbfs(frames: bytes) -> float:
     if peak == 0:
         return float("-inf")
     return 20 * math.log10(min(peak, 32768) / 32768.0)
+
+
+def seconds_on_disk(wav: Path) -> float:
+    """How many seconds of audio a clip STILL BEING RECORDED holds. ``0.0`` if it cannot be read.
+
+    The same arithmetic as :func:`tail_dbfs` and for the same reason: while ffmpeg is appending,
+    the RIFF header still says the file is empty, so :func:`audio_seconds` answers 0 for a clip
+    that is minutes long.
+    """
+    try:
+        return max(0.0, (wav.stat().st_size - 44) / BYTES_PER_SECOND)
+    except OSError:
+        return 0.0
 
 
 def tail_dbfs(wav: Path, seconds: float) -> float:
@@ -2382,7 +2441,10 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
 
     started = time.monotonic()
     try:
-        heard = transcribe(wav)
+        # The live pass may already have read this exact audio with this exact model. If nothing
+        # was said after it looked, transcribing again buys a copy of what is on screen for the
+        # seconds the operator is standing there waiting — see :func:`whole_clip_read`.
+        heard = whole_clip_read(stream, wav, captured) or transcribe(wav)
         raw = heard.text
     finally:
         retire()

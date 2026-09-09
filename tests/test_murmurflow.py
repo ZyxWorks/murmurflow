@@ -1681,6 +1681,37 @@ def test_a_forgotten_key_still_gets_its_words(monkeypatch):
     assert starts == [1]  # the daemon started its server and then rescued the clip on its own
 
 
+def test_the_end_is_not_transcribed_twice_when_the_live_pass_already_read_it(monkeypatch, tmp_path):
+    """The 8 seconds at the end of a long dictation, and the tail that landed after he had sent.
+
+    From the operator's own log: a 73.7s clip spent 3.2s in the final transcription, 69.0s spent
+    6.0s, 79.1s spent 7.8s — and each of those rows says `→ streamed`, meaning that pass produced
+    nothing that was not already on screen. He had stopped, read his sentence and sent it; the
+    tail then arrived eight seconds later in whatever he was looking at by then.
+    """
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(b"\x00" * (44 + dictate.BYTES_PER_SECOND * 30))
+    live = dictate.Heard("what the live pass already read", 0.99, "en", warm=True)
+    stream = dictate.Stream(threading.Event())
+
+    # Nothing read yet: there is nothing to reuse.
+    assert dictate.whole_clip_read(stream, clip, 30.0) is None
+    assert dictate.whole_clip_read(None, clip, 30.0) is None
+
+    # It read 29.9 of the 30 seconds — too little left to hold a word.
+    stream.read = (live, 29.9)
+    assert dictate.whole_clip_read(stream, clip, 30.0) is live
+
+    # It read 20 of 30, and the ten seconds it never saw are SILENT: still the whole transcript.
+    stream.read = (live, 20.0)
+    monkeypatch.setattr(dictate, "tail_dbfs", lambda _wav, _seconds: -90.0)
+    assert dictate.whole_clip_read(stream, clip, 30.0) is live
+
+    # Same ten seconds, but somebody was talking in them. Now the shortcut must refuse.
+    monkeypatch.setattr(dictate, "tail_dbfs", lambda _wav, _seconds: -12.0)
+    assert dictate.whole_clip_read(stream, clip, 30.0) is None
+
+
 def test_the_last_seconds_of_a_clip_still_being_recorded_can_be_read(tmp_path):
     """`wave` cannot answer this and that is the whole reason it exists.
 
@@ -2108,17 +2139,21 @@ def test_the_live_model_is_a_small_one_and_never_the_transcript_model(tmp_path, 
     models = config.home_root() / "models"
     models.mkdir(parents=True, exist_ok=True)
     (models / "ggml-large-v3-turbo.bin").write_bytes(b"x")
-    assert whisper.partial_model() == ""  # a big model is not a live model
     (models / "ggml-base.bin").write_bytes(b"x")
-    assert whisper.partial_model().endswith("ggml-base.bin")
     (models / "ggml-small.bin").write_bytes(b"x")
+    # THE DEFAULT IS THE BIG MODEL, i.e. no live model at all — the live pass types the
+    # punctuation the operator keeps, and the two models are not close there.
+    assert whisper.partial_model() == ""
+    config.set_value("livePass", "small")
     assert whisper.partial_model().endswith("ggml-small.bin")  # small beats base: measured German
+    (models / "ggml-small.bin").unlink()
+    assert whisper.partial_model().endswith("ggml-base.bin")  # base is the fallback below small
     assert whisper.model().endswith("ggml-large-v3-turbo.bin")  # and the transcript is unmoved
 
     # An explicit `model` override still names the transcript model, and only that one.
     config.set_value("model", str(models / "ggml-base.bin"))
     assert whisper.model().endswith("ggml-base.bin")
-    assert whisper.partial_model().endswith("ggml-small.bin")
+    assert whisper.partial_model().endswith("ggml-base.bin")
 
 
 def test_the_live_server_gets_its_own_model_and_its_own_port(monkeypatch):

@@ -45,11 +45,9 @@ where you told it to — see :func:`polish`.
 
 from __future__ import annotations
 
-import array
 import contextlib
 import difflib
 import json
-import math
 import os
 import re
 import shutil
@@ -67,7 +65,39 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from . import config, platforms, whisper
+from . import config, platforms, speech, whisper
+
+# ONE COPY, TWO TOOLS. Everything below is the same file in zyx's `core.speech` - byte for byte,
+# checked by a digest in both repos and copied by one command (`make voice-sync`, run from zyx).
+# It is the layer that is true of AUDIO and of a TRANSCRIPT rather than of either product: this
+# module was extracted from zyx's `core.dictate`, the two drifted for three weeks, and the same two
+# bugs had to be found twice. Re-exported rather than reached through the module, so every call
+# site and every test that says `dictate.X` keeps saying it.
+from .speech import (  # noqa: F401
+    AUTO_STOP_SECONDS,
+    BYTES_PER_SECOND,
+    MAX_CLIP_SECONDS,
+    MIN_CLIP_SECONDS,
+    MIN_HEADER_BYTES,
+    NO_SPEECH,
+    QUIET_DBFS,
+    SAMPLE_RATE,
+    SILENCE_STOP_SECONDS,
+    SILENT_DBFS,
+    SPEECH_CONFIDENCE,
+    TOO_SHORT,
+    TRIM_BLOCK_SECONDS,
+    TRIM_KEEP_SECONDS,
+    audio_seconds,
+    data_offset,
+    is_hallucination,
+    join_segments,
+    peak_dbfs,
+    repair_punctuation,
+    repair_wav,
+    strip_trailing_hallucination,
+    tail_dbfs,
+)
 
 # Homebrew's bin dirs. launchd hands an agent a minimal PATH that excludes them, so a bare
 # shutil.which() finds nothing when the listener runs from a plist while working fine in a shell
@@ -416,99 +446,6 @@ def _exited(pid: int) -> bool:
 
 #: What a wav header is when nothing else is in it: `RIFF....WAVE` + a 16-byte `fmt ` chunk.
 #: A FLOOR, never the answer — see :func:`data_offset`.
-MIN_HEADER_BYTES = 44
-
-
-def data_offset(wav: Path) -> int:
-    """Where the samples actually start. :data:`MIN_HEADER_BYTES` when the header cannot be read.
-
-    **44 is a guess and on a real recording it is the wrong one.** Measured 2026-09-09 with
-    :func:`start`'s own argv on macOS: ffmpeg writes a 26-byte ``LIST``/``INFO`` chunk (its own
-    encoder name) between ``fmt `` and ``data``, so the first sample is at byte **78**. Everything
-    that seeks past "the header" by a constant — :func:`trim_trailing_quiet`, :func:`tail_dbfs` —
-    was reading 34 bytes of that metadata as audio and cutting the clip 34 bytes early. Small
-    enough to have gone unnoticed, wrong on every clip.
-
-    Works on a file STILL BEING RECORDED: the chunk headers are written when ffmpeg opens the file,
-    and only the two SIZE fields are left for the exit that may never come — which is what
-    :func:`repair_wav` is for.
-    """
-    try:
-        with wav.open("rb") as handle:
-            if handle.read(4) != b"RIFF":
-                return MIN_HEADER_BYTES
-            handle.seek(8)
-            if handle.read(4) != b"WAVE":
-                return MIN_HEADER_BYTES
-            size = wav.stat().st_size
-            offset = 12
-            while offset + 8 <= size:
-                handle.seek(offset)
-                name = handle.read(4)
-                declared = int.from_bytes(handle.read(4), "little")
-                if name == b"data":
-                    return offset + 8
-                if declared <= 0:
-                    break  # a chunk with no length: the walk cannot go on honestly
-                offset += 8 + declared + (declared % 2)  # chunks are padded to an even length
-    except (OSError, ValueError):
-        pass
-    return MIN_HEADER_BYTES
-
-
-def repair_wav(wav: Path) -> bool:
-    """Patch a RIFF header whose lengths were never written. ``True`` if it had to. Never raises.
-
-    **ffmpeg writes the real lengths when it EXITS, and it does not always get to.** SIGKILL on the
-    fallback path in :func:`stop` is one way; Windows is the other, and there it is not a fallback
-    but the only path — ``os.kill`` there cannot deliver anything gentler than ``TerminateProcess``
-    for a signal that is not CTRL_C/CTRL_BREAK, and a daemon started by ``pythonw`` has no console
-    to send those through.
-
-    Measured rather than assumed, because the guess was wrong and the wrong guess would have been
-    a scary comment about a bug that does not exist. A killed ffmpeg leaves ``0xFFFFFFFF`` in both
-    size fields, not zero, so the audio still decodes — ``-flush_packets 1`` already wrote every
-    sample (see :func:`start`) and the readers stop at the end of the file. What breaks is
-    :func:`audio_seconds`, which believes the header and reports **37 hours** of captured audio:
-    that number is the entire capture-fault diagnostic (see the daemon loop, where a clip shorter
-    than the hold is how a throttled agent recording a quarter of every sentence was found), and it
-    goes silently blind on exactly the clips something already went wrong with.
-
-    Cheaper than what it protects: a stat and twelve bytes on the ordinary path, where the header
-    is already right and this returns immediately.
-    """
-    try:
-        size = wav.stat().st_size
-        if size <= 44:  # a header and nothing else — there is nothing to rescue
-            return False
-        with wav.open("r+b") as handle:
-            if handle.read(4) != b"RIFF":
-                return False
-            handle.seek(8)
-            if handle.read(4) != b"WAVE":
-                return False
-            offset = 12
-            while offset + 8 <= size:
-                handle.seek(offset)
-                name = handle.read(4)
-                declared = int.from_bytes(handle.read(4), "little")
-                if name == b"data":
-                    actual = size - (offset + 8)
-                    if declared and declared <= actual:
-                        return False  # the trailer was written; leave it exactly as it is
-                    handle.seek(offset + 4)
-                    handle.write(actual.to_bytes(4, "little"))
-                    handle.seek(4)
-                    handle.write((size - 8).to_bytes(4, "little"))
-                    return True
-                if declared <= 0:
-                    return False  # a chunk with no length: the walk cannot go on honestly
-                offset += 8 + declared + (declared % 2)  # chunks are padded to an even length
-    except (OSError, ValueError):
-        return False
-    return False
-
-
 def stop(rec: Recording | None = None) -> Path | None:
     """Stop the in-flight capture and return the finished wav (``None`` if nothing was recording).
 
@@ -1035,46 +972,6 @@ def strip_fillers(transcript: str) -> str:
 
 # A clip this short cannot contain a word — it is a brushed key or an aborted chord. Transcribing
 # it wastes a second and, worse, invites the hallucination below.
-MIN_CLIP_SECONDS = 0.4
-
-# The one problem that is NOT worth a sound: see the daemon's release handler.
-TOO_SHORT = "too short"
-
-# The clip was long enough and loud enough to be a sentence, but there was no speech in it. ONE
-# string for every way we reach that conclusion (whisper's language score, the boilerplate word
-# list, an empty transcript) because callers act on it rather than print it: the huddle counts
-# consecutive occurrences to decide when to stop trusting the microphone. Kept in plain words —
-# nobody cares which of the three traps fired.
-NO_SPEECH = "I didn't hear anything"
-
-# The longest single clip the recorder will ever produce (see the `-t` flag in `start`). Ten minutes
-# is far beyond any real hold — the longest measured real dictation is ~60s — and short
-# enough that an orphaned recorder costs ~20 MB and ten minutes of open microphone instead of hours.
-MAX_CLIP_SECONDS = 600
-
-# How long the daemon lets a clip run before it closes the microphone ITSELF and types what was
-# said. `MAX_CLIP_SECONDS` above is the recorder's own fuse and stays where it is: it bounds an
-# ORPHAN, one nobody is waiting for, and it throws the audio away. This one is the opposite case —
-# the operator is right there, he simply forgot the second tap ("what happens a lot of times is
-# that I forget to close the microphone"), and the right answer is not to discard two minutes of
-# his voice but to finish the clip exactly as the tap would have. Two minutes because the longest
-# real dictation measured on this machine is ~68s; `maxHold` moves it.
-AUTO_STOP_SECONDS = 120.0
-
-# How long the microphone stays open with nothing being said before the daemon closes it and types
-# what it has. The operator asked for it and left the number to me ("I don't know what is a good
-# timing, you have to decide that yourself"), so: fifteen seconds.
-#
-# Dictation apps that stop on silence sit around two to three, and two to three is WRONG HERE. The
-# gesture is a tap, not a held key, so nothing is telling the microphone you are still there; and
-# this operator thinks mid-sentence — the pauses that produced every punctuation bug in this file
-# were real, and a clip cut at three seconds would have ended half of them mid-thought, with the
-# rest of the sentence spoken into a closed microphone. That failure is worse than the one being
-# fixed, because a forgotten microphone loses nothing and a truncated sentence loses the sentence.
-# Fifteen is longer than any pause measured here and still closes a forgotten one in a quarter of
-# a minute rather than two. `silenceStop` moves it; 0 switches it off.
-SILENCE_STOP_SECONDS = 15.0
-
 # What whisper emits when handed near-silence: it does not return "", it confidently returns one of
 # its training-set boilerplate lines. Untrapped, these get TYPED INTO YOUR DOCUMENT, which
 # is the worst failure this tool has — silence should produce nothing, never words you did not
@@ -1090,166 +987,9 @@ SILENCE_STOP_SECONDS = 15.0
 # What stays is only what a person does NOT say: subtitle-rip credits and literal audio markers.
 # The bias is deliberate and one-directional — a hallucination that slips through is visible and
 # deletable, while a real sentence that is swallowed is invisible and looks like broken hardware.
-_HALLUCINATIONS: frozenset[str] = frozenset(
-    {
-        "thanks for watching!",
-        "thanks for watching.",
-        "[blank_audio]",
-        "(silence)",
-        "untertitel von stephanie geiges",
-        "untertitel der amara.org-community",
-        "untertitelung aufgrund der amara.org-community",
-        "amara.org",
-        # THE SAME BOILERPLATE, IN THE LANGUAGES IT INVENTS. Whisper does not answer silence with
-        # nothing; it answers with the credit line of whatever it was trained on, and which
-        # language that lands in is a coin toss. Live: a 1.8s desk bump came back as
-        # "ご視聴ありがとうございました" (thank you for watching) and was typed into a terminal.
-        # The structural guards above it are the real fix; this is the list for the exact strings
-        # already seen, and it costs nothing to carry.
-        "ご視聴ありがとうございました",
-        "ご視聴ありがとうございます",
-        "おやすみなさい",
-        "字幕by索兰娅",
-        "字幕由amara.org社区提供",
-        "字幕志愿者 李宗盛",
-        "请不吝点赞 订阅 转发 打赏支持明镜与点点栏目",
-        "多谢您的观看",
-        "감사합니다",
-        "구독과 좋아요 부탁드립니다",
-        "sous-titres réalisés par la communauté d'amara.org",
-        "subtítulos realizados por la comunidad de amara.org",
-        "sottotitoli e revisione a cura di qtss",
-        "legendas pela comunidade amara.org",
-    }
-)
-
-
-# Whisper also annotates NON-SPEECH sound rather than returning nothing: "*sad*", "[MUSIC]",
-# "(wind blowing)", "♪♪♪". Observed live in a quiet room (it produced "*sad*"). These
-# are an open CLASS, not a word list — a blocklist would need a new entry forever — so the whole
-# class is matched structurally: a transcript that is ENTIRELY one bracketed/asterisked annotation
-# was a description of a sound, not something you said, and must never be typed.
-_ANNOTATION_ONLY = re.compile(r"^[\s♪]*[\*\[\(]([^\]\)\*]*)[\*\]\)][\s♪.]*$")
-
-# An annotation is a LABEL ("sad", "wind blowing", "MUSIC"), never a sentence. Without this cap the
-# trap also eats a real dictated line that happens to be fully parenthesised — "(That said, ship it
-# anyway.)" — which is the worse bug of the two: a hallucination that slips through is visible and
-# deletable, whereas silently swallowing what you actually said looks like the mic failed.
-# Bias deliberately toward letting text through.
-_MAX_ANNOTATION_WORDS = 3
-
-
-def is_hallucination(text: str) -> bool:
-    """True if ``text`` is whisper's output for silence rather than something that was said.
-
-    Three shapes: the fixed boilerplate lines it emits for pure silence, a transcript of nothing
-    but music notes, and the open class of non-speech ANNOTATIONS it emits for room noise. All
-    three must be trapped — any of them typed into your document is a word you did not say.
-    """
-    stripped = text.strip().lower().strip("♪ ")
-    # Bare "♪♪♪" with no brackets around it, which the annotation pattern below cannot match
-    # because that one requires a bracket or an asterisk. Once the notes and the whitespace are
-    # removed there is nothing left, so there was no speech in the clip.
-    if not stripped:
-        return bool(text.strip())
-    if stripped in _HALLUCINATIONS:
-        return True
-    match = _ANNOTATION_ONLY.match(text.strip())
-    if match is None:
-        return False
-    return len(match.group(1).split()) <= _MAX_ANNOTATION_WORDS
-
-
-_SPACE_BEFORE_PUNCT = re.compile(r"\s+([,.!?;:])")
-_DOUBLED_PUNCT = re.compile(r"([,;:])\s*([.!?])")
-# A filler strip can leave the sentence dangling on the comma that preceded it ("...fixed, you
-# know." -> "...fixed,"). Invisible on a Slack echo; sloppy when it is typed into a document.
-_DANGLING_TAIL = re.compile(r"[,;:]+\s*$")
-
-# whisper puts a `\n` at every SEGMENT boundary, and a segment ends where the decoder's budget ran
-# out — a TOKEN boundary, which is not a word boundary. When the seam lands inside a word the next
-# segment starts with NO leading space ("...zyxworks.gith" + "ub.io"), and flattening every seam to
-# a space is what typed "zyxworks.gith ub.io" and "z yxworks.com" into a real dictation.
-#
-# Whisper's own spacing is the signal, and reading it costs nothing: whisper carries a word's
-# leading space inside the token, so a genuine word boundary always has whitespace on one side of
-# the seam. None on either side means the word was cut in half — close that seam with nothing.
-_SEGMENT_SEAM = re.compile(r"([^\S\n]*)\n+([^\S\n]*)")
-
-# Sentence end, for the trailing-boilerplate trap below. Deliberately crude: it only has to find
-# the seam between "...make it public." and an appended "Thanks for watching!".
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
-
-
-def join_segments(transcript: str) -> str:
-    """Flatten whisper's per-segment newlines WITHOUT inventing a space in the middle of a word."""
-    return _SEGMENT_SEAM.sub(lambda seam: " " if seam.group(1) or seam.group(2) else "", transcript)
-
-
-#: Polite closings whisper invents for the pause between your last word and your hand.
-#:
-#: **Trailing only, and that is the whole reason this is a second list.** "Thank you." on its own is
-#: a sentence people dictate, and swallowing it looks like the microphone failed — which is exactly
-#: why it was taken OUT of :data:`_HALLUCINATIONS` once. Appended to a sentence that already ended,
-#: it is whisper filling silence: reported live as "random thank-yous, I don't know where this
-#: comes from". :func:`strip_trailing_hallucination` never removes the last sentence standing, so
-#: both readings get what they should.
-_TRAILING_BOILERPLATE: frozenset[str] = frozenset(
-    {
-        "thank you",
-        "thank you.",
-        "thank you!",
-        "thank you very much",
-        "thank you very much.",
-        "thanks",
-        "thanks.",
-        "thank you for watching",
-        "thank you for watching.",
-        "thanks for listening",
-        "thanks for listening.",
-        "bye",
-        "bye.",
-        "bye!",
-        "bye bye",
-        "bye-bye.",
-        "goodbye",
-        "goodbye.",
-        # ...and in the other language he actually speaks.
-        "danke",
-        "danke.",
-        "danke schön",
-        "danke schön.",
-        "vielen dank",
-        "vielen dank.",
-        "tschüss",
-        "tschüss.",
-        "auf wiedersehen",
-        "auf wiedersehen.",
-        "untertitel im auftrag des zdf",
-    }
-)
-
-
-def strip_trailing_hallucination(text: str) -> str:
-    """Drop whisper's boilerplate when it is APPENDED to a real sentence.
-
-    :func:`is_hallucination` judges the WHOLE line, which is the right shape for a clip that was
-    nothing but silence. It is the wrong shape for the other half of the same failure: a real
-    sentence followed by trailing silence comes back as the sentence *plus* the credit line
-    ("...so only agent flow is public now. Thanks for watching!"), the whole thing scores as
-    confident speech in a language you speak, and every one of those words gets typed.
-
-    Only whole trailing SENTENCES are removed, and never the last one standing — same
-    one-directional bias as everything else here: an invented line that slips through is visible and
-    deletable, a real one swallowed is invisible. That guard is also what lets this list carry the
-    polite closings (see :data:`_TRAILING_BOILERPLATE`) that the whole-line trap must not.
-    """
-    parts = _SENTENCE_END.split(text)
-    while len(parts) > 1 and (
-        is_hallucination(parts[-1]) or parts[-1].strip().lower() in _TRAILING_BOILERPLATE
-    ):
-        parts.pop()
-    return " ".join(parts)
+def trim_trailing_quiet(wav: Path) -> bool:
+    """Cut the silence off the end of a clip, at this install's own floor. See `speech`."""
+    return speech.trim_trailing_quiet(wav, quiet_floor())
 
 
 def tidy(transcript: str) -> str:
@@ -1282,18 +1022,15 @@ def tidy(transcript: str) -> str:
     # right call) silently took the flattening with it, and the two have nothing to do with each
     # other.
     text = " ".join(text.split())
-    text = _SPACE_BEFORE_PUNCT.sub(r"\1", text)
-    text = _DOUBLED_PUNCT.sub(r"\2", text)
-    # The credit line whisper appends to trailing silence. `finish` traps the whole-transcript
-    # case; this is the same hallucination riding along behind a real sentence.
-    text = strip_trailing_hallucination(text)
-    if stripping:
-        # Seam repair, and ONLY meaningful after a strip: it exists to close the ", ," a removed
-        # filler leaves behind. Run unconditionally it would quietly eat a trailing comma somebody
-        # dictated on purpose, which is the same class of bug as the strip itself.
-        ended = transcript.rstrip().endswith((".", "!", "?"))
-        text = _DANGLING_TAIL.sub("." if ended else "", text)
-    return text.strip()
+    # Seam repair is ONLY meaningful after a strip: it exists to close the ", ," a removed filler
+    # leaves behind. Run unconditionally it would quietly eat a trailing comma somebody dictated on
+    # purpose, which is the same class of bug as the strip itself - so `stripping` decides it, and
+    # zyx, which always strips, always closes it.
+    return repair_punctuation(
+        text,
+        close_dangling=stripping,
+        ended=transcript.rstrip().endswith((".", "!", "?")),
+    )
 
 
 # The instruction prepended to the transcript when `polishCommand` is a bare model runner that
@@ -2068,20 +1805,6 @@ def streamed(stream: Stream | None) -> str:
 # denied microphone — CoreAudio hands back digital silence — so a process without the grant records
 # a perfectly valid, perfectly empty wav, and whisper answers it with confident nonsense ("Nibble,
 # Nibble, Nibble"). Room tone from a real mic sits around -46 dBFS; true silence is -90 or below.
-SILENT_DBFS = -70.0
-
-# Below this language score, whisper was not listening to speech — see :class:`Heard`. Measured on
-# large-v3-turbo: every real utterance scored >= 0.969, every silent or
-# noisy clip <= 0.453. 0.75 sits in the empty middle with ~0.22 of margin on both sides.
-#
-# This is the trap that the word-list in `_HALLUCINATIONS` structurally cannot be: whisper answers
-# silence in a DIFFERENT invented language each time. Hit live: the key was pressed, nothing was
-# said, and back came two sentences of invented Icelandic ("Ennum, hvað
-# er hann?") as though it were a question. No blocklist can grow fast enough to cover that; asking
-# whisper how sure it was covers all of it at once.
-SPEECH_CONFIDENCE = 0.75
-
-
 def spoken_languages() -> frozenset[str]:
     """The languages you actually speak (``languages``), or empty = accept every one.
 
@@ -2120,9 +1843,6 @@ def spoken_languages() -> frozenset[str]:
 # is not a constant. 8 dB over the loudest room seen, 15 dB under the quietest sentence seen. A
 # far-field microphone in a big room is a different machine from this one, so `quietFloor`
 # overrides it rather than leaving somebody with a tool that never hears them and no way to say so.
-QUIET_DBFS = -30.0
-
-
 def auto_stop_seconds() -> float:
     """How long a forgotten microphone stays open. ``maxHold`` overrides; ``0`` switches it off."""
     raw = _cfg().get("maxHold")
@@ -2151,156 +1871,6 @@ def quiet_floor() -> float:
 #: nothing was asked for, so nothing gets a failure tone. A noise reporting that nothing worked,
 #: when nothing was attempted, is the "beeping out of nowhere" that makes a daemon feel broken.
 NOTHING_SAID = "nothing was said"
-
-
-def peak_dbfs(wav: Path) -> float:
-    """Peak amplitude of a 16-bit PCM wav in dBFS; ``-inf`` for silence or an unreadable file.
-
-    Pure stdlib (:mod:`wave` + :mod:`array`), cheap enough for the hot path: one pass over a few
-    seconds of 16 kHz mono. Worth it because "the transcript is wrong" and "we recorded nothing at
-    all" are indistinguishable in a log and have completely different fixes.
-    """
-    try:
-        with wave.open(str(wav), "rb") as handle:
-            if handle.getsampwidth() != 2:
-                return 0.0  # not 16-bit: no opinion rather than a wrong one
-            frames = handle.readframes(handle.getnframes())
-    except Exception:  # noqa: BLE001 — a diagnostic must never break a dictation
-        return 0.0
-    return _peak_dbfs(frames)
-
-
-#: The recorder's own format — see the `-ar`/`-ac` flags in :func:`start`. 16 kHz mono 16-bit is
-#: 32000 bytes of file per second of audio, which is what lets :func:`tail_dbfs` find "the last ten
-#: seconds" by seeking from the END of a file whose header has not been written yet.
-SAMPLE_RATE = 16000
-BYTES_PER_SECOND = SAMPLE_RATE * 2
-
-
-def _peak_dbfs(frames: bytes) -> float:
-    """Peak of 16-bit PCM ``frames`` in dBFS. ``-inf`` for silence or nothing."""
-    if not frames:
-        return float("-inf")
-    samples = array.array("h")
-    samples.frombytes(frames[: len(frames) - (len(frames) % 2)])
-    if not samples:
-        return float("-inf")
-    # `max(max(...), -min(...))` and not `max(abs(s) for s in samples)`: both find the same peak,
-    # but the generator runs one Python-level loop per SAMPLE — a minute of dictation is ~1M of
-    # them — where two array scans stay in C. This sits on the hot path between the key coming up
-    # and the transcribe starting, which is the one stretch of the product a person is waiting on.
-    peak = max(max(samples), -min(samples))
-    if peak == 0:
-        return float("-inf")
-    return 20 * math.log10(min(peak, 32768) / 32768.0)
-
-
-#: Silence left on the end of a clip, in blocks this long, is cut before anything transcribes it.
-#: Small enough to find the end of the last word closely, large enough that one loud sample of
-#: keyboard noise does not hold a whole minute of nothing in place.
-TRIM_BLOCK_SECONDS = 0.2
-
-#: ...and this much is kept after the last block that had sound in it. A word's decay is part of
-#: the word, and whisper reads a hard cut at the end of a syllable as a different syllable.
-TRIM_KEEP_SECONDS = 0.4
-
-
-def trim_trailing_quiet(wav: Path) -> bool:
-    """Cut silence off the end of a clip. True if anything was cut. Never raises.
-
-    **Whisper invents words when it is handed audio with nothing in it**, and this is the fix for
-    it — measured, after two that were not. The same 12 seconds of speech, three ways:
-
-        speech alone                 "...but just in this text box,"
-        + 20s of digital silence     "...but just in this text box, Thank you."
-        + 20s of faint room noise    "...but just in this text box.."
-
-    So the invention is not a property of the speech, the model or the prompt. It is the silence,
-    and the cure is not to hand it over. Reported as "a lot of gibberish in a different language",
-    which was romanised Japanese appended to a real English sentence, and it reached the cursor
-    because he had not tapped to stop — so the clip ended with fifteen seconds of nothing.
-
-    What was tried first and REFUSED, both measured: no word list can catch it (this file already
-    said so — whisper answers silence in a different invented language each time), and whisper's
-    own per-segment `no_speech_prob`/`avg_logprob` do not either. The invented " Thank you." came
-    back at `no_speech_prob` **0.000** and `avg_logprob` -0.28, sitting among real speech at -0.05
-    to -0.12: confidently wrong, with no threshold between them that does not also cut real quiet
-    speech.
-
-    Nothing is cut when the clip is quiet all the way through — that is a clip with no speech in
-    it, and the level gates in :func:`finish` are what should judge it and say so.
-    """
-    block = int(TRIM_BLOCK_SECONDS * BYTES_PER_SECOND)
-    head = data_offset(wav)  # NOT 44: ffmpeg writes a LIST chunk in there too
-    try:
-        size = wav.stat().st_size
-        with wav.open("rb") as handle:
-            handle.seek(head)
-            audio = handle.read()
-    except OSError:
-        return False
-    floor = quiet_floor()
-    last = -1
-    for index in range(len(audio) // block):
-        if _peak_dbfs(audio[index * block : (index + 1) * block]) >= floor:
-            last = index
-    if last < 0:
-        return False  # nothing above the floor anywhere: not ours to judge
-    keep = head + (last + 1) * block + int(TRIM_KEEP_SECONDS * BYTES_PER_SECOND)
-    if keep >= size:
-        return False
-    try:
-        with wav.open("r+b") as handle:
-            handle.truncate(keep)
-    except OSError:
-        return False
-    repair_wav(wav)  # the RIFF header still claims the length it had before the cut
-    return True
-
-
-def tail_dbfs(wav: Path, seconds: float) -> float:
-    """Peak of the LAST ``seconds`` of a clip that is STILL BEING RECORDED. ``0.0`` = no opinion.
-
-    Read by seeking from the end of the file rather than through :mod:`wave`, because while ffmpeg
-    is still appending, the RIFF header holds the lengths it was born with — zero — so every
-    header-respecting reader sees an empty file (this is what :func:`repair_wav` exists to undo,
-    and it may not be run against the file the recorder is writing).
-
-    Every byte past the header is a sample, so "the last ten seconds" is the last
-    ``10 * BYTES_PER_SECOND`` bytes, and a seek is the whole implementation. A clip that has not
-    yet run that long has no opinion — ``0.0``, the same "no opinion" :func:`peak_dbfs` returns for
-    a format it will not judge, which is well above any real floor and so is never read as silence.
-    """
-    want = int(seconds * BYTES_PER_SECOND)
-    if want <= 0:
-        return 0.0
-    try:
-        size = wav.stat().st_size
-        if size < want + data_offset(wav):
-            return 0.0  # not enough audio yet to have been quiet for that long
-        with wav.open("rb") as handle:
-            handle.seek(size - want)
-            return _peak_dbfs(handle.read(want))
-    except OSError:
-        return 0.0
-
-
-def audio_seconds(wav: Path) -> float:
-    """How long the RECORDING is, from its own header. ``0.0`` if it cannot be read.
-
-    Not the same number as :attr:`Recording.seconds`, and the gap between them is the point.
-    ``Recording.seconds`` is wall clock from spawning ffmpeg to stopping it; this is how much
-    audio actually reached the file. A daemon log that prints only the first cannot tell "whisper
-    mis-heard 21 seconds of speech" from "we captured 15 of the 21 seconds you spoke", which are
-    the two halves of every report that a dictation came back short, and they have completely
-    different fixes. Both are printed now, and only when they disagree — see the daemon loop.
-    """
-    try:
-        with wave.open(str(wav), "rb") as handle:
-            rate = handle.getframerate()
-            return handle.getnframes() / rate if rate else 0.0
-    except Exception:  # noqa: BLE001 — a diagnostic must never break a dictation
-        return 0.0
 
 
 @dataclass(frozen=True)

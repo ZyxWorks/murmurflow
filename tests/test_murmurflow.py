@@ -1695,6 +1695,57 @@ def test_the_microphone_closes_itself_when_the_second_tap_never_comes(monkeypatc
     assert dictate.MAX_CLIP_SECONDS == 600
 
 
+def _drive_stream(passes):
+    """What lands on screen when the live pass reads ``passes``, one after another.
+
+    The same four calls `_stream_loop` makes, in the same order, so a sequence that broke a real
+    dictation can be replayed as a test. Kept beside the tests that use it rather than inside them:
+    four copies of the loop drift, and a copy that drifts stops testing the loop.
+    """
+    screen = previous = ""
+    for heard in passes:
+        settled = dictate.stable_prefix(previous, heard)
+        previous = heard
+        chunk = dictate.stream_tail(screen, settled) if settled else ""
+        mark = dictate.missing_mark(screen, settled) if chunk else ""
+        if chunk:
+            screen = f"{screen}{mark} {chunk}".strip() if screen else chunk
+    return screen
+
+
+def test_the_mark_lands_once_a_later_word_confirms_it():
+    """Reported as "there was a break before, but no punctuation".
+
+    A mark rides on the word in front of it, and that word is never typed with its mark while it
+    still touches the end of the audio — a pause is how whisper decides a sentence ended, and it
+    takes that back the moment the speaker carries on. So the word landed bare and nothing could
+    put the mark on afterwards. A later pass answers it: real speech follows and whisper STILL
+    ends the sentence there, so the mark goes on, joined to the word it belongs to.
+    """
+    reference = "I did not say the three times. I did, however, say really three times."
+    screen = _drive_stream(
+        [
+            "I did not say the three times",
+            "I did not say the three times",  # the break
+            "I did not say the three times.",  # whisper ends the sentence
+            "I did not say the three times.",
+            "I did not say the three times. I",  # he carries on
+            "I did not say the three times. I did however say",
+            "I did not say the three times. I did, however, say really",
+            reference,
+            reference,
+        ]
+    )
+    # ...plus the one thing only the key release can know: the mark that ends the clip.
+    landed = screen + dictate.end_mark(screen, reference)
+    assert landed == reference  # streamed, and identical to the whole-clip transcript
+    # And the fixes it must not undo, driven through the same loop.
+    assert _drive_stream(["Could you please work on my", "Could you please work on my..."] * 2) == (
+        "Could you please work on my"
+    )
+    assert "The The" not in _drive_stream(["Well, yeah. The The The"] * 3)
+
+
 def test_a_pause_never_types_a_lone_full_stop_where_the_next_word_goes():
     """Reported as "it puts a period instead of the word" after a short break.
 
@@ -1704,24 +1755,21 @@ def test_a_pause_never_types_a_lone_full_stop_where_the_next_word_goes():
     screen with no letters in it, so the next alignment read it as something the final pass had
     reworded and dropped a real word to pay for it. The word this ate, in the report, was "But".
     """
-    screen, previous = "", ""
-    for heard in (
-        "and then I ran the command",
-        "and then I ran the command",  # the pause: the transcript stops growing
-        "and then I ran the command.",  # whisper decides the sentence ended
-        "and then I ran the command.",
-        "and then I ran the command. But",  # he speaks again
-        "and then I ran the command. But when I say",
-        "and then I ran the command. But when I say",
-    ):
-        settled = dictate.stable_prefix(previous, heard)
-        previous = heard
-        chunk = dictate.stream_tail(screen, settled) if settled else ""
-        if chunk:
-            screen = f"{screen} {chunk}".strip() if screen else chunk
-    assert " ." not in screen
-    assert "But" in screen
-    assert screen == "and then I ran the command But when I say"
+    screen = _drive_stream(
+        [
+            "and then I ran the command",
+            "and then I ran the command",  # the pause: the transcript stops growing
+            "and then I ran the command.",  # whisper decides the sentence ended
+            "and then I ran the command.",
+            "and then I ran the command. But",  # he speaks again
+            "and then I ran the command. But when I say",
+            "and then I ran the command. But when I say",
+        ]
+    )
+    assert " ." not in screen  # never a mark standing on its own
+    assert "But" in screen  # and never a word paid to the alignment for one
+    # The full stop DOES land, because "But" settled behind it and confirmed it.
+    assert screen == "and then I ran the command. But when I say"
 
 
 def test_a_pause_does_not_put_a_full_stop_in_the_middle_of_the_sentence():

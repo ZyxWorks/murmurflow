@@ -1790,13 +1790,22 @@ def stream_tail(pasted: str, final: str) -> str:
     if not already:
         return final
     words = final.split()
-    keys = [_key(word) for word in words]
+    return " ".join(words[_reached(already, [_key(word) for word in words]) :])
+
+
+def _reached(already: list[str], keys: list[str]) -> int:
+    """The index in ``keys`` just past everything that is already on screen.
+
+    Split out of :func:`stream_tail` because :func:`missing_mark` asks the same question about the
+    same two sequences — where does the screen END inside this transcript — and two answers to that
+    would drift apart word by word.
+    """
     if keys[: len(already)] == already:
-        return " ".join(words[len(already) :])
+        return len(already)
     matcher = difflib.SequenceMatcher(a=already, b=keys, autojunk=False)
     matched = [block for block in matcher.get_matching_blocks() if block.size]
     if not matched:  # nothing corresponds: trust the count, lose nothing
-        return " ".join(words[len(already) :])
+        return len(already)
     reached = matched[-1]
     # Words on screen PAST the alignment are ones the final pass said differently. The tail that
     # follows them is not new text, it is the same words again in the better model's wording, and
@@ -1804,7 +1813,40 @@ def stream_tail(pasted: str, final: str) -> str:
     # exactly what one reworded last word looks like ("the design" + "designs"). One dropped for
     # one left over: the rewording is skipped and anything genuinely beyond the screen still lands.
     reworded = len(already) - (reached.a + reached.size)
-    return " ".join(words[reached.b + reached.size + reworded :])
+    return reached.b + reached.size + reworded
+
+
+def missing_mark(pasted: str, settled: str) -> str:
+    """The mark that belongs directly after ``pasted``, once a later word has confirmed it.
+
+    **This is the punctuation streaming used to lose, and it is the last of it.** A mark rides on
+    the word in front of it, and :func:`stable_prefix` will not type the mark on a word that is
+    still touching the end of the audio — a pause is how whisper decides a sentence ended, and it
+    takes that decision back the moment the speaker carries on. So the word lands bare, and
+    nothing could ever put the mark on afterwards: the word is already on screen and there is no
+    un-type. Reported as "there was a break before, but no punctuation".
+
+    A LATER pass answers the question the earlier one could not. If the word carrying the mark is
+    no longer at the end of the transcript — real speech follows it, and whisper still ends the
+    sentence there — the mark is a decision made WITH the following audio, which is the same test
+    every other word passes before it is typed. It goes on with no space in front of it, joined to
+    the word it belongs to.
+
+    Returns ``""`` unless a word after it has also settled, so this can never be the lone full stop
+    of :func:`end_mark`'s docstring: the mark is only ever typed in the same breath as the word
+    that proves it.
+    """
+    already = [_key(word) for word in pasted.split()]
+    words = settled.split()
+    if not already or not words:
+        return ""
+    index = _reached(already, [_key(word) for word in words])
+    if index <= 0 or index >= len(words):
+        return ""  # nothing before it, or nothing after it to confirm it
+    mark = _TRAILING_MARK.search(words[index - 1])
+    if not mark or pasted.rstrip().endswith(mark.group()):
+        return ""
+    return mark.group()
 
 
 def _partial(live: Path, snapshot: Path, language: str = "") -> Heard:
@@ -1948,6 +1990,9 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
         settled = stable_prefix(previous, heard)
         previous = heard
         chunk = stream_tail(stream.text, settled) if settled else ""
+        # The mark on the word already at the end of the screen, now that a later word has
+        # settled behind it. Only ever together with that word — see :func:`missing_mark`.
+        mark = missing_mark(stream.text, settled) if chunk else ""
         if chunk:
             with _INJECT_LOCK:
                 # Inside the lock, because `stop_streaming` sets this and then takes the lock: past
@@ -1961,7 +2006,7 @@ def _stream_loop(rec: Recording, stream: Stream) -> None:
                 # `stream.text` is literally what is on the screen, built from what LANDED rather
                 # than from what was asked for — see :func:`place`. The leading space travels with
                 # the chunk, so this is a concatenation and never a re-join.
-                landed = place(f" {chunk}" if stream.text else chunk)
+                landed = place(f"{mark} {chunk}" if stream.text else chunk)
                 if landed:
                     stream.text = f"{stream.text}{landed}".strip()
                     stream.typed += 1

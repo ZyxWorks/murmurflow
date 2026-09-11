@@ -1,8 +1,9 @@
 """``murmurflow`` — the command line. Ten verbs, and most people only ever type two.
 
-``setup`` then ``install`` is the whole happy path. Everything else here exists because dictation
-fails in exactly four ways — the key is not seen, the microphone is not heard, the model is not
-found, the text is not typed — and each of those has its own verb that answers it in one run.
+``setup``, ``install``, ``on`` is the whole happy path; ``off`` and ``update`` mean what they mean
+in zyx and agent-office. Everything else here exists because dictation fails in exactly four ways
+— the key is not seen, the microphone is not heard, the model is not found, the text is not typed —
+and each of those has its own verb that answers it in one run.
 """
 
 from __future__ import annotations
@@ -149,31 +150,32 @@ def _update_command(receipt: Path) -> list[str] | None:
     return None
 
 
-def _update() -> None:
+def _update() -> bool:
     """Re-install this package from its source, then re-exec into the new copy. Usually a no-op.
 
     Never blocks the install: a machine with no ``uv``, a source that has gone away, a network that
     is down — all of them print a line and carry on with the copy that is already here. An update
     that could not run is an inconvenience; an ``install`` that refuses to run is a dead tool.
+    False only when an update was tried and failed, so the ``update`` verb can say so.
     """
     receipt = None if os.environ.get(_RESYNCED) else _receipt()
     if receipt is None:
-        return
+        return True
     command = _update_command(receipt)
     if command is None:
-        return
+        return True
     _out("updating the installed copy from its source...")
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         _out(f"[!] could not update it ({error}) — installing the copy already here")
-        return
+        return False
     if done.returncode != 0:
         detail = (done.stderr or "").strip().splitlines()
         _out(
             f"[!] could not update it ({detail[-1] if detail else 'unknown error'}) — installing the copy already here"
         )
-        return
+        return False
     _out("[OK] code updated")
     os.environ[_RESYNCED] = "1"
     try:
@@ -186,23 +188,34 @@ def _update() -> None:
         # lazy import opens a path that is gone. Half an install is worse than none, and re-running
         # the command is now free — the update is already done, and the guard above skips it.
         _out(f"[!] updated, but could not restart into the new copy ({error}).")
-        _out("    Run `murmurflow install` once more — the update itself is done.")
+        # The SAME verb, not `install`: `install` never starts a stopped listener, so after a
+        # failed `murmurflow on` it would leave dictation off while the hint promised otherwise.
+        again = " ".join(["murmurflow", *sys.argv[1:]])
+        _out(f"    Run `{again}` once more — the update itself is done.")
         raise SystemExit(1) from error
 
 
-def _install() -> int:
-    """Update the installed copy, warm the microphone, then install the launchd agent.
-
-    This is the ONE command: `git pull && murmurflow install` and the machine is running what the
-    repo says. See :func:`_update` for why the update belongs here rather than in a verb of its own.
-    """
-    _update()  # may re-exec; anything after this line runs in the NEW copy
+def _ready() -> bool:
+    """Can a listener run on this machine at all. Says why not."""
     ready, hint = dictate.available()
     if not ready:
         _out(hint)
-        return 2
+        return False
     if not service.supported():
         _out(f"murmurflow has no always-on listener for {sys.platform} yet — see the README")
+        return False
+    return True
+
+
+def _install() -> int:
+    """Update the installed copy and warm the microphone. It never switches dictation ON.
+
+    `install` means the same in every tool here (zyx, agent-office): put it on the machine, start
+    nothing — `on` starts it. A listener that is ALREADY on comes back on the new code, so
+    `git pull && murmurflow install` is still a whole update; a first install ends by naming `on`.
+    """
+    _update()  # may re-exec; anything after this line runs in the NEW copy
+    if not _ready():
         return 2
 
     # The FIRST ever CoreAudio access on a Mac takes ~10 seconds. Paying it here, explicitly, means
@@ -219,8 +232,67 @@ def _install() -> int:
     else:
         _out("[!] could not open the microphone — grant Microphone access and re-run")
 
+    if service.running():
+        return _start()  # installing IS updating: a live listener comes back on the new code
+    _out("[OK] installed. Dictation is off until you switch it on:")
+    _out("  murmurflow on")
+    return 0
+
+
+def _on() -> int:
+    """Dictation on, now and after every login, on the newest code — the same `on` as `zyx on`."""
+    _update()  # may re-exec; anything after this line runs in the NEW copy
+    if not _ready():
+        return 2
+    return _start()
+
+
+def _off() -> int:
+    """Dictation off, now and after every restart, until `on`. Deletes nothing you would miss."""
+    ok, detail = service.uninstall()
+    # The warm whisper-server is detached on purpose and would otherwise sit on ~1.8 GB until the
+    # next reboot, long after the thing that talked to it was stopped.
+    freed = dictate.stop_server()
+    _out(
+        "[OK] dictation is off, also after a restart. `murmurflow on` brings it back."
+        if ok
+        else f"[!] {detail}"
+    )
+    if freed:
+        _out("[OK] stopped the warm whisper-server")
+    return 0 if ok else 1
+
+
+def _update_verb() -> int:
+    """The newest code. A listener that is on restarts on it; one that is off stays off."""
+    if not os.environ.get(_RESYNCED) and _receipt() is None:
+        _out(
+            "[!] this copy was not installed with `uv tool`, so there is nothing to update it from."
+        )
+        _out("    From a checkout: `git pull`, then `murmurflow on`.")
+        return 1
+    if not _update():  # may re-exec; anything after this line runs in the NEW copy
+        return 1
+    if not service.running():
+        _out("[OK] up to date. Dictation is off, so it stays off — `murmurflow on` starts it.")
+        return 0
+    ok, detail = service.install()  # rewrite the agent too, the way `install` always has
+    _out(
+        "[OK] up to date, and dictation restarted on it."
+        if ok
+        else f"[!] updated, but could not restart it: {detail}"
+    )
+    return 0 if ok else 1
+
+
+def _start() -> int:
+    """Register the login agent and start it now, then name what the user still has to grant."""
     ok, detail = service.install()
-    _out(f"[OK] installed {service.LABEL}" if ok else f"[!] could not install it: {detail}")
+    _out(
+        "[OK] dictation is on, now and after every login."
+        if ok
+        else f"[!] could not switch it on: {detail}"
+    )
     _out("")
     # Installing is the exact moment a second daemon joins the key, so it is the moment to say so.
     # Silence here costs the user a session of "it worked yesterday" before anyone runs the health
@@ -260,20 +332,14 @@ def _install() -> int:
 
 
 def _uninstall() -> int:
-    ok, detail = service.uninstall()
-    # The warm whisper-server is detached on purpose and would otherwise sit on ~1.8 GB until the
-    # next reboot, long after the thing that talked to it was removed.
-    freed = dictate.stop_server()
+    """`off`, and the .app with it."""
+    code = _off()
     # And the .app, or `uninstall` leaves an application in ~/Applications forever. Recreating it
     # later at the same path from the same interpreter reproduces the cdhash, so the Privacy grant
     # is not spent by removing it.
-    removed = service.remove_identity()
-    _out("[OK] dictation stopped and removed from login." if ok else f"[!] {detail}")
-    if freed:
-        _out("[OK] stopped the warm whisper-server")
-    if removed:
+    if service.remove_identity():
         _out("[OK] removed the MurmurFlow.app bundle")
-    return 0 if ok else 1
+    return code
 
 
 # --- diagnosis --------------------------------------------------------------------------------
@@ -462,7 +528,7 @@ def _doctor(*, verbs: bool = False) -> int:
             installed,
             f"login agent: {'installed' if installed else 'not installed'}"
             + (f", {'running' if service.running() else 'not loaded'}" if installed else ""),
-            "murmurflow install",
+            "murmurflow on",
         )
     )
     for ok, line, fix in rows:
@@ -497,7 +563,8 @@ _VERBS = (
     ("keytest", "does this Mac see your key, and does it read your gesture the way you think"),
     ("devices", "list microphones (then: config set inputName <part of a name>)"),
     ("pause / resume", "lend the trigger key to another program, and take it back"),
-    ("install / uninstall", "turn dictation on or off for every login"),
+    ("on / off", "dictation on or off — both last across a restart"),
+    ("update", "the newest code; restarts dictation only if it is on"),
     ("--help", "everything else"),
 )
 
@@ -844,8 +911,11 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("listen", help="run the press-to-talk daemon in this terminal (blocks)")
-    sub.add_parser("install", help="install the login agent so dictation is always live")
-    sub.add_parser("uninstall", help="stop dictation and remove it from login")
+    sub.add_parser("install", help="set it up on this Mac (starts nothing; a running one updates)")
+    sub.add_parser("on", help="dictation on, now and after every login")
+    sub.add_parser("off", help="dictation off, now and after every restart")
+    sub.add_parser("update", help="the newest code; restarts dictation only if it is on")
+    sub.add_parser("uninstall", help="off, and remove the MurmurFlow.app too")
     sub.add_parser("doctor", help="what is missing, and the one command that fixes each thing")
     sub.add_parser("devices", help="list microphones")
     sub.add_parser("toggle", help="start/stop one recording (for a Shortcuts binding)")
@@ -889,6 +959,12 @@ def main(argv: list[str] | None = None) -> int:
             return _listen(trigger=getattr(args, "trigger", ""))
         if command == "install":
             return _install()
+        if command == "on":
+            return _on()
+        if command == "off":
+            return _off()
+        if command == "update":
+            return _update_verb()
         if command == "uninstall":
             return _uninstall()
         if command == "setup":

@@ -1239,9 +1239,7 @@ def test_the_warm_server_is_started_in_a_writable_directory(monkeypatch, tmp_pat
         raise OSError("not really spawning anything in a test")
 
     monkeypatch.setattr(speech, "server_up", lambda _port=0: False)
-    monkeypatch.setattr(
-        speech, "serve_command", lambda _setup: ["whisper-server", "--convert"]
-    )
+    monkeypatch.setattr(speech, "serve_command", lambda _setup: ["whisper-server", "--convert"])
     monkeypatch.setattr(speech.subprocess, "Popen", _popen)
     assert dictate.start_server() is False
     cwd = Path(str(seen["kwargs"]["cwd"]))

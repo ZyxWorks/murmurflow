@@ -423,7 +423,7 @@ def _doctor(*, verbs: bool = False) -> int:
                     if warm
                     else f"{why} — every clip pays the model load again, on the weaker cold path"
                 ),
-                "murmurflow install   (the listener starts and keeps it warm)",
+                "murmurflow on   (the listener starts and keeps it warm)",
             )
         )
     rows.append(
@@ -480,7 +480,7 @@ def _doctor(*, verbs: bool = False) -> int:
                 else f"{len(live)} AT ONCE ({', '.join(str(pid) for pid in live)}) "
                 "— every sentence is typed twice"
             ),
-            "murmurflow uninstall, then murmurflow install",
+            "murmurflow off, then murmurflow on",
         )
     )
     # A murmurflow-only count reads "listeners: 1 [OK]" on a Mac where a SECOND program holds the

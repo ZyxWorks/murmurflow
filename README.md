@@ -64,7 +64,8 @@ the fewest ways to go wrong:
 brew install whisper-cpp ffmpeg uv
 uv tool install --python 3.13 git+https://github.com/ZyxWorks/murmurflow
 murmurflow setup             # downloads both speech models (~2.1 GB, once)
-murmurflow install           # dictation is live now, and after every login
+murmurflow install           # set it up (starts nothing)
+murmurflow on                # dictation is live now, and after every login
 ```
 
 On Windows the only difference is whisper: there is no package for it, so the installer downloads
@@ -76,6 +77,7 @@ winget install Gyan.FFmpeg astral-sh.uv
 uv tool install --python 3.13 git+https://github.com/ZyxWorks/murmurflow
 murmurflow setup
 murmurflow install
+murmurflow on
 ```
 
 If `murmurflow` is not found afterwards, `~/.local/bin` is not on your `PATH` — `uv tool
@@ -485,7 +487,10 @@ A broken polish command degrades to the plain transcript. It never costs you the
 ## Commands
 
 ```
-murmurflow install      install (or UPDATE) dictation, and keep it live after every login
+murmurflow install      set it up on this Mac; starts nothing (a listener already on updates)
+murmurflow on           dictation on, now and after every login
+murmurflow off          dictation off, now and after every restart, until `on`
+murmurflow update       the newest code; restarts dictation only if it is on
 murmurflow listen       run the daemon in this terminal instead (blocks)
 murmurflow doctor       what is missing, and the one command that fixes each thing
 murmurflow keytest      does this Mac actually see your trigger key?
@@ -497,8 +502,12 @@ murmurflow transcribe   transcribe an audio file and print the text
 murmurflow pause        lend the trigger key to another program for a while
 murmurflow resume       take it back
 murmurflow trigger      print the trigger key this install is on, for another program to read
-murmurflow uninstall    stop dictation and remove it from login
+murmurflow uninstall    `off`, and remove the MurmurFlow.app too
 ```
+
+`install`, `on`, `off`, `update` and `doctor` mean the same here as in `zyx` and in agent-office's
+`office`: install sets up and starts nothing, on and off both last across a restart, update never
+switches on something that is off.
 
 Every clip the daemon handles is logged — how long you held the key, how much audio actually
 landed, the peak level, the transcribe time, how many characters came back and the app the paste
@@ -511,14 +520,15 @@ you leave it on, and deletes the clip when you turn it off.
 this machine cannot poll, a model path that is not there, a language you did not say you speak. All of those
 used to be accepted and then fail silently, which is the same symptom as broken hardware.
 
-**`install` is also `update`.** The listener does not run your checkout — `uv tool install` made
+**`update` is the update.** The listener does not run your checkout — `uv tool install` made
 a copy of the package and launchd runs that — so a `git pull` alone changes a directory the running
-program never reads, silently. `murmurflow install` therefore re-installs the package from wherever
+program never reads, silently. `murmurflow update` therefore re-installs the package from wherever
 it came from first (a local checkout, a git URL, PyPI), then re-executes itself out of the new copy
-and registers the agent. Two commands, and only because the first one is git:
+and restarts the listener if it is on. `install` and `on` do the same re-install first, so the old
+habit still works. From a checkout, two commands, and only because the first one is git:
 
 ```sh
-git pull && murmurflow install
+git pull && murmurflow update
 ```
 
 An update that cannot run never blocks the install: no `uv`, a source that has moved, a network

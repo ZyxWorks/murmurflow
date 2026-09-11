@@ -67,6 +67,7 @@ say "Downloading the speech models (~2.1 GB, once)"
 
 say "Turning dictation on"
 "$MF" install
+"$MF" on
 
 say "Done"
 echo "Open a NEW terminal for the 'murmurflow' command; dictation itself is already live."

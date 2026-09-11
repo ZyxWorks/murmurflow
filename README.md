@@ -300,7 +300,7 @@ macOS will ask for two the first time, and neither can be granted from a script:
 2. **Accessibility** — to type into the app you're using.
    *System Settings → Privacy & Security → Accessibility*
 
-**Both rows are called `MurmurFlow`.** `murmurflow install` builds a small app bundle at
+**Both rows are called `MurmurFlow`.** `murmurflow on` builds a small app bundle at
 `~/Applications/MurmurFlow.app` purely so that is true. Without it macOS names the row after the
 *interpreter* — `python3.13` — which nobody scrolling for "murmurflow" finds, and switching that on
 would hand the microphone and your keyboard to every other Python tool sharing it.

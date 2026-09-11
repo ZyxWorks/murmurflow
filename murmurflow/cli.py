@@ -188,7 +188,10 @@ def _update() -> bool:
         # lazy import opens a path that is gone. Half an install is worse than none, and re-running
         # the command is now free — the update is already done, and the guard above skips it.
         _out(f"[!] updated, but could not restart into the new copy ({error}).")
-        _out("    Run `murmurflow install` once more — the update itself is done.")
+        # The SAME verb, not `install`: `install` never starts a stopped listener, so after a
+        # failed `murmurflow on` it would leave dictation off while the hint promised otherwise.
+        again = " ".join(["murmurflow", *sys.argv[1:]])
+        _out(f"    Run `{again}` once more — the update itself is done.")
         raise SystemExit(1) from error
 
 

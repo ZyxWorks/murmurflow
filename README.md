@@ -116,12 +116,13 @@ move the cursor mid-sentence (to click a file, switch windows) and a streamed ch
 wrong place, with only the un-streamed tail pasted at the end — the rest of what you said was
 simply gone. One paste, at the end, like Wispr Flow, is the version that cannot lose words.
 
-**On a Mac it makes no sound: a small waveform shows up instead.** A dark pill at the bottom of
+**On a Mac the listener makes no sound: a small waveform shows up instead.** A dark pill at the bottom of
 the screen opens with the microphone. Its bars move with your voice, so you can see it hearing you
 — and see when it is not. When the microphone closes, a soft wave of light runs across it while
 the words are transcribed, and it disappears when they land. It never takes focus, so your cursor
 stays where it was. No setting, no compiled helper: it is drawn with `osascript`. On Windows it is
-two short sounds instead, one when the microphone opens and one when it closes. Nothing marks a
+two short sounds instead, one when the microphone opens and one when it closes — and so is
+`murmurflow toggle` on a Mac, which runs in its own short process. Nothing marks a
 failure — that is a line in the log, not a noise in a meeting.
 
 **And the first word is not missing any more.** CoreAudio takes about 0.6s to hand over its first

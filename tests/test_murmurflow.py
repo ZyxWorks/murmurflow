@@ -42,6 +42,7 @@ def _isolated_home(tmp_path, monkeypatch):
     # And an unclaimed pre-roll is module state too: one left behind makes the NEXT test's
     # `preroll` a no-op and its `preroll_claim` wait out the full claim timeout.
     dictate._PREROLL = None
+    dictate._LEVELS.clear()
     # THE SUITE MUST NOT REACH OUT OF THIS DIRECTORY, and `MURMURFLOW_HOME` alone does not stop it:
     # `config set` bounces the warm servers whenever the listener is INSTALLED, and that question is
     # about the real machine. On a developer's Mac a config test therefore ran a real `pgrep` and a

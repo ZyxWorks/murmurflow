@@ -44,7 +44,12 @@ function run(argv) {
   app.setActivationPolicy($.NSApplicationActivationPolicyAccessory);
 
   const width = PAD * 2 + BARS * BAR_W + (BARS - 1) * GAP;
-  const screen = $.NSScreen.mainScreen.visibleFrame;
+  // The screen under the mouse: this process never has a key window, so mainScreen is always the
+  // primary display, which on a laptop with a monitor is the wrong one.
+  const mouse = $.NSEvent.mouseLocation;
+  const screens = ObjC.unwrap($.NSScreen.screens);
+  const under = screens.find((s) => $.NSMouseInRect(mouse, s.frame, false)) || screens[0];
+  const screen = under.visibleFrame;
   const x = screen.origin.x + (screen.size.width - width) / 2;
   const y = screen.origin.y + 28;
   // 128 = NSWindowStyleMaskNonactivatingPanel on a borderless (0) panel.

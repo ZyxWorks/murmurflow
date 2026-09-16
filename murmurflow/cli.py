@@ -150,6 +150,36 @@ def _update_command(receipt: Path) -> list[str] | None:
     return None
 
 
+def _pull(checkout: Path) -> None:
+    """Fast-forward a git checkout to its upstream before it is re-installed. Never blocks.
+
+    `update` promised "the newest code" and re-installed the checkout exactly as it sat on disk:
+    two PRs merged on GitHub, `murmurflow update` said "[OK] code updated", and the listener kept
+    running last week's code, because nothing had pulled. ``--ff-only`` so local work is never
+    merged or overwritten; a checkout that cannot fast-forward says so and installs what it has.
+    """
+    git = speech.resolve_bin("git")
+    if not git or not (checkout / ".git").exists():
+        return
+    try:
+        done = subprocess.run(
+            [git, "-C", str(checkout), "pull", "--ff-only", "--quiet"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        _out(f"[!] could not pull the newest code ({error}) — installing the checkout as it is")
+        return
+    if done.returncode != 0:
+        detail = (done.stderr or "").strip().splitlines()
+        _out(
+            f"[!] could not pull the newest code ({detail[-1] if detail else 'unknown error'})"
+            " — installing the checkout as it is"
+        )
+
+
 def _update() -> bool:
     """Re-install this package from its source, then re-exec into the new copy. Usually a no-op.
 
@@ -165,6 +195,8 @@ def _update() -> bool:
     if command is None:
         return True
     _out("updating the installed copy from its source...")
+    if Path(command[-1]).is_dir():
+        _pull(Path(command[-1]))
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
     except (OSError, subprocess.SubprocessError) as error:

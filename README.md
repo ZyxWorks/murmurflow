@@ -2,9 +2,9 @@
 
 ### Write at the speed you talk.
 
-Tap a key twice and talk. The words land at your cursor **while you are still talking**, in
-whatever app you are already in: Slack, your terminal, a browser, your notes. It transcribes on
-your own machine, so nothing you say ever leaves it.
+Tap a key twice and talk, tap again to stop. The words land at your cursor **the moment you stop
+talking**, in whatever app you are already in: Slack, your terminal, a browser, your notes. It
+transcribes on your own machine, so nothing you say ever leaves it.
 
 [![CI](https://github.com/ZyxWorks/murmurflow/actions/workflows/ci.yml/badge.svg)](https://github.com/ZyxWorks/murmurflow/actions/workflows/ci.yml)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-c9903f)](LICENSE)
@@ -32,7 +32,7 @@ irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex
 
 Either one works on a machine with nothing on it: no package manager, no Python, no developer
 tools, and on Windows no Administrator either. It installs what is missing, downloads the speech
-speech models (~2.1 GB, once), and turns dictation on for every login. On macOS it also opens the one
+model (~1.6 GB, once), and turns dictation on for every login. On macOS it also opens the one
 permission switch the OS will not let a script flip for you; Windows has no such switch.
 
 Then double-tap **Control**, say something, and tap it once more to stop. That's the whole product,
@@ -63,7 +63,7 @@ the fewest ways to go wrong:
 ```sh
 brew install whisper-cpp ffmpeg uv
 uv tool install --python 3.13 git+https://github.com/ZyxWorks/murmurflow
-murmurflow setup             # downloads both speech models (~2.1 GB, once)
+murmurflow setup             # downloads the speech model (~1.6 GB, once)
 murmurflow install           # set it up (starts nothing)
 murmurflow on                # dictation is live now, and after every login
 ```
@@ -110,11 +110,11 @@ all. `murmurflow doctor` runs on Linux and says exactly that.
 
 ### Two things worth knowing
 
-**It types while you talk, and there is no setting for it.** Tap twice and start speaking: the
-words begin landing at your cursor about two seconds in, in lumps, and the rest arrives when you
-tap again to stop. It used to be an opt-in flag called `stream` and that flag is gone — opt-in
-meant almost nobody ever saw the good version of the tool. See
-[how it works](#how-the-words-arrive-while-you-talk).
+**The whole transcript lands at once, the moment you stop.** Tap twice, talk, tap again — nothing
+is typed until then. It used to paste in lumps while you were still talking, and that was removed:
+move the cursor mid-sentence (to click a file, switch windows) and a streamed chunk landed in the
+wrong place, with only the un-streamed tail pasted at the end — the rest of what you said was
+simply gone. One paste, at the end, like Wispr Flow, is the version that cannot lose words.
 
 **It makes exactly two sounds, and neither has a setting.** A short tick the moment the microphone
 is genuinely live, so you know when to start. A blunter one the instant it closes, so you know the
@@ -283,11 +283,10 @@ Mac roughly doubled every row. Measure your own before believing any of them, in
   `ctypes`. No Xcode, no code signing, no notarization, and no TCC grant that a rebuild invalidates.
 - **No dependencies.** `pip install murmurflow` pulls in nothing. Two Homebrew binaries and macOS
   itself do the work.
-- **No always-on microphone.** Nothing is listening between sentences. Typing the words out while
-  you talk decodes the clip you are already recording, and nothing else — see
-  [how the words arrive](#how-the-words-arrive-while-you-talk). The one exception is the half
-  second the recorder opens early, on the first of your two taps, so the first word is not lost;
-  a tap that never becomes a pair stops it and deletes what it caught.
+- **No always-on microphone.** Nothing is listening between sentences: recording starts on the
+  first tap and ends on the second, and the clip is transcribed once, then discarded. The one
+  exception is the half second the recorder opens early, on the first of your two taps, so the
+  first word is not lost; a tap that never becomes a pair stops it and deletes what it caught.
 - **No LLM on the hot path**, unless you ask for one — see [polish](#polish-optional).
 - **No Linux.** Recording and typing are both small there; the hotkey is not, because Wayland
   exposes no global hotkey API at all. `murmurflow doctor` runs on Linux and says exactly that.
@@ -327,9 +326,8 @@ change: the best model **present** wins.
 murmurflow setup base            # smaller and faster, noticeably worse
 ```
 
-ONE model does both jobs — the transcript you keep and the words that arrive while you talk. There
-used to be a second, small one for the live pass; it was retired when the live pass began typing
-punctuation. See [how the words arrive](#how-the-words-arrive-while-you-talk).
+ONE model transcribes everything. There used to be a second, small one for a faster live pass;
+it was retired when the live pass began typing punctuation the big model would not have chosen.
 
 Teach it your own words — the cheapest accuracy win there is:
 
@@ -353,78 +351,19 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `stripFillers` | `true` = delete the sounds `um` / `uh` / `erm` / `hmm`, and nothing else. **Off** — you get verbatim |
 | `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |
 | `model` | path to a ggml model file, overriding the best one found in `~/.murmurflow/models/` |
-| `port` | loopback port for the warm whisper-server. Default `8479`. The live model's server takes the next one up |
+| `port` | loopback port for the warm whisper-server. Default `8479`. The port one above it is kept free, to sweep away a second server an older MurmurFlow left running |
 | `keepAudio` | keep the evidence for one bad transcription: the last clip, and the transcript in the log. Off, so your sentences are not written down |
+| `silenceStop` | seconds of silence before a forgotten microphone closes itself. Default `15`. `0` switches it off |
+| `maxHold` | seconds before a forgotten microphone closes itself either way. Default `120`. `0` switches it off |
 
 **Right Option is deliberately not offered as a default.** On a German layout it's AltGr — the dead
 key for `@ € \ | ~ [ ] { }` — so binding dictation there fires the microphone on every email
 address and code bracket.
 
-### How the words arrive while you talk
+### What lands at your cursor
 
-**On by default, with no setting to find.** The words land at your cursor in lumps while you are
-still talking, instead of arriving in one paste when you stop.
-
-What it actually does: it re-decodes the clip you are currently recording, over and over, and types
-the words that two passes in a row agreed on. Agreement is the safety. Whisper revises — give it
-another second of audio and it re-reads what it already had, now that it knows how the sentence
-ends — so typing each pass's best guess would type words the next pass withdraws, and nothing can
-un-type them. The first pass has nothing to agree with, so it holds back its last four words
-instead.
-
-**ONE model, and it types the punctuation you keep.** `large-v3-turbo` (~1.6 GB) answers the live
-pass *and* writes the final transcript, on one warm server.
-
-There used to be a second, small model on its own server, because it answered a pass in ~0.4s
-against ~1.5s. It was retired the day the live pass started typing **marks** as well as words: a
-full stop lands as soon as a later word confirms it, so the model answering the live pass is the
-model that decides the punctuation you keep — and there the two are not close. Replayed through the
-whole streaming loop on one real 38 second clip, against the big model's own whole-clip transcript:
-
-| live model | differs | what lands on screen |
-|---|---|---|
-| small | 13.9% | `...in the end like when I just stopped my control it just added a lot of gibberish` |
-| **big** | **11.4%** | `...in the end, like when I just stopped my control, it just added a lot of gibberish, I'm not sure. And that came after a few seconds, after I already sent the message` |
-
-The percentages understate it. The sentences are the finding.
-
-**And a live word is TYPED, not pasted.** The clipboard round trip — save the pasteboard, write the
-text, send ⌘V, wait for the target to read it, put the old contents back — costs about 500ms, more
-than decoding the audio did. A unicode key event carries the characters itself: no pasteboard,
-nothing to settle, **2.6ms**.
-
-It is also safe on a German keyboard, which is the reason the clipboard was chosen in the first
-place: AppleScript's `keystroke` sends keycodes that the target re-maps through its own layout and
-mangles every umlaut, where `CGEventKeyboardSetUnicodeString` sends the characters themselves. The
-**final** transcript still goes through the clipboard, because it can be two thousand characters at
-once and because its paste reports back what the target actually received.
-
-**Measured** on an M4 Pro, macOS 26, `language` on `auto`:
-
-| clip length so far | one live pass |
-|---|---|
-| 2s | 1.47s |
-| 10s | 1.50s |
-| 20s | 1.49s |
-| 30s | 2.35s |
-| 45s | 2.38s |
-
-So the words arrive in **lumps of a second and a half**, and in bigger lumps the longer you talk —
-past 30 seconds whisper.cpp's padding becomes a second 30s window. That is the price of the
-punctuation, and it is a setting:
-
-```sh
-murmurflow config set livePass small   # faster lumps, thinner punctuation
-```
-
-`murmurflow doctor` says which model is answering, and every clip's line in the daemon log ends
-with what streaming actually did: `stream 21x → 20 typed`.
-
-**Nothing is pinned.** Detecting the language costs a whole extra encoder pass, and every pass pays
-it. Pinning the language to what the first second heard saved ~0.75s a pass and cost the gate that
-refuses invented speech: whisper-server reports back whatever language it was *told* to decode, so
-every pass after the first reported the pinned language by construction, whatever it had actually
-decoded. A partial is typed, so the gate that judges it has to be able to see.
+The whole transcript pastes once, the moment you stop talking — not before (see
+[above](#two-things-worth-knowing) for why).
 
 **Silence is cut before anything transcribes it.** Whisper invents words when it is handed audio
 with nothing in it. The same 12 seconds of speech, three ways:
@@ -438,30 +377,8 @@ with nothing in it. The same 12 seconds of speech, three ways:
 So the invention is the silence, not the speech. A word list cannot catch it — whisper answers
 silence in a different invented language each time — and neither can whisper's own per-segment
 `no_speech_prob`: the invented "Thank you." came back at **0.000**, sitting among real speech.
-The cure is not to hand the silence over.
-
-Two things to know:
-
-- **It needs the tap gesture, and that is not a preference.** A paste is a synthetic ⌘V, and in
-  hold-to-talk the trigger is a modifier that is physically down — every paste would be sent as
-  ⌥⌘V into whatever app you are in. With `doubleTap false` it stands down, and the daemon says so
-  on the line it prints at start-up.
-- **It needs the warm whisper-server.** Partials never fall back to the cold `whisper-cli`: that
-  would spawn a model on every pass and make your final transcription slower, not faster. No warm
-  server, and the words simply arrive at the end as they always did.
-- **The microphone closes itself.** After 15 seconds with nothing said, or 120 seconds either way,
-  the clip is finished exactly as your second tap would have finished it — the words are typed, not
-  thrown away. `silenceStop` and `maxHold` move both; `0` switches either off.
-- **The last pass can still reword what is already typed.** Usually punctuation or a capital. There
-  is no un-paste and deliberately no attempt at one: synthesising backspaces into an app whose
-  cursor may have moved since would delete text that was never ours. A word left as first heard is
-  a cosmetic loss; a doubled half-sentence is not.
-
-Shrinking the encoder window per request (`audio_ctx`) was tried instead and thrown out: it does
-cut a pass to 0.8s, and on some clips it returns
-fluent invented text — *"the final pass has to line a line. So the final pass has to line a line"* —
-at every window size tried, deterministically enough that two passes agree on it and it gets typed.
-Fast and occasionally making things up is the one trade a dictation tool cannot take.
+The cure is not to hand the silence over: every clip is trimmed of trailing quiet before it ever
+reaches the transcriber.
 
 ### Polish (optional)
 
@@ -495,7 +412,7 @@ murmurflow listen       run the daemon in this terminal instead (blocks)
 murmurflow doctor       what is missing, and the one command that fixes each thing
 murmurflow keytest      does this Mac actually see your trigger key?
 murmurflow devices      list microphones
-murmurflow setup        download both speech models (the big one, and the fast live one)
+murmurflow setup        download the speech model
 murmurflow config       show or change settings
 murmurflow toggle       start/stop one recording (bind this to a macOS Shortcut)
 murmurflow transcribe   transcribe an audio file and print the text

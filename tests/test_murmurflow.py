@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import itertools
 import json
 import math
 import os
@@ -28,7 +27,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from murmurflow import cli, config, dictate, gesture, platforms, service, speech, whisper
+from murmurflow import cli, config, dictate, gesture, service, speech, whisper
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +42,6 @@ def _isolated_home(tmp_path, monkeypatch):
     # And an unclaimed pre-roll is module state too: one left behind makes the NEXT test's
     # `preroll` a no-op and its `preroll_claim` wait out the full claim timeout.
     dictate._PREROLL = None
-    dictate._STREAMS.clear()
     # THE SUITE MUST NOT REACH OUT OF THIS DIRECTORY, and `MURMURFLOW_HOME` alone does not stop it:
     # `config set` bounces the warm servers whenever the listener is INSTALLED, and that question is
     # about the real machine. On a developer's Mac a config test therefore ran a real `pgrep` and a
@@ -1143,7 +1141,6 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=T
     monkeypatch.setattr(dictate, "start_server", lambda **_k: bool(starts.append(1)) or warm_starts)
     monkeypatch.setattr(dictate, "stop_server", lambda: bool(stops.append(1)) or 1)
     monkeypatch.setattr(dictate, "preroll_claim", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
-    monkeypatch.setattr(dictate, "stream_start", lambda _rec: None)  # not what this drives
     # The ready cue waits for the device to hand over its first buffer, and `_Inline` above runs
     # every thread inline — so without these three clips would sit out the full 8s timeout each.
     monkeypatch.setattr(dictate, "ready", lambda _rec, timeout=0.0: True)
@@ -1591,27 +1588,6 @@ def test_the_shipped_ceiling_leaves_months_of_real_use_in_the_file():
     assert dictate.LOG_KEEP_BYTES < dictate.LOG_MAX_BYTES
 
 
-def test_the_suite_can_never_type_on_the_real_keyboard():
-    """The suite typed into the operator's screen for a whole day. See `tests/conftest.py`.
-
-    Two tests drive `_stream_loop` with a fixed `Heard` and monkeypatch `dictate._inject`, believing
-    the clipboard was the way out to the machine. `dictate.place` tries `platforms.type_text` FIRST,
-    and that is a real CGEvent with nothing in front of it — so both fixtures were typed into
-    whatever window had focus, back to back and with no space between them:
-
-        hello there my friend and also yougokigen you desu ne totemo ii tenki
-
-    Reported as "I keep getting this same random paste everywhere, even tho I'm not using
-    murmurflow". The giveaway was that it was byte-identical every time: a hallucination is
-    different every time, a fixture is not.
-    """
-    assert platforms.type_text.__module__ != "murmurflow.platforms", (
-        "tests/conftest.py no longer shuts the keyboard door — the suite can type on the real "
-        "machine again"
-    )
-    assert platforms.type_text("anything at all") == ""
-
-
 def _tap_the_key(monkeypatch, script, *, is_recording=None):
     """Drive the real `listen_double_tap` loop over a scripted key sequence.
 
@@ -1705,80 +1681,7 @@ def test_without_the_callback_the_gesture_is_exactly_what_it_was(monkeypatch):
     assert seen.count("STOP") == 1  # the third tap stops it, because nothing else can
 
 
-# --- streaming ---------------------------------------------------------------------------------
-
-
-def test_only_the_words_two_passes_agreed_on_are_settled():
-    # The pass that can still see more audio coming is the one that revises, so the word touching
-    # the end is never committed even when both passes said it.
-    assert dictate.stable_prefix("the quick brown", "the quick brown fox") == "the quick brown"
-    assert dictate.stable_prefix("the quick brown", "the quick green fox") == "the quick"
-
-
-def test_the_last_word_lands_once_the_transcript_stops_growing():
-    # Silence at the end of the clip: the audio grew, the words did not. Held back forever, the
-    # last word only ever arrived when the key was released.
-    assert (
-        dictate.stable_prefix("the quick brown fox", "the quick brown fox") == "the quick brown fox"
-    )
-    # Still growing: the last word is still the one whisper may revise, so it still waits.
-    assert dictate.stable_prefix("the quick brown", "the quick brown fox") == "the quick brown"
-    # Shrank (whisper dropped a word it had): not a settled tail, so the old rule holds.
-    assert dictate.stable_prefix("the quick brown fox", "the quick brown") == "the quick"
-
-
-def test_punctuation_and_capitals_are_not_a_disagreement():
-    # "okay so we" becomes "Okay, so we" the moment whisper sees the end of the sentence. Treating
-    # that as a changed word would stall the stream on every clip that ends in a full stop.
-    assert dictate.stable_prefix("okay so we", "Okay, so we start") == "Okay, so we"
-
-
-def test_the_first_pass_holds_its_tail_back_instead_of_waiting_for_a_second():
-    # There is nothing yet to agree with, and waiting costs a whole ~2s pass on the one update
-    # whose lateness is most felt. The tail is where whisper's revisions are, so the tail is what
-    # is held.
-    assert dictate.STREAM_HOLDBACK_WORDS == 4
-    assert dictate.stable_prefix("", "one two three four five six") == "one two"
-    assert dictate.stable_prefix("", "hello there world") == ""  # nothing but tail yet
-
-
-def test_the_tail_is_what_is_not_at_the_cursor_yet():
-    assert dictate.stream_tail("the quick brown", "the quick brown fox jumps") == "fox jumps"
-    assert dictate.stream_tail("", "the whole thing") == "the whole thing"
-
-
-def test_a_fully_streamed_sentence_leaves_only_its_final_mark_to_paste():
-    # The words are all on screen; the full stop is not, because `stable_prefix` never types the
-    # mark touching the end of the audio. At the key release the clip really is over, so it lands.
-    assert dictate.stream_tail("all of it", "All of it.") == ""  # mid-clip: nothing new to type
-    assert dictate.end_mark("all of it", "All of it.") == "."  # at the release: the mark is real
-    assert dictate.end_mark("all of it.", "All of it.") == ""
-    assert dictate.end_mark("all of it", "All of it") == ""
-
-
-def test_a_word_whisper_repeats_into_a_silence_is_not_typed():
-    """Reported as "I did not say *the* three times. I did however say *really* three times."
-
-    Whisper repeats a short word into a silence: hold after saying "the" and the transcript grows
-    "The", "The The", "The The The" over audio in which nothing was said. Every one of those is
-    two passes agreeing, so it used to commit and land at the cursor.
-    """
-    assert dictate.stable_prefix("Well, yeah. The The", "Well, yeah. The The") == "Well, yeah. The"
-    assert dictate.stable_prefix("The The The", "The The The") == "The"
-
-
-def test_a_word_the_speaker_really_did_repeat_still_lands():
-    """The other half of the same report, and the reason the guard is only ever at the END.
-
-    A repeat is refused only while it is still the last word — the one place invention happens.
-    The moment a different word follows, the pair is no longer at the end and both commit.
-    """
-    assert (
-        dictate.stable_prefix("really really really works", "really really really works well")
-        == "really really really works"
-    )
-    # And a clip that simply ENDS on a doubled word loses nothing: it is the tail `finish` types.
-    assert dictate.stream_tail("so it is", "so it is is") == "is"
+# --- the microphone watches itself ------------------------------------------------------------
 
 
 def test_a_forgotten_key_still_gets_its_words(monkeypatch):
@@ -1857,266 +1760,6 @@ def test_the_microphone_closes_itself_when_the_second_tap_never_comes(monkeypatc
     assert dictate.MAX_CLIP_SECONDS == 600
 
 
-def _drive_stream(passes):
-    """What lands on screen when the live pass reads ``passes``, one after another.
-
-    The same four calls `_stream_loop` makes, in the same order, so a sequence that broke a real
-    dictation can be replayed as a test. Kept beside the tests that use it rather than inside them:
-    four copies of the loop drift, and a copy that drifts stops testing the loop.
-    """
-    screen = previous = ""
-    for heard in passes:
-        settled = dictate.stable_prefix(previous, heard)
-        previous = heard
-        chunk = dictate.stream_tail(screen, settled) if settled else ""
-        mark = dictate.missing_mark(screen, settled) if chunk else ""
-        if chunk:
-            screen = f"{screen}{mark} {chunk}".strip() if screen else chunk
-    return screen
-
-
-def test_the_mark_lands_once_a_later_word_confirms_it():
-    """Reported as "there was a break before, but no punctuation".
-
-    A mark rides on the word in front of it, and that word is never typed with its mark while it
-    still touches the end of the audio — a pause is how whisper decides a sentence ended, and it
-    takes that back the moment the speaker carries on. So the word landed bare and nothing could
-    put the mark on afterwards. A later pass answers it: real speech follows and whisper STILL
-    ends the sentence there, so the mark goes on, joined to the word it belongs to.
-    """
-    reference = "I did not say the three times. I did, however, say really three times."
-    screen = _drive_stream(
-        [
-            "I did not say the three times",
-            "I did not say the three times",  # the break
-            "I did not say the three times.",  # whisper ends the sentence
-            "I did not say the three times.",
-            "I did not say the three times. I",  # he carries on
-            "I did not say the three times. I did however say",
-            "I did not say the three times. I did, however, say really",
-            reference,
-            reference,
-        ]
-    )
-    # ...plus the one thing only the key release can know: the mark that ends the clip.
-    landed = screen + dictate.end_mark(screen, reference)
-    assert landed == reference  # streamed, and identical to the whole-clip transcript
-    # And the fixes it must not undo, driven through the same loop.
-    assert _drive_stream(["Could you please work on my", "Could you please work on my..."] * 2) == (
-        "Could you please work on my"
-    )
-    assert "The The" not in _drive_stream(["Well, yeah. The The The"] * 3)
-
-
-def test_a_pause_never_types_a_lone_full_stop_where_the_next_word_goes():
-    """Reported as "it puts a period instead of the word" after a short break.
-
-    Every pass mid-clip ends where the AUDIO happens to end, so "all the words are on screen and
-    only the mark is missing" is true of every pause. Asking for the mark there put a bare " ." at
-    the cursor exactly where the next word was about to go — and that mark is then a word on
-    screen with no letters in it, so the next alignment read it as something the final pass had
-    reworded and dropped a real word to pay for it. The word this ate, in the report, was "But".
-    """
-    screen = _drive_stream(
-        [
-            "and then I ran the command",
-            "and then I ran the command",  # the pause: the transcript stops growing
-            "and then I ran the command.",  # whisper decides the sentence ended
-            "and then I ran the command.",
-            "and then I ran the command. But",  # he speaks again
-            "and then I ran the command. But when I say",
-            "and then I ran the command. But when I say",
-        ]
-    )
-    assert " ." not in screen  # never a mark standing on its own
-    assert "But" in screen  # and never a word paid to the alignment for one
-    # The full stop DOES land, because "But" settled behind it and confirmed it.
-    assert screen == "and then I ran the command. But when I say"
-
-
-def test_a_pause_does_not_put_a_full_stop_in_the_middle_of_the_sentence():
-    """Reported as "a lot of points in between... it cuts the logic of the sentence".
-
-    A pause is silence, and silence is how whisper decides a sentence ended. The transcript stops
-    growing while the audio does not, two passes agree word for word, and the stopped-growing rule
-    commits the run — with the guessed mark on it. Then the speaker carries on.
-    """
-    assert dictate.stable_prefix("work on my...", "work on my...") == "work on my"
-    assert dictate.stable_prefix("okay so.", "okay so.") == "okay so"
-    # A mark with real audio behind it is a sentence he actually finished: the growing branch
-    # keeps it, so ordinary dictated full stops are not eaten.
-    assert dictate.stable_prefix("i did it. then i", "i did it. then i left") == "i did it. then i"
-
-
-def test_the_final_pass_rewording_the_last_word_does_not_add_one():
-    """Reported as "it just adds another word at the end" when the key is pressed.
-
-    The live pass runs a smaller model than the final one, so the two disagree about the last word
-    more often than about any other. Everything past the alignment is already on screen: the
-    better model's version of it is not new text, it is the same word twice.
-    """
-    assert dictate.stream_tail("i like the design", "I like the designs") == ""
-    assert (
-        dictate.stream_tail("i like the design", "I like the designs and then we left")
-        == "and then we left"
-    )
-
-
-def test_a_reworded_prefix_neither_doubles_nor_loses_the_rest():
-    # The final pass turned "to" into "two" inside text that is already on screen. There is no
-    # un-paste, so the only question is whether what follows lands exactly once.
-    assert dictate.stream_tail("send it to him", "send it two him tomorrow") == "tomorrow"
-
-
-def test_a_streamed_chunk_is_typed_and_never_touches_the_clipboard(monkeypatch):
-    """The clipboard round trip was ~500ms against ~420ms to decode the audio, so it was HALF the
-    streaming cycle and the report was "it is lagging behind, two or three words at a time".
-    """
-    typed: list[str] = []
-    pasted: list[str] = []
-    monkeypatch.setattr(dictate.platforms, "type_text", lambda text: typed.append(text) or "")
-    monkeypatch.setattr(dictate, "_inject", lambda text: (bool(pasted.append(text)), "", ""))
-    assert dictate.place(" and then") == " and then"
-    assert typed == [" and then"]
-    assert pasted == []
-
-
-def test_a_chunk_that_cannot_be_typed_still_lands_by_paste(monkeypatch):
-    """Windows types nothing, and a Mac without the grant cannot either. Never lose the words."""
-    pasted: list[str] = []
-    monkeypatch.setattr(dictate.platforms, "type_text", lambda text: text)
-    monkeypatch.setattr(
-        dictate, "_inject", lambda text: (bool(pasted.append(text)) or True, "", "")
-    )
-    assert dictate.place(" and then") == " and then"
-    assert pasted == [" and then"]
-
-    def _boom(_text):
-        raise OSError("the event tap said no")
-
-    monkeypatch.setattr(dictate.platforms, "type_text", _boom)
-    pasted.clear()
-    assert dictate.place(" and then") == " and then"
-    assert pasted == [" and then"]
-
-
-def test_typing_that_stops_halfway_pastes_only_what_is_left(monkeypatch):
-    """The text goes out in pieces, so a failure halfway is already half on screen. Told only that
-    it failed, the caller would paste the whole chunk over the top and type the first half twice.
-    """
-    pasted: list[str] = []
-    monkeypatch.setattr(dictate.platforms, "type_text", lambda _text: "then")
-    monkeypatch.setattr(
-        dictate, "_inject", lambda text: (bool(pasted.append(text)) or True, "", "")
-    )
-    assert dictate.place(" and then") == " and then"
-    assert pasted == ["then"], "only the part that never went out"
-
-    # ...and when even the paste fails, only what the typing already placed is remembered, or the
-    # final transcript would be asked to fill a gap that is not there.
-    monkeypatch.setattr(dictate, "_inject", lambda _text: (False, "no", ""))
-    assert dictate.place(" and then") == " and "
-
-
-def test_an_emoji_is_never_split_across_two_events():
-    """Both UTF-16 units of a non-BMP character must reach ONE event, or the app is handed half a
-    character and drops it — silently, while everything reports success.
-    """
-    macos = pytest.importorskip("murmurflow.platforms.macos")
-    if sys.platform != "darwin":
-        pytest.skip("the direct-typing path is macOS only")
-    import ctypes
-
-    size = macos._TYPE_CHUNK
-    text = "a" * (size - 1) + "\U0001f600" + "ok"  # the emoji straddles the first seam
-    units = text.encode("utf-16-le")
-    buffer = (ctypes.c_uint16 * (len(units) // 2)).from_buffer_copy(units)
-    total = len(buffer)
-
-    seams = []
-    start = 0
-    while start < total:
-        start = macos._chunk_end(buffer, start, total)
-        seams.append(start)
-    for seam in seams[:-1]:
-        assert not 0xD800 <= buffer[seam - 1] <= 0xDBFF, "a piece ended on half a character"
-    # ...and every piece still decodes on its own, which is what the event actually receives.
-    pieces = [0, *seams]
-    for lower, upper in itertools.pairwise(pieces):
-        raw = bytes(bytearray(units[lower * 2 : upper * 2]))
-        assert raw.decode("utf-16-le")  # raises on a lone surrogate
-    assert (
-        "".join(
-            bytes(bytearray(units[a * 2 : b * 2])).decode("utf-16-le")
-            for a, b in itertools.pairwise(pieces)
-        )
-        == text
-    )
-
-
-def test_the_last_part_of_a_long_dictation_is_never_pasted_twice():
-    """REPORTED: 88 seconds, 1586 characters, and the end of it appeared on screen a second time.
-
-    The live pass and the final pass are DIFFERENT MODELS now, so they drift by a few words over a
-    paragraph — and the old alignment hunted for the single last word typed within three positions
-    of the word count. Over 250 words the count is off by more than three and "the" is everywhere,
-    so it matched early and re-pasted everything after that match.
-    """
-    live = (
-        "we should ship the thing to the team before friday because otherwise we are waiting for "
-        "the review until the week after and that pushes the launch into the month after that"
-    )
-    final = (
-        "We should ship the whole thing to the team before Friday, because otherwise we are going "
-        "to be waiting for the review until the week after that, and that pushes the launch into "
-        "the month after that, which is not what we agreed."
-    )
-    assert dictate.stream_tail(live, final) == "which is not what we agreed."
-
-
-def test_an_alignment_holds_even_when_the_common_words_are_everywhere():
-    """`autojunk` would drop "the"/"to"/"a" from a sequence this long — the words holding it up."""
-    live = " ".join(["the cat sat on the mat and"] * 12) + " then it left"
-    final = " ".join(["the cat sat on the mat and"] * 12) + " then it left the room"
-    assert dictate.stream_tail(live, final) == "the room"
-
-
-def test_streaming_is_on_by_default_and_needs_no_setting():
-    # It used to be opt-in, and opt-in meant almost nobody ever saw the good version of the product.
-    config.set_value("doubleTap", None)
-    assert dictate.streaming() is True
-
-
-def test_streaming_stands_down_while_the_trigger_is_held():
-    # A held modifier turns every ⌘V into ⌥⌘V, so it is honoured only under doubleTap.
-    config.set_value("doubleTap", False)
-    assert dictate.streaming() is False
-    config.set_value("doubleTap", True)
-    assert dictate.streaming() is True
-
-
-def test_a_partial_in_a_language_you_do_not_speak_is_never_typed(monkeypatch, tmp_path):
-    """`finish` can refuse a transcript in a language you do not speak. It cannot refuse one that
-    is already at the cursor, and there is no un-paste — so the gate has to be on the partial too.
-    """
-    config.set_value("languages", ["de", "en"])
-    live = tmp_path / "live.wav"
-    live.write_bytes(b"RIFF")
-    monkeypatch.setattr(dictate, "audio_seconds", lambda _p: 3.0)
-    monkeypatch.setattr(dictate, "peak_dbfs", lambda _p: -14.0)
-    monkeypatch.setattr(dictate, "repair_wav", lambda _p: False)
-
-    monkeypatch.setattr(
-        dictate, "transcribe_warm", lambda *a, **k: dictate.Heard("guten Tag", 0.99, "de", True)
-    )
-    assert dictate._partial(live, tmp_path / "snap.wav").text == "guten Tag"
-
-    monkeypatch.setattr(
-        dictate, "transcribe_warm", lambda *a, **k: dictate.Heard("ご視聴", 0.99, "ja", True)
-    )
-    assert dictate._partial(live, tmp_path / "snap.wav").text == ""
-
-
 def test_a_lent_trigger_does_not_open_the_microphone_early(monkeypatch):
     """A pause promises the key is not being listened to. Pre-roll runs BEFORE `on_press` gets to
     check, so without its own check a paused daemon still opened the microphone on every press.
@@ -2140,71 +1783,6 @@ def test_a_lent_trigger_does_not_open_the_microphone_early(monkeypatch):
     monkeypatch.setattr(dictate, "paused", lambda: (False, ""))
     taps[0]("press")
     assert opened == ["mic"]
-
-
-def test_a_partial_never_pins_the_language(monkeypatch, tmp_path):
-    """The pin saved ~0.75s a pass and cost the gate that refuses invented speech.
-
-    whisper-server reports back whatever language it was TOLD to decode, so a pass pinned to what
-    the first second heard reported that language by construction, whatever it had actually
-    decoded. The gate was blind for the rest of the clip — and a partial is PASTED.
-    """
-    config.set_value("languages", ["de", "en"])
-    asked: list[tuple] = []
-
-    def _partial(_live, _snapshot, *args):
-        asked.append(args)
-        return dictate.Heard("hello there my friend and also you", 0.99, "en", warm=True)
-
-    monkeypatch.setattr(dictate, "_partial", _partial)
-    monkeypatch.setattr(dictate, "_inject", lambda _text: (True, "", ""))
-    monkeypatch.setattr(dictate, "STREAM_FIRST_SECONDS", 0.0)
-    monkeypatch.setattr(dictate, "STREAM_EVERY_SECONDS", 0.0)
-
-    stream = dictate.Stream(threading.Event())
-    thread = threading.Thread(
-        target=dictate._stream_loop,
-        args=(dictate.Recording(1, tmp_path / "live.wav", 0.0), stream),
-        daemon=True,
-    )
-    thread.start()
-    while len(asked) < 3:
-        time.sleep(0.01)
-    stream.done.set()
-    thread.join(timeout=2)
-    assert len(asked) >= 3
-    assert all(extra == () for extra in asked)  # every pass detects it for itself, forever
-
-
-def test_a_language_you_do_not_speak_is_never_pinned(monkeypatch, tmp_path):
-    """A partial pinned to a language nobody is speaking comes back as fluent TRANSLATION, and two
-    of those in a row agree with each other and get typed. So the pin is gated the same way the
-    final transcript is.
-    """
-    config.set_value("languages", ["de", "en"])
-    asked: list[str] = []
-
-    def _partial(_live, _snapshot, language=""):
-        asked.append(language)
-        return dictate.Heard("gokigen you desu ne totemo ii tenki", 0.99, "ja", warm=True)
-
-    monkeypatch.setattr(dictate, "_partial", _partial)
-    monkeypatch.setattr(dictate, "_inject", lambda _text: (True, "", ""))
-    monkeypatch.setattr(dictate, "STREAM_FIRST_SECONDS", 0.0)
-    monkeypatch.setattr(dictate, "STREAM_EVERY_SECONDS", 0.0)
-
-    stream = dictate.Stream(threading.Event())
-    thread = threading.Thread(
-        target=dictate._stream_loop,
-        args=(dictate.Recording(1, tmp_path / "live.wav", 0.0), stream),
-        daemon=True,
-    )
-    thread.start()
-    while len(asked) < 3:
-        time.sleep(0.01)
-    stream.done.set()
-    thread.join(timeout=2)
-    assert set(asked) == {""}  # every pass still detects; none is pinned to a language he lacks
 
 
 # --- the live pass has its own small model ----------------------------------------------------
@@ -2290,16 +1868,6 @@ def test_every_clip_is_its_own_clip(monkeypatch):
     command = dictate.serve_command("/models/ggml-large-v3-turbo.bin")
     assert command is not None
     assert command[command.index("-mc") + 1] == "0"
-
-
-def test_the_log_says_whether_streaming_typed_or_merely_ran():
-    """ "It does not stream" and "my sentence was too short to settle a word" wrote the same line."""
-    assert dictate.stream_note(None) == ""
-    assert dictate.stream_note(dictate.Stream(threading.Event())) == ""  # never ran
-    ran = dictate.Stream(threading.Event(), "", passes=4, blank=3, typed=0)
-    assert dictate.stream_note(ran) == "stream 4x → 0 typed, 3 read nothing"
-    worked = dictate.Stream(threading.Event(), "hello", passes=9, blank=1, typed=8)
-    assert dictate.stream_note(worked) == "stream 9x → 8 typed, 1 read nothing"
 
 
 def test_an_impostor_on_the_port_is_never_handed_the_audio(monkeypatch):
@@ -2521,40 +2089,9 @@ def test_a_pre_roll_nobody_claims_stops_itself_and_leaves_no_audio(monkeypatch, 
     assert dictate.preroll_claim() is None
 
 
-def test_stopping_a_stream_returns_what_it_pasted_and_ends_it(tmp_path):
-    wav = tmp_path / "said.wav"
-    stream = dictate.Stream(threading.Event(), "hello there")
-    dictate._STREAMS[str(wav)] = stream
-    stopped = dictate.stop_streaming(wav)
-    assert stopped is stream and stream.done.is_set()
-    assert dictate.streamed(stopped) == "hello there"
-    assert dictate.stop_streaming(wav) is None  # gone from the registry
-
-
-def test_a_paste_still_in_flight_is_counted_before_the_tail_is_worked_out(tmp_path):
-    # The race this seam exists for, and it produced a doubled half-sentence on a real machine: the
-    # pass that was already inside `inject` when the key was released records its words only when
-    # it returns, so reading `text` without waiting reports a prefix shorter than the screen shows.
-    wav = tmp_path / "inflight.wav"
-    stream = dictate.Stream(threading.Event())
-    dictate._STREAMS[str(wav)] = stream
-
-    def _late_paste():
-        with dictate._INJECT_LOCK:
-            time.sleep(0.15)
-            stream.text = "the words already on screen"
-
-    pasting = threading.Thread(target=_late_paste)
-    pasting.start()
-    time.sleep(0.02)  # the key is released mid-paste
-    stopped = dictate.stop_streaming(wav)
-    assert dictate.streamed(stopped) == "the words already on screen"
-    pasting.join()
-
-
 def test_a_leading_space_survives_into_the_paste(monkeypatch):
-    # A streamed chunk arrives as " and then", because the space in front of it is the gap between
-    # it and the words already on screen. `inject` stripping that glued every chunk to the last.
+    # `inject` tests emptiness on a STRIPPED copy but pastes the text exactly as given — a caller
+    # that passes a leading or trailing space must get it back, not have it silently eaten.
     sent: list[str] = []
 
     def _record(text, settle):

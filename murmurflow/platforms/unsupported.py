@@ -84,6 +84,15 @@ def permission_hint() -> str:
     return _WHY
 
 
+def show_level(wav: Path) -> None:
+    """No waveform here; the two sounds say when the microphone opens and closes."""
+    return None
+
+
+def hide_level(handle: object) -> None:
+    return None
+
+
 def play_ready() -> None:
     return None
 

@@ -42,6 +42,7 @@ def _isolated_home(tmp_path, monkeypatch):
     # And an unclaimed pre-roll is module state too: one left behind makes the NEXT test's
     # `preroll` a no-op and its `preroll_claim` wait out the full claim timeout.
     dictate._PREROLL = None
+    dictate._LEVELS.clear()
     # THE SUITE MUST NOT REACH OUT OF THIS DIRECTORY, and `MURMURFLOW_HOME` alone does not stop it:
     # `config set` bounces the warm servers whenever the listener is INSTALLED, and that question is
     # about the real machine. On a developer's Mac a config test therefore ran a real `pgrep` and a
@@ -1113,13 +1114,16 @@ def test_the_peak_is_the_loudest_sample_in_either_direction(tmp_path):
 # --- a warm server that answers wrongly is bounced ------------------------------------------------
 
 
-def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=True, quiet=0):
+def _drive_listener(
+    monkeypatch, results, *, warm_starts=True, hold=0, release=True, quiet=0, level=None
+):
     """Run `listen_loop` over a fixed list of dictations. Returns (server starts, server stops).
 
     ``hold`` is `maxHold`, and it is 0 — OFF — for every caller but the one testing it. The
     forgotten-key watchdog is a thread that waits out the whole hold, and `_Inline` below runs
     every thread inline, so leaving the default on would park this harness for two minutes per
     clip. ``release=False`` presses without the second tap, which is the case the watchdog is for.
+    ``level`` is a list that turns the waveform on and records every one that was closed.
     """
     starts: list[int] = []
     stops: list[int] = []
@@ -1146,6 +1150,10 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=T
     monkeypatch.setattr(dictate, "ready", lambda _rec, timeout=0.0: True)
     monkeypatch.setattr(dictate, "current", lambda: dictate.Recording(1, Path("x.wav"), 0.0))
     monkeypatch.setattr(dictate, "cue_ready", lambda: cues.append(1))
+    if level is not None:
+        monkeypatch.delenv("MURMURFLOW_NO_AUDIO")  # `finish` is faked, so nothing can sound
+        monkeypatch.setattr(dictate.platforms, "show_level", lambda wav: f"pill:{wav}")
+        monkeypatch.setattr(dictate.platforms, "hide_level", level.append)
     config.set_value("maxHold", hold)
     config.set_value("silenceStop", quiet)
     pending = list(results)
@@ -1160,8 +1168,25 @@ def _drive_listener(monkeypatch, results, *, warm_starts=True, hold=0, release=T
 
     monkeypatch.setattr(dictate, "bind_trigger", _bind)
     dictate.listen_loop()
-    assert len(cues) == len(results), "every clip that starts says so, once"
+    if level is None:
+        assert len(cues) == len(results), "every clip that starts says so, once"
+    else:
+        assert not cues, "a clip with a waveform open makes no sound"
     return starts, stops
+
+
+def test_the_waveform_replaces_the_sound_and_closes_after_every_clip(monkeypatch):
+    """The pill says the microphone opened, so no tick — and it must never outlive its clip."""
+    closed: list[str] = []
+    _drive_listener(monkeypatch, [_clip(True), _clip(True)], level=closed)
+    assert closed == ["pill:x.wav", "pill:x.wav"]
+    assert not dictate._LEVELS
+
+
+def test_the_waveform_ships_beside_the_backend_that_runs_it():
+    from murmurflow.platforms import macos
+
+    assert macos.LEVEL_SCRIPT.is_file()
 
 
 def _clip(warm):

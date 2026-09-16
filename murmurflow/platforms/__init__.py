@@ -84,6 +84,14 @@ input_permitted = impl.input_permitted
 #: One line telling the user how to grant it, or ``""`` when there is nothing to grant.
 permission_hint = impl.permission_hint
 
+# --- level --------------------------------------------------------------------------------------
+
+#: Draw the live waveform for the clip being written to a wav, without taking focus. Returns a
+#: handle for :func:`hide_level`, or ``None`` where this platform draws none — and then the two
+#: sounds below are the cue instead.
+show_level = impl.show_level
+hide_level = impl.hide_level
+
 # --- sound --------------------------------------------------------------------------------------
 
 #: The two sounds this tool makes, without blocking and without ever raising. No player, no sound,

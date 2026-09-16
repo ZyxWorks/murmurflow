@@ -439,6 +439,38 @@ def _play(path: str) -> None:
         )
 
 
+#: The live waveform: a small pill at the bottom of the screen while the microphone is open. JXA
+#: (``osascript -l JavaScript``) because it is on every Mac and reaches AppKit with no compiled
+#: helper — and a NON-ACTIVATING panel, because a window that takes focus takes the paste with it.
+#: Measured: a Tk window became the frontmost app the instant it opened; this one does not.
+LEVEL_SCRIPT = Path(__file__).with_name("level.js")
+
+
+def show_level(wav: Path) -> subprocess.Popen[bytes] | None:
+    """Open the waveform for the clip being written to ``wav``. ``None`` if it cannot be drawn."""
+    runner = shutil.which("osascript")
+    if not runner or not LEVEL_SCRIPT.is_file():
+        return None
+    try:
+        return subprocess.Popen(
+            [runner, "-l", "JavaScript", str(LEVEL_SCRIPT), str(wav)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def hide_level(handle: object) -> None:
+    """Close a waveform :func:`show_level` opened, and reap it. Never raises."""
+    if not isinstance(handle, subprocess.Popen):
+        return
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        handle.terminate()
+        handle.wait(timeout=1.0)
+
+
 def play_ready() -> None:
     """The microphone is live: start talking."""
     _play(READY_SOUND)

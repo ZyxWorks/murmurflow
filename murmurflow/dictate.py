@@ -958,7 +958,9 @@ def finish(rec: Recording | None = None, *, paste: bool = True) -> Result:
     # silence in between reads as the tool having missed you rather than as a wait. Every surface
     # goes through this function, so cueing at the seam is also the only way they stay in step.
     # After the two ways above this can still be a non-event, so nothing chimes at a brushed key.
-    cue_done()
+    # A clip with a waveform open says this by drawing it, so it stays silent.
+    if str(rec.wav) not in _LEVELS:
+        cue_done()
     # BEFORE the level gates and the transcribe: silence on the end is what whisper invents into,
     # and a clip closed by the silence watchdog ends with fifteen seconds of it. See
     # :func:`trim_trailing_quiet`.
@@ -1209,6 +1211,29 @@ def _preroll_expire(pending: _Preroll) -> None:
             wav = stop(pending.rec)
             if wav is not None:
                 wav.unlink(missing_ok=True)
+
+
+#: The open waveform per clip, keyed by its wav. A clip with one makes no sound: the pill already
+#: says the microphone opened, shows it hearing you, and shows it working once it closed.
+_LEVELS: dict[str, object] = {}
+
+
+def show_level(rec: Recording) -> None:
+    """Open the waveform for ``rec``, where the platform has one. Never raises, never in the suite."""
+    if os.environ.get("MURMURFLOW_NO_AUDIO"):
+        return
+    with contextlib.suppress(Exception):
+        handle = platforms.show_level(rec.wav)
+        if handle is not None:
+            _LEVELS[str(rec.wav)] = handle
+
+
+def hide_level(wav: Path) -> None:
+    """Close the waveform for ``wav``, if one is open. Never raises."""
+    handle = _LEVELS.pop(str(wav), None)
+    if handle is not None:
+        with contextlib.suppress(Exception):
+            platforms.hide_level(handle)
 
 
 def cue_ready() -> None:
@@ -1600,7 +1625,7 @@ def listen_loop(
 
     def _say_ready(rec: Recording) -> None:
         """Sound the one cue, once the microphone is genuinely live and the clip is still alive."""
-        if ready(rec, timeout=8.0) and current() is not None:
+        if ready(rec, timeout=8.0) and current() is not None and str(rec.wav) not in _LEVELS:
             cue_ready()
 
     def on_tap(what: str) -> None:
@@ -1630,6 +1655,7 @@ def listen_loop(
         rec = preroll_claim() or start()
         if rec is not None:
             mine.append(rec)
+            show_level(rec)
             threading.Thread(target=_forgot, args=(rec,), daemon=True).start()
             # ON A THREAD, never inline: `ready` blocks until the device hands over its first
             # buffer, and this runs on the poll loop, which is the only thing watching the key.
@@ -1660,9 +1686,14 @@ def listen_loop(
         if claim(rec) is None:
             return
         emit(f"[--] closed the microphone {why} — you did not tap to stop")
-        _land(finish(rec))
+        _land(rec)
 
-    def _land(result: Result) -> None:
+    def _land(rec: Recording) -> None:
+        """Transcribe and type ``rec``, then close its waveform whatever happened."""
+        try:
+            result = finish(rec)
+        finally:
+            hide_level(rec.wav)
         watch_warm(result.warm)
         if result.problem:
             emit(f"[!] {result.problem}")
@@ -1675,13 +1706,14 @@ def listen_loop(
         rec = claim()
         if rec is None:
             return  # nothing of OURS was recording, or the watchdog got there first
-        _land(finish(rec))
+        _land(rec)
 
     def on_abort() -> None:
         """A keyboard shortcut, not speech: throw the audio away without transcribing it."""
         rec = claim()
         if rec is None:
             return
+        hide_level(rec.wav)
         wav = stop(rec)
         if wav is not None:
             wav.unlink(missing_ok=True)

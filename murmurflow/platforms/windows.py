@@ -444,6 +444,15 @@ def _beep(which: str) -> None:
         winsound.MessageBeep(getattr(winsound, which))
 
 
+def show_level(wav: Path) -> None:
+    """No waveform here; the two sounds say when the microphone opens and closes."""
+    return None
+
+
+def hide_level(handle: object) -> None:
+    return None
+
+
 def play_ready() -> None:
     """The microphone is live: start talking."""
     _beep("MB_OK")

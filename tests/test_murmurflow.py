@@ -2019,6 +2019,27 @@ def test_a_restart_that_fails_stops_the_install_rather_than_half_doing_it(tmp_pa
     assert exit_code.value.code == 1
 
 
+def test_an_update_pulls_the_checkout_before_it_reinstalls_it(tmp_path, monkeypatch):
+    """Two PRs merged, `update` said OK, and the listener ran last week's code: nothing had pulled."""
+    checkout = tmp_path / "murmurflow"
+    (checkout / ".git").mkdir(parents=True)
+    ran: list[list[str]] = []
+
+    def _run(cmd, **_k):
+        ran.append(cmd)
+        return types.SimpleNamespace(returncode=1 if "pull" in cmd else 0, stderr="diverged")
+
+    monkeypatch.setattr(cli.subprocess, "run", _run)
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(cli, "_receipt", lambda: tmp_path / "uv-receipt.toml")
+    monkeypatch.setattr(cli, "_update_command", lambda _r: ["uv", "tool", "install", str(checkout)])
+    monkeypatch.setattr(cli.os, "execv", lambda *_a: None)
+    monkeypatch.delenv(cli._RESYNCED, raising=False)
+    cli._update()
+    assert ran[0] == ["/bin/git", "-C", str(checkout), "pull", "--ff-only", "--quiet"]
+    assert ran[1] == ["uv", "tool", "install", str(checkout)], "a pull that fails never blocks"
+
+
 def test_the_re_executed_child_never_updates_again(tmp_path, monkeypatch):
     """The child of the re-exec runs `install` too, and without the guard it would re-exec forever."""
     ran: list[list[str]] = []

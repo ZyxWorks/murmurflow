@@ -445,10 +445,11 @@ a copy of the package and launchd runs that — so a `git pull` alone changes a 
 program never reads, silently. `murmurflow update` therefore re-installs the package from wherever
 it came from first (a local checkout, a git URL, PyPI), then re-executes itself out of the new copy
 and restarts the listener if it is on. `install` and `on` do the same re-install first, so the old
-habit still works. From a checkout, two commands, and only because the first one is git:
+habit still works. From a git checkout it pulls first (fast-forward only, so local work is never
+touched), so it is one command:
 
 ```sh
-git pull && murmurflow update
+murmurflow update
 ```
 
 An update that cannot run never blocks the install: no `uv`, a source that has moved, a network

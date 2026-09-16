@@ -35,10 +35,10 @@ def _out(line: str = "") -> None:
 def _setup(name: str = "") -> int:
     """Download the speech model into ``~/.murmurflow/models/``.
 
-    ONE model, and it does both jobs: it writes the transcript you keep AND answers the live pass
-    while you are still talking. It was two — a small model typed live, the big one wrote the final
-    — until the live pass began typing PUNCTUATION rather than only words. The marks it chooses are
-    the marks you keep, and there the two models are not close. Naming one downloads that one.
+    ONE model does the whole job: it writes the transcript you keep. There used to be a second,
+    smaller model that answered faster; it was retired because its punctuation choices were not
+    close to the big model's, and the model that transcribes is the model that decides the marks
+    you keep. Naming one downloads that one.
     """
     return _download(name or whisper.DEFAULT_MODEL)
 
@@ -719,14 +719,14 @@ def _reject(key: str, value: object) -> str:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value >= 0:
             return f"`{key}` is a peak level in dBFS below zero, e.g. -30 or -40, not `{text}`."
     elif key == "port":
-        # The ceiling is one BELOW the last port, because the live server takes the next one up:
-        # 65535 would put it on 65536, which cannot bind, and every partial would fall back to the
-        # big model with nothing anywhere saying why.
+        # The ceiling is one BELOW the last port, because `stop_server` sweeps the port above ours
+        # to reap the small second server an older MurmurFlow ran: 65535 would put that sweep on
+        # 65536, which cannot bind.
         top = dictate.MAX_PORT
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= top:
             return (
-                f"`{key}` is a TCP port between 1 and {top}, not `{text}` — the live model's "
-                f"server takes the port one above this one."
+                f"`{key}` is a TCP port between 1 and {top}, not `{text}` — the port directly "
+                f"above it has to stay bindable too."
             )
     elif key == "language":
         code = speech.language_code(text)

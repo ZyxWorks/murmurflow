@@ -430,20 +430,6 @@ def permission_hint() -> str:
     return ""
 
 
-# --- typing ---------------------------------------------------------------------------------
-
-
-def type_text(text: str) -> str:
-    """The whole string back, so Windows keeps the clipboard paste it has always used.
-
-    The macOS version exists because the clipboard round trip is half the streaming cycle THERE —
-    an AppleScript that saves the pasteboard, sends Cmd-V, waits and restores. `SendInput` with
-    `KEYEVENTF_UNICODE` is the equivalent and would be worth having, but it is a second ctypes
-    surface to get right on a platform nobody here can test on, and the paste already works.
-    """
-    return text
-
-
 # --- the one sound ------------------------------------------------------------------------------
 
 

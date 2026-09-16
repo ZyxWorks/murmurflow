@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MurmurFlow: write at the speed you talk</title>
-<meta name="description" content="Double-tap dictation that runs on your own machine. Tap a key twice and talk: the words land at your cursor while you are still talking, in any app. Free, no account, no subscription, and nothing you say leaves your machine.">
+<meta name="description" content="Double-tap dictation that runs on your own machine. Tap a key twice and talk, tap again to stop: the words land at your cursor the moment you stop, in any app. Free, no account, no subscription, and nothing you say leaves your machine.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120' fill='none'><rect width='120' height='120' rx='18' fill='%230B0C10'/><g stroke='%23F6F5F1' stroke-width='11' stroke-linecap='round'><line x1='60' y1='60' x2='60' y2='30'/><line x1='60' y1='60' x2='30' y2='82'/><line x1='60' y1='60' x2='94' y2='74'/></g></svg>">
 <meta property="og:title" content="MurmurFlow: write at the speed you talk">
-<meta property="og:description" content="Tap a key twice and talk. The words land at your cursor while you are still talking, in any app. Runs on your machine. Free.">
+<meta property="og:description" content="Tap a key twice and talk, tap again to stop. The words land at your cursor, in any app. Runs on your machine. Free.">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
 <!-- Not listed anywhere: a visitor gets here by typing the URL or from the index. "noindex" is
@@ -234,8 +234,8 @@
 
   <header id="top">
     <h1>Write at the<br>speed you talk.</h1>
-    <p class="lead">Tap a key twice and talk. The words land at your cursor while you are still
-    talking, in any app. On your machine, for nothing.</p>
+    <p class="lead">Tap a key twice and talk, tap again to stop. The words land at your cursor
+    the moment you stop, in any app. On your machine, for nothing.</p>
 
     <div class="cta">
       <p class="os mono">macOS, paste into Terminal</p>
@@ -291,35 +291,31 @@
   </section>
 
   <section>
-    <h2>The words arrive while you talk</h2>
-    <p class="punch">Tap twice and start speaking. The first words land at your cursor after about
-    <strong>a second and a half</strong>, and the rest keep up as you go &mdash; in lumps of about
-    a second and a half, punctuation and all.</p>
+    <h2>The text lands the moment you stop</h2>
+    <p class="punch">Tap twice, talk, tap again. The whole transcript pastes at your cursor at
+    once, about <strong>two seconds</strong> after you stop &mdash; there is nothing typed while
+    you talk to land in the wrong place if you move the cursor mid-sentence.</p>
     <div class="scroll">
       <table>
         <thead><tr><th>step</th><th>seconds</th></tr></thead>
         <tbody>
-          <tr><td>first words at your cursor</td><td>1.5</td></tr>
-          <tr><td>a live pass, under 30s of speech</td><td>1.5</td></tr>
-          <tr><td>a live pass, past 30s of speech</td><td>2.4</td></tr>
+          <tr><td>warm transcription, model resident</td><td>2.3</td></tr>
           <tr><td>first transcription after boot, cold</td><td>13.3</td></tr>
           <tr><td>microphone open, first ever</td><td>9.9</td></tr>
           <tr><td>speech lost at the start of a clip</td><td>0.04</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="note">M4 Pro, macOS 26. <strong>One model</strong> does both jobs &mdash;
-    <code>large-v3-turbo</code> answers the live pass and writes the transcript you keep &mdash;
-    because the model typing while you talk is the model that decides your punctuation. The words
-    are typed as key events rather than pasted: 2.6ms, and no clipboard. Measure your own before
-    believing any of these, including ours.</p>
+    <p class="note">M4 Pro, macOS 26. <strong>One model</strong>, <code>large-v3-turbo</code>,
+    answers every clip &mdash; on one warm server, so the first dictation is as fast as the
+    hundredth. Measure your own before believing any of these, including ours.</p>
   </section>
 
   <section>
     <h2>What it does not do</h2>
     <ul>
       <li><strong>No compiled helper.</strong> Key state is polled through stdlib <code>ctypes</code>. No Xcode, no signing, no notarization.</li>
-      <li><strong>No always-on microphone.</strong> Nothing listens between sentences, and a clip you forget about closes itself after fifteen seconds of quiet &mdash; typing what you said rather than throwing it away.</li>
+      <li><strong>No always-on microphone.</strong> Nothing listens between sentences, and a clip you forget about closes itself after fifteen seconds of quiet &mdash; pasting what you said rather than throwing it away.</li>
       <li><strong>No wall of settings.</strong> Two sounds, no presets: one tick when the microphone opens, one when it closes. The words on screen say the rest.</li>
       <li><strong>No LLM on the hot path</strong>, unless you ask for one.</li>
       <li><strong>No Linux.</strong> Wayland exposes no global hotkey API at all, so the answer is honest rather than half working.</li>
@@ -331,10 +327,9 @@
     <p>Your voice is transcribed by your own machine and <strong>the recording is discarded the
     moment that is done</strong>, before anything else happens to it. The microphone closes with
     the key &mdash; and by itself after fifteen seconds of quiet, so it cannot be left open.</p>
-    <p>The transcript is never inspected, filtered, or written down. The words that arrive while
-    you talk are typed straight in and never touch your clipboard at all; the final transcript goes
-    through it and puts your previous contents back. Nothing here makes a network request except
-    the one-off model download.</p>
+    <p>The transcript is never inspected, filtered, or written down. It is pasted through your
+    clipboard once, and whatever was there before is put back right after. Nothing here makes a
+    network request except the one-off model download.</p>
     <p class="after"><a href="https://github.com/ZyxWorks/murmurflow#readme">The source is
     public, and so is every claim on this page.</a></p>
   </section>

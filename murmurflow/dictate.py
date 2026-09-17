@@ -866,7 +866,7 @@ NOTHING_SAID = "nothing was said"
 
 @dataclass(frozen=True)
 class Result:
-    """What one dictation produced, for the CLI and the huddle loop to report on."""
+    """What one dictation produced, for the CLI and the listen loop to report on."""
 
     text: str
     seconds: float
@@ -1278,7 +1278,7 @@ def bind_trigger(
 ) -> str:
     """Run the key listener in whichever mode ``doubleTap`` selects. Blocks. Returns a description.
 
-    One seam, so dictation and a huddle can never end up on different keys or different gestures —
+    One seam, so dictation and a voice chat can never end up on different keys or different gestures —
     which is exactly what happened while each surface bound the keyboard for itself.
     """
     from . import hotkey

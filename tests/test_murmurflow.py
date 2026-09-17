@@ -1782,7 +1782,7 @@ def test_a_lent_trigger_does_not_open_the_microphone_early(monkeypatch):
     monkeypatch.setattr(dictate, "resolve_input", lambda: ("0", "a mic"))
     monkeypatch.setattr(dictate, "start_server", lambda **_k: True)
     monkeypatch.setattr(dictate, "preroll", lambda: opened.append("mic"))
-    monkeypatch.setattr(dictate, "paused", lambda: (True, "a huddle"))
+    monkeypatch.setattr(dictate, "paused", lambda: (True, "your agent's voice chat"))
     monkeypatch.setattr(
         dictate, "bind_trigger", lambda *_a, on_tap=None, **_k: taps.append(on_tap) or "driven"
     )

@@ -1208,7 +1208,7 @@ def reap_orphans(*, scratch: Path, state: Path) -> int:
 def _clear_state_for(pid: int, state: Path) -> None:
     """Drop the in-flight marker, but ONLY if it still describes ``pid``.
 
-    A huddle answers on a worker thread so the operator can interrupt, which means his NEXT
+    A voice chat answers on a worker thread so the operator can interrupt, which means his NEXT
     recording can already be running by the time the previous one is stopped. Unlinking
     unconditionally orphaned it — ffmpeg still capturing, ``current()`` reporting nothing — so the
     clip he was in the middle of speaking could never be finished. An unreadable marker is cleared,

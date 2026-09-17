@@ -1,11 +1,10 @@
-"""speech — the physics of a microphone and the hygiene of a transcript. ONE COPY, TWO TOOLS.
+"""speech — the physics of a microphone and the hygiene of a transcript. CONSUMERS MAY VENDOR IT.
 
-**This file is byte-identical in MurmurFlow and in zyx, and that is enforced.** MurmurFlow was
-extracted from zyx's ``core.dictate`` and the two ship separately on purpose — they do different
-jobs, one types at your cursor and one hands what you said to a runtime — but the layer underneath
-both is not a product decision at all. It is what a wav header looks like, what silence measures,
-and what whisper invents when it is handed nothing. That layer drifted for three weeks and cost
-two of the same bugs found twice, which is what this file exists to stop.
+MurmurFlow owns this file. Another voice tool may copy it verbatim: it is not a product decision at
+all. It is what a wav header looks like, what silence measures, and what whisper invents when it is
+handed nothing. Two hand-kept copies of this layer once drifted for three weeks and the same two
+bugs had to be found twice, so a vendored copy should stay byte-identical and compare itself
+against ``voice-core.sha256``.
 
 **What belongs here:** anything that is true of the AUDIO or of the TRANSCRIPT, needs no config,
 opens no device, and has no opinion about what happens to the words afterwards.
@@ -14,11 +13,9 @@ opens no device, and has no opinion about what happens to the words afterwards.
 the recorder, the key, the server, the cues, and anything that types, pastes, speaks or answers.
 A function here that needs to ask a question about THIS install is in the wrong file.
 
-Stdlib only, and it must stay that way: it is copied verbatim into a runtime whose first invariant
-is a stdlib core.
+Stdlib only, and it must stay that way: a consumer that vendors it takes on no dependency.
 
-Licence: MIT, as MurmurFlow is. The copy in zyx is vendored under it — see
-docs/legal/THIRD-PARTY.md.
+Licence: MIT, as MurmurFlow is. A vendored copy carries it under that licence.
 """
 
 from __future__ import annotations
@@ -289,7 +286,7 @@ TOO_SHORT = "too short"
 
 # The clip was long enough and loud enough to be a sentence, but there was no speech in it. ONE
 # string for every way we reach that conclusion (whisper's language score, the boilerplate word
-# list, an empty transcript) because callers act on it rather than print it: the huddle counts
+# list, an empty transcript) because callers act on it rather than print it: a voice chat counts
 # consecutive occurrences to decide when to stop trusting the microphone. Kept in the operator's
 # own words — he does not care which of the three traps fired.
 NO_SPEECH = "I didn't hear anything"
@@ -299,7 +296,7 @@ NO_SPEECH = "I didn't hear anything"
 # enough that an orphaned recorder costs ~20 MB and ten minutes of open microphone instead of hours.
 MAX_CLIP_SECONDS = 600
 
-# How long a turn may run before the huddle closes the microphone ITSELF and answers what was said.
+# How long a turn may run before a voice chat closes the microphone ITSELF and answers what was said.
 # `MAX_CLIP_SECONDS` above is the recorder's own fuse and stays where it is: it bounds an ORPHAN —
 # a clip nobody is waiting for — and it throws the audio away. This is the opposite case. The
 # operator is right there and simply forgot the second tap, and the right answer is not to discard
@@ -313,8 +310,8 @@ SILENT_DBFS = -70.0
 #
 # This is the trap that the word-list in `_HALLUCINATIONS` structurally cannot be: whisper answers
 # silence in a DIFFERENT invented language each time. The operator hit it live on 2026-08-09 —
-# he pressed the key, said nothing, and Zyx answered two turns of invented Icelandic ("Ennum, hvað
-# er hann?") as though it were a question. No blocklist can grow fast enough to cover that; asking
+# he pressed the key, said nothing, and his voice assistant answered two turns of invented Icelandic
+# ("Ennum, hvað er hann?") as though it were a question. No blocklist can grow fast enough to cover that; asking
 # whisper how sure it was covers all of it at once.
 SPEECH_CONFIDENCE = 0.75
 
@@ -323,10 +320,10 @@ SPEECH_CONFIDENCE = 0.75
 # room reads -38 dBFS and the quietest real speech -15, so -30 sits between them. Do NOT lower it
 # to -40 — that is inside the room.
 #
-# **It is not a gate on a clip, and that distinction is the reason zyx may have this number at all**
+# **It is not a gate on a clip, and that distinction is why a consumer may share this number**
 # (the voice contract, `deliberately_divergent.quiet_floor`). MurmurFlow DROPS a clip
 # under its floor, because it types into a document where transcribing a room is worse than losing
-# a sentence; zyx hands text to a model that can decline to answer, so it drops nothing. Here the
+# a sentence; a tool that hands text to a model that can decline to answer may drop nothing. Here the
 # floor answers two different questions: "has he stopped talking" (:data:`SILENCE_STOP_SECONDS`)
 # and "is this tail worth transcribing" (:func:`trim_trailing_quiet`).
 # Each tool names the setting that moves it in its own vocabulary; this is the default.
@@ -415,7 +412,7 @@ def is_hallucination(text: str, extra: frozenset[str] = frozenset()) -> bool:
     the credit line in each language whisper invents it in. The polite one-word sentences
     ("thank you", "so", "bye") are a different bet in each tool: MurmurFlow types into a document,
     where swallowing a sentence somebody did say reads as broken hardware, so it carries none of
-    them; zyx hands text to a model that can decline to answer, so it carries them all. That is
+    them; a tool that hands text to a model that can decline to answer may carry them all. That is
     `deliberately_divergent.hallucination_list` in the voice contract, and a test in MurmurFlow
     fails the moment one of those words reaches this table.
 
@@ -540,11 +537,11 @@ def repair_punctuation(
 class Setup:
     """What the engine needs to know about THIS install, asked ONCE by the caller.
 
-    **This is the seam that lets the engine be one file.** The two tools name their settings
-    differently (`voicePort` against `port`, `whisperModel` against `model`), read them from
-    different homes, and answer to different vocabularies - so a single `config.get` in here is a
-    line that has to differ, and one line that differs is a file that is no longer shared. Each tool
-    builds one of these from its own configuration and hands it over.
+    **This is the seam that lets the engine be one file.** Every tool that vendors it names its
+    settings differently, reads them from a different home, and answers to a different vocabulary -
+    so a single `config.get` in here is a line that has to differ, and one line that differs is a
+    file that is no longer a copy. Each tool builds one of these from its own configuration and
+    hands it over.
 
     Every field has a default that is safe rather than clever: an empty binary path or model makes
     the function that needs it decline, exactly as a missing binary always did.
@@ -1211,7 +1208,7 @@ def reap_orphans(*, scratch: Path, state: Path) -> int:
 def _clear_state_for(pid: int, state: Path) -> None:
     """Drop the in-flight marker, but ONLY if it still describes ``pid``.
 
-    A huddle answers on a worker thread so the operator can interrupt, which means his NEXT
+    A voice chat answers on a worker thread so the operator can interrupt, which means his NEXT
     recording can already be running by the time the previous one is stopped. Unlinking
     unconditionally orphaned it — ffmpeg still capturing, ``current()`` reporting nothing — so the
     clip he was in the middle of speaking could never be finished. An unreadable marker is cleared,

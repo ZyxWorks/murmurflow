@@ -160,7 +160,7 @@ def unavailable_reason() -> str:
     return platforms.keys_unavailable()
 
 
-# THE GESTURE ITSELF IS SHARED — `murmurflow.gesture`, byte-identical with zyx's copy of it (see
+# THE GESTURE ITSELF IS VENDORABLE — `murmurflow.gesture`, which another tool may copy (see
 # that module's own note). What stays HERE is the vocabulary: which triggers exist, what they are
 # called on each keyboard, and which platform module answers for them. The loop is handed the two
 # questions it needs as callables and never learns what a keycode is.

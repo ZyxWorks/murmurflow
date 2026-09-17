@@ -176,7 +176,7 @@ recorder that must not have the microphone pulled out from under it. That is a *
 stop: the listener stays up and the whisper server stays warm, and only the trigger stands down.
 
 ```sh
-murmurflow pause --seconds 120 --who "a Zyx huddle"
+murmurflow pause --seconds 120 --who "your agent's voice chat"
 murmurflow resume                                   # or just wait
 ```
 
@@ -222,13 +222,31 @@ one keyboard reads on another.
 > `murmurflow doctor` checks for it and prints the fix; you do not have to remember this.
 > *System Settings → Keyboard → Dictation → Shortcut → Off.*
 
-> **Every sentence typed twice?** Something else is listening on the same key. `murmurflow doctor`
-> names it and prints the one command that stops it. The usual one is `zyx voice listen` —
-> murmurflow was extracted from zyx, and murmurflow's own lock cannot see another program's daemon.
+> **Every sentence typed twice?** Two listeners are on the same key. `murmurflow doctor` counts
+> murmurflow's own. Another program on that key is not visible to it: switch that one off, or have
+> it borrow the key with `murmurflow pause` (see [Plug your own agent in](#plug-your-own-agent-in)).
 
 `murmurflow keytest` shows what this Mac actually reports for every bindable key. Use it before
 believing any of the above about your hardware — some MacBooks report the right-side Command and
 Option keys as the left ones, so a `right_*` trigger can never fire there.
+
+## Plug your own agent in
+
+Three connection points, all already here:
+
+- **Borrow the key.** `murmurflow trigger` prints the key it is on (e.g. `left_control`), so your
+  agent can tell whether its own hotkey collides. If it does, run
+  `murmurflow pause --seconds 300 --who "your agent's voice chat"` while your agent owns the key,
+  and `murmurflow resume` after. A pause expires by itself (default 5 minutes, at most an hour).
+- **Reuse the warm model.** While dictation is on, a whisper.cpp `whisper-server` stays loaded on
+  `127.0.0.1:8479` (`murmurflow config set port` moves it; `murmurflow off` stops it). It is
+  whisper.cpp's own server: `curl 127.0.0.1:8479/inference -F file=@clip.wav`. It returns whisper's
+  raw text, so silence can still come back as "Thank you." — the cleanup is MurmurFlow's, not the
+  server's.
+- **Check against the measurements.** [`voice-contract.json`](voice-contract.json) is the measured
+  record (thresholds, request fields, server flags, capture flags). `murmurflow/speech.py` and
+  `murmurflow/gesture.py` are stdlib-only and read no config, so you may vendor them (MIT); compare
+  your copy against [`voice-core.sha256`](voice-core.sha256).
 
 ---
 
@@ -425,8 +443,7 @@ murmurflow trigger      print the trigger key this install is on, for another pr
 murmurflow uninstall    `off`, and remove the MurmurFlow.app too
 ```
 
-`install`, `on`, `off`, `update` and `doctor` mean the same here as in `zyx` and in agent-office's
-`office`: install sets up and starts nothing, on and off both last across a restart, update never
+`install`, `on`, `off`, `update` and `doctor` mean the same here as in agent-office's `office`: install sets up and starts nothing, on and off both last across a restart, update never
 switches on something that is off.
 
 Every clip the daemon handles is logged — how long you held the key, how much audio actually
@@ -505,9 +522,7 @@ MIT. See [LICENSE](LICENSE).
 ## Where this comes from
 
 MurmurFlow is one of the tools **[ZyxWorks](https://zyxworks.com)**, a product studio and forward
-deployed engineering practice, built for itself and gave away. It was extracted from
-[Zyx](https://zyxworks.com#zyx), the OS the studio runs on, which is also why a Mac running both
-types every sentence twice until you turn one off.
+deployed engineering practice, built for itself and gave away.
 
 The other one is **[Agent Office](https://zyxworks.github.io/agent-office/)**: several coding
 agents in one tmux window, each in its own git worktree, and the one that has stopped and is waiting
@@ -518,7 +533,6 @@ on you says so on its border.
 [issues](https://github.com/ZyxWorks/murmurflow/issues)
 
 **Studio:** [what we do for companies](https://zyxworks.com) ·
-[Zyx](https://zyxworks.com#zyx) ·
 [GitHub](https://github.com/ZyxWorks)
 
 **Legal:** [MIT licence](LICENSE) ·

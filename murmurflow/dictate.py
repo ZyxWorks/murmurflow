@@ -62,11 +62,9 @@ from pathlib import Path
 
 from . import config, platforms, speech, whisper
 
-# ONE COPY, TWO TOOLS. Everything below is the same file in zyx's `core.speech` - byte for byte,
-# checked by a digest in both repos and copied by one command (`make voice-sync`, run from zyx).
-# It is the layer that is true of AUDIO and of a TRANSCRIPT rather than of either product: this
-# module was extracted from zyx's `core.dictate`, the two drifted for three weeks, and the same two
-# bugs had to be found twice. Re-exported rather than reached through the module, so every call
+# `speech` is the layer that is true of AUDIO and of a TRANSCRIPT rather than of this product, and
+# another voice tool may vendor it (see that module's own note and `voice-core.sha256`).
+# Re-exported rather than reached through the module, so every call
 # site and every test that says `dictate.X` keeps saying it.
 from .speech import (  # noqa: F401
     AUTO_STOP_SECONDS,
@@ -316,7 +314,7 @@ def server_answers() -> tuple[bool, str]:
 
 # --- the recorder, in this install's vocabulary --------------------------------------------------
 #
-# The engine below is byte-identical with zyx's copy and knows nothing about avfoundation or dshow:
+# The engine below is the vendorable `speech` and knows nothing about avfoundation or dshow:
 # `capture` is this platform's own input arguments with the device already resolved, which is
 # exactly the seam that made the Windows port four files instead of a fork.
 
@@ -356,7 +354,7 @@ def _setup(model: str = "") -> speech.Setup:
     """This install's answer to every question the shared engine asks. See :class:`speech.Setup`.
 
     ONE place where MurmurFlow's vocabulary meets the engine's, so nothing below reads a setting and
-    the engine can stay one file - byte-identical with zyx's copy of it.
+    the engine can stay one file that another tool may vendor unchanged.
     """
     return speech.Setup(
         whisper_server=resolve_bin("whisper-server"),
@@ -520,7 +518,7 @@ def tidy(transcript: str) -> str:
     # Seam repair is ONLY meaningful after a strip: it exists to close the ", ," a removed filler
     # leaves behind. Run unconditionally it would quietly eat a trailing comma somebody dictated on
     # purpose, which is the same class of bug as the strip itself - so `stripping` decides it, and
-    # zyx, which always strips, always closes it.
+    # a tool that always strips always closes it.
     return repair_punctuation(
         text,
         close_dangling=stripping,
@@ -868,7 +866,7 @@ NOTHING_SAID = "nothing was said"
 
 @dataclass(frozen=True)
 class Result:
-    """What one dictation produced, for the CLI and the huddle loop to report on."""
+    """What one dictation produced, for the CLI and the listen loop to report on."""
 
     text: str
     seconds: float
@@ -1280,7 +1278,7 @@ def bind_trigger(
 ) -> str:
     """Run the key listener in whichever mode ``doubleTap`` selects. Blocks. Returns a description.
 
-    One seam, so dictation and a huddle can never end up on different keys or different gestures —
+    One seam, so dictation and a voice chat can never end up on different keys or different gestures —
     which is exactly what happened while each surface bound the keyboard for itself.
     """
     from . import hotkey
@@ -1361,9 +1359,10 @@ def pause_path() -> Path:
 def pause(seconds: float = DEFAULT_PAUSE_SECONDS, *, who: str = "") -> float:
     """Stand the listener down until a deadline, and return that deadline as a unix time.
 
-    ``who`` is whoever is borrowing the key, in words a person would recognise ("a Zyx huddle").
-    It costs nothing to pass and it is the entire difference between ``murmurflow doctor`` saying
-    "paused" and it saying "paused by a Zyx huddle for another 4 minutes" — one of those is a
+    ``who`` is whoever is borrowing the key, in words a person would recognise ("your agent's
+    voice chat"). It costs nothing to pass and it is the entire difference between ``murmurflow
+    doctor`` saying "paused" and it saying "paused by your agent's voice chat for another 4
+    minutes" — one of those is a
     diagnosis and the other is a new question.
     """
     until = time.time() + min(max(1.0, float(seconds)), MAX_PAUSE_SECONDS)
@@ -1457,28 +1456,6 @@ def listener_pids() -> list[int]:
     the setup worth reporting is the broken one where something is listening that never claimed it.
     """
     return _pgrep("murmurflow listen")
-
-
-#: Dictation daemons that are NOT murmurflow and fire on the SAME double-tap key. murmurflow was
-#: extracted from zyx's ``core.dictate``, so a machine that runs both hears every cue twice — in
-#: two different presets, which is exactly what the report sounds like ("several different start
-#: and fail sounds at once"). The listener lock cannot see this: it is one program's lock file and
-#: the other program never asks for it, so the only honest place to catch it is the health report.
-#: (pgrep pattern, what it is, how to switch it off.)
-RIVAL_LISTENERS: tuple[tuple[str, str, str], ...] = (
-    ("zyx voice listen", "zyx", "zyx voice uninstall"),
-    ("anton voice listen", "anton", "anton voice uninstall"),
-)
-
-
-def rival_listeners() -> list[tuple[str, list[int], str]]:
-    """(name, pids, how to stop it) for every non-murmurflow listener on the same trigger."""
-    rivals = []
-    for pattern, name, fix in RIVAL_LISTENERS:
-        pids = _pgrep(pattern)
-        if pids:
-            rivals.append((name, pids, fix))
-    return rivals
 
 
 def claim_listener() -> int:

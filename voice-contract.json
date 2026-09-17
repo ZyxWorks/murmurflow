@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "what_this_is": "The measured, physical facts that core.dictate (zyx) and murmurflow/dictate.py (MurmurFlow) must agree on, because MurmurFlow was extracted from core.dictate and the two now ship separately. Each repo holds an identical copy of this file and a test asserting ITS OWN code still matches it. A change that silently diverges from a measurement fails in the repo that made it, on the day it is made.",
-  "why_it_exists": "One bug - start_server spawning whisper-server with no cwd, so --convert could not write and the server 500'd on every request - sat in BOTH copies and had to be found once and fixed twice. A second (whisper's per-segment newlines reaching the paste) lived in one copy for weeks because nothing compared them. Deleting one copy was measured and rejected: the two tools do different jobs (see docs/guides/voice.md). So the code stays forked and the MEASUREMENTS do not.",
-  "its_honest_limit": "This detects a CODE change that diverges from the contract. It does not detect somebody editing this file in one repo only - the other repo's test would keep passing against its stale copy. Bumping `version` means bumping it in both, deliberately. A cross-repo sync check would need one repo to depend on the other, which invariant 1 forbids and which is a worse trade than a version integer somebody has to move on purpose.",
+  "what_this_is": "The measured, physical facts MurmurFlow's voice code holds, written down so another voice tool that reuses the same whisper-server setup or vendors murmurflow/speech.py can check itself against them. tests/test_voice_contract.py asserts MurmurFlow's own code still matches this file, so a change that silently diverges from a measurement fails on the day it is made.",
+  "why_it_exists": "One bug - start_server spawning whisper-server with no cwd, so --convert could not write and the server 500'd on every request - sat in two hand-kept copies of this code and had to be found once and fixed twice. A second (whisper's per-segment newlines reaching the paste) lived in one copy for weeks because nothing compared them. So the MEASUREMENTS are written down, whoever carries the code.",
+  "its_honest_limit": "This detects a CODE change that diverges from the contract. It does not detect somebody editing this file and the code together, and it cannot see a consumer's copy. Bump `version` when a measurement changes, so a consumer comparing against it sees that it moved.",
   "thresholds": {
     "MIN_CLIP_SECONDS": {
       "value": 0.4,
@@ -20,11 +20,11 @@
   "transcript_seams": {
     "rule": "A `\\n` in a transcript is a whisper SEGMENT boundary, never a line the speaker spoke, and it must be flattened. Flatten it to a SPACE only when there is whitespace on one side of the seam already; when there is none on either side, close it with NOTHING.",
     "must_hold": [
-      ["Look at zyxworks.gith\nub.io today.", "Look at zyxworks.github.io today."],
-      ["Mail me at z\nyxworks.com.", "Mail me at zyxworks.com."],
+      ["Look at example.gith\nub.io today.", "Look at example.github.io today."],
+      ["Mail me at e\nxample.com.", "Mail me at example.com."],
       [" It seems like it's way better working here than in the\n other, you know,\n", "in the other"]
     ],
-    "why": "whisper segments on the DECODER's budget, which is a token boundary and not a word one, so a seam lands inside a word perhaps once every few sentences. Whisper carries a word's leading space inside its first token, so a segment that begins with no space is the SECOND HALF OF A WORD. Joining every seam with a space typed `zyxworks.gith ub.io` and `z yxworks.com` into a real dictation on 2026-08-20. The spacing whisper already emits is the whole signal - there is nothing to measure and nothing to guess."
+    "why": "whisper segments on the DECODER's budget, which is a token boundary and not a word one, so a seam lands inside a word perhaps once every few sentences. Whisper carries a word's leading space inside its first token, so a segment that begins with no space is the SECOND HALF OF A WORD. Joining every seam with a space typed a domain as `gith ub.io`, and another with its first letter split off, into a real dictation on 2026-08-20. The spacing whisper already emits is the whole signal - there is nothing to measure and nothing to guess."
   },
   "trailing_hallucination": {
     "rule": "The boilerplate whisper invents for silence must also be trapped when it is APPENDED to a real sentence, not only when it is the whole transcript. Remove whole trailing sentences that the whole-line trap already recognises; never remove the last sentence standing.",
@@ -45,7 +45,7 @@
     ],
     "response_format": "verbose_json",
     "temperature": "0",
-    "why": "verbose_json is asked for ONLY to get the language score back - the transcript is identical either way. temperature 0 because a dictation is a transcription, not a sample. `prompt` is the proper-noun glossary; dropping it is the difference between 'ZyxWorks' and 'Zicks Works'."
+    "why": "verbose_json is asked for ONLY to get the language score back - the transcript is identical either way. temperature 0 because a dictation is a transcription, not a sample. `prompt` is the proper-noun glossary; dropping it is the difference between 'MurmurFlow' and 'Murmur Flow'."
   },
   "whisper_server_flags": {
     "must_contain": [
@@ -69,8 +69,8 @@
     "why": "aresample=async=1 FILLS dropped avfoundation buffers instead of splicing them out - without it speech plays ~11% fast and whisper transcribes the wrong words. 16k mono is what whisper consumes natively. -flush_packets stops ffmpeg holding ~2s of audio in its buffer."
   },
   "deliberately_divergent": {
-    "tidy": "zyx strips spoken fillers unconditionally; MurmurFlow made it `stripFillers`, default OFF, after it deleted a leading 'hey' from a real sentence, and has since cut every lexical entry from the list - it strips the sounds um/uh/erm/hmm and nothing that is also a word. DIFFERENT ON PURPOSE: zyx's reader is a language model that wants the signal, MurmurFlow's is a human who said those words. Whitespace collapse is NOT in this category - both must flatten whisper's per-segment newlines, because nobody can speak a newline.",
-    "hallucination_list": "MurmurFlow deliberately narrowed the blocklist. A false positive deletes a sentence somebody did say, which reads as broken hardware; the confidence gate above subsumes most of it.",
-    "quiet_floor": "BOTH have QUIET_DBFS (-30.0) now, and they answer DIFFERENT questions with it. MurmurFlow also DROPS a clip whose peak is under the floor, because it types into a document where transcribing a room is worse than losing a sentence; zyx drops nothing, because it hands text to a model that can simply decline to answer, and that half stays divergent on purpose. What zyx uses the number for is WHERE THE SILENCE IS: has the speaker stopped (the microphone closes itself after SILENCE_STOP_SECONDS) and is this tail worth transcribing (the trailing-quiet trim, without which every self-closed clip ends in silence and comes back with an invented sentence on it). Measured -38 dBFS for a loud silent room and -15 dBFS for the quietest real speech, so -30 sits between them. Do NOT lower it to -40."
+    "tidy": "MurmurFlow made filler stripping `stripFillers`, default OFF, after it deleted a leading 'hey' from a real sentence, and has since cut every lexical entry from the list - it strips the sounds um/uh/erm/hmm and nothing that is also a word. A consumer whose reader is a language model may strip unconditionally: that reader wants the signal, MurmurFlow's is a human who said those words. Whitespace collapse is NOT in this category - both must flatten whisper's per-segment newlines, because nobody can speak a newline.",
+    "hallucination_list": "MurmurFlow deliberately narrowed the blocklist; a consumer whose reader can decline to answer may carry a wider one. A false positive deletes a sentence somebody did say, which reads as broken hardware; the confidence gate above subsumes most of it.",
+    "quiet_floor": "BOTH have QUIET_DBFS (-30.0) now, and they answer DIFFERENT questions with it. MurmurFlow also DROPS a clip whose peak is under the floor, because it types into a document where transcribing a room is worse than losing a sentence; a consumer that hands text to a model that can simply decline to answer may drop nothing, and that half is its own choice. What the shared engine uses the number for is WHERE THE SILENCE IS: has the speaker stopped (the microphone closes itself after SILENCE_STOP_SECONDS) and is this tail worth transcribing (the trailing-quiet trim, without which every self-closed clip ends in silence and comes back with an invented sentence on it). Measured -38 dBFS for a loud silent room and -15 dBFS for the quietest real speech, so -30 sits between them. Do NOT lower it to -40."
   }
 }

@@ -10,7 +10,7 @@ branch changes behaviour. Each item names the file and line as of `865e1c8`, wha
 smallest verified fix.
 
 **Baseline at `865e1c8`:** 154 tests pass, `ruff check` clean, `mypy --strict` clean.
-One local note: after the repo moved to `.zyx/code/murmurflow`, the checked-out `.venv` still
+One local note: after the repo moved directories, the checked-out `.venv` still
 pointed at the old path; `rm -rf .venv && uv sync` fixes it (already done in this checkout,
 `.venv` is gitignored).
 

@@ -1,4 +1,4 @@
-"""install / on / off / update mean the same here as in zyx and agent-office.
+"""install / on / off / update mean the same here as in agent-office.
 
 install sets up and starts nothing; on and off both last across a restart; update never switches
 on a listener that is off. "start" below is the login agent being (re)registered and loaded.
@@ -18,7 +18,6 @@ def _machine(monkeypatch, *, running, updated=True):
     monkeypatch.setattr(cli, "_tcc_entry", lambda: "MurmurFlow")
     monkeypatch.setattr(cli.dictate, "start", lambda: None)  # no microphone in a test
     monkeypatch.setattr(cli.dictate, "stop_server", lambda: False)
-    monkeypatch.setattr(cli.dictate, "rival_listeners", lambda: [])
     monkeypatch.setattr(cli.dictate, "trigger_hint", lambda: "Double-tap Control")
     monkeypatch.setattr(cli.service, "is_macos", lambda: False)  # never open System Settings
     monkeypatch.setattr(cli.service, "running", lambda: running)

@@ -33,8 +33,8 @@
 // So this file no longer knows where the sun or the moon is at all. `paint` still ACCEPTS a `body`
 // so the two copied-out consumers do not break on an extra key, and does nothing with it.
 //
-// STILL ONE MODULE, STILL COPIED OUT. `zyx`'s dashboard, `zyxworks-site` and MurmurFlow's landing
-// page all run this file; `make brand-field` overwrites the other two from this one. A React repo
+// STILL ONE MODULE, STILL COPIED OUT. The studio's dashboard, `zyxworks-site` and MurmurFlow's
+// landing page all run this file; `make brand-field` overwrites the other two from the source copy. A React repo
 // calls `mount` in a `useEffect`; a plain page calls it in a `<script type="module">`.
 //
 // CANVAS, NOT DOM NODES. It also makes "never steals a pointer event" true by construction rather
@@ -61,7 +61,7 @@ export function mulberry32(seed) {
 const JOINT = [60, 60];
 
 // AND THE MARK IS AN XYZ AXIS, SO IT TURNS ON ONE (operator, 2026-08-27: "I want this xyz thingy
-// to rotate in the xyz axis, right? Cause Zyx is an xyz axis").
+// to rotate in the xyz axis").
 //
 // These are the brand's own three strokes lifted back into 3D. Drop the z and you get
 // (60,30) (30,82) (94,74) EXACTLY - so nothing is re-drawn and nothing is a new glyph. The z each

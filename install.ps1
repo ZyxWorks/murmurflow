@@ -98,7 +98,7 @@ Check "murmurflow setup (the model download)"
 Say "Registering the listener to start at logon"
 & $mf install
 Check "murmurflow install"
-# `install` sets up and starts nothing (the same verb as zyx and agent-office); `on` starts it.
+# `install` sets up and starts nothing (the same verb as agent-office); `on` starts it.
 & $mf on
 Check "murmurflow on"
 

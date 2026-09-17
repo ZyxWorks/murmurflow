@@ -1,15 +1,15 @@
-"""gesture — what a hand does with one key, and what it means. ONE COPY, TWO TOOLS.
+"""gesture — what a hand does with one key, and what it means. CONSUMERS MAY VENDOR IT.
 
-**This file is byte-identical in MurmurFlow and in zyx, and that is enforced** — same rule and same
-ritual as :mod:`core.speech`, which holds the other half (`make voice-sync`, a digest in both
-repos, a test that fails the moment either copy is edited alone).
+MurmurFlow owns this file, and another tool may copy it verbatim — same rule as :mod:`speech`,
+which holds the other half (a digest in ``voice-core.sha256``, and a test that fails the moment
+this file changes without it).
 
 It is here rather than in `speech` because it is not about audio at all. It is the gesture: the
 intent delay, the chord abort, the press-to-press double-tap window, the tap/hold distinction, and
 the rule that a callback which raises never kills the loop. Every one of those is a decision made
 against a person's hand, tuned by watching one, and every one of them was tuned twice — the
-press-to-press window was measured in MurmurFlow and carried into zyx by hand three weeks later,
-which is exactly the drift this file ends.
+press-to-press window was measured once and carried into a hand-kept copy three weeks later, which
+is exactly the drift one vendored file ends.
 
 **What is NOT here, and must not be:** which key, what it is called, how this platform reads it,
 and what the gesture is FOR. The two primitives are passed in — ``held()`` answers "is the trigger
@@ -17,12 +17,10 @@ down right now" and ``since_keydown()`` "how long since any real key went down" 
 knows nothing about CoreGraphics, dshow, virtual keycodes or trigger names, and neither tool has to
 explain its own vocabulary to it.
 
-Stdlib only, like everything it may be copied into — and it must satisfy the STRICTER of the two
-repos' linters, which is MurmurFlow's (it runs the `S` and `SIM` rule sets that zyx does not). A
-shared file that only passes in one repo is a file somebody edits in the other and cannot commit.
+Stdlib only, and it passes MurmurFlow's linter, which runs the `S` and `SIM` rule sets, so a copy
+lints clean in a repo with looser rules too.
 
-Licence: MIT, as MurmurFlow is. The copy in zyx is vendored under it — see
-docs/legal/THIRD-PARTY.md.
+Licence: MIT, as MurmurFlow is. A vendored copy carries it under that licence.
 """
 
 from __future__ import annotations
@@ -166,7 +164,7 @@ def listen(
             if elapsed < min_hold:
                 # The REMAINDER, not the floor again: a press of `min_hold - 1ms` used to wait
                 # a further full floor, so the shortest holds took nearly twice as long to answer.
-                # Measured in MurmurFlow; zyx carried the doubled wait until the loop became one.
+                # Measured; a hand-kept copy carried the doubled wait until the loop became one.
                 time.sleep(min_hold - elapsed)  # let the mic collect something before we cut it
             _safe(on_release)
         time.sleep(interval)

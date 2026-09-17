@@ -331,21 +331,6 @@ def test_claiming_twice_from_the_same_process_is_not_a_conflict():
     assert dictate.claim_listener() == 0
 
 
-def test_a_rival_daemon_on_the_same_key_is_found_and_named(monkeypatch):
-    # The doubling the lock CANNOT catch: another program, its own lock file, the same double-tap.
-    # murmurflow was extracted from zyx, so a Mac running both is the ordinary case, not an exotic
-    # one — and the murmurflow-only count reads a healthy "1" straight through it.
-    monkeypatch.setattr(
-        dictate, "_pgrep", lambda pattern: [31073] if pattern == "zyx voice listen" else []
-    )
-    assert dictate.rival_listeners() == [("zyx", [31073], "zyx voice uninstall")]
-
-
-def test_nothing_else_on_the_key_reports_no_rival(monkeypatch):
-    monkeypatch.setattr(dictate, "_pgrep", lambda pattern: [])
-    assert dictate.rival_listeners() == []
-
-
 # --- the trigger ---------------------------------------------------------------------------------
 
 
@@ -617,13 +602,13 @@ def test_a_whisper_segment_break_never_reaches_the_paste():
 
 
 def test_a_segment_seam_inside_a_word_does_not_become_a_space():
-    # The report, and his own dictated message is the evidence: "zyxworks.gith ub.io",
-    # "z yxworks.com", "murmur flow". whisper segments on the DECODER's budget, so the seam lands
+    # The report, and his own dictated message is the evidence: a domain typed as "gith ub.io",
+    # another with its first letter split off, "murmur flow". whisper segments on the DECODER's budget, so the seam lands
     # between two tokens of one word - and that segment starts with no leading space, because
     # whisper carries a word's space inside its first token. Joining every seam with " " split the
     # word. No whitespace on either side of the seam = the word was cut in half.
-    assert dictate.tidy("go to zyxworks.gith\nub.io") == "go to zyxworks.github.io"
-    assert dictate.tidy("Mail me at z\nyxworks.com.") == "Mail me at zyxworks.com."
+    assert dictate.tidy("go to example.gith\nub.io") == "go to example.github.io"
+    assert dictate.tidy("Mail me at e\nxample.com.") == "Mail me at example.com."
     # ...and a seam at a REAL word boundary still gets its space, from either side of the newline.
     assert dictate.tidy("in the\n other") == "in the other"
     assert dictate.tidy("in the \nother") == "in the other"
@@ -858,9 +843,9 @@ def test_lending_the_key_expires_on_its_own():
     # silently dead with nothing on screen to explain it — the key is pressed, no cue plays, and
     # there is nothing to read. An expiry makes the worst case a few minutes, not an outage.
     assert dictate.paused() == (False, "")
-    dictate.pause(60, who="a Zyx huddle")
+    dictate.pause(60, who="your agent's voice chat")
     lent, holder = dictate.paused()
-    assert lent and "a Zyx huddle" in holder
+    assert lent and "your agent's voice chat" in holder
     dictate.pause(-5)  # clamped to the 1s floor, so this is the shortest pause there is
     import time as _t
 

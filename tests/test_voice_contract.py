@@ -1,14 +1,9 @@
-"""The measurements MurmurFlow and zyx must not drift apart on — see voice-contract.json.
+"""The measurements MurmurFlow's voice code must not drift from — see voice-contract.json.
 
-MurmurFlow was extracted from zyx's ``core.dictate`` and the two now ship separately, on purpose:
-they do different jobs. MurmurFlow types what you say into the app you are in; zyx hands what you
-say to its own runtime and answers out loud. Merging them back was measured and rejected, so the
-CODE is forked and the MEASUREMENTS are not.
-
-This asserts MurmurFlow's own code still matches the contract; zyx holds an identical copy of the
-file and asserts the same of its own. It is deliberately about physics and protocol, never about
-product decisions — where the two SHOULD differ (``tidy``, the hallucination list, ``quietFloor``)
-the contract says so and nothing here checks it. A test forcing those together would be wrong.
+The contract is the measured record another voice tool can check itself against. This asserts
+MurmurFlow's own code still matches it. It is deliberately about physics and protocol, never about
+product decisions — where a consumer MAY differ (``tidy``, the hallucination list, ``quietFloor``)
+the contract says so and nothing here checks it.
 """
 
 from __future__ import annotations
@@ -28,7 +23,7 @@ CONTRACT = json.loads(
 
 
 def test_the_contract_is_the_version_this_test_was_written_against() -> None:
-    """Bumping it is a deliberate act in BOTH repos — see the file's own ``its_honest_limit``."""
+    """Bumping it is a deliberate act — see the file's own ``its_honest_limit``."""
     assert CONTRACT["version"] == 2
 
 
@@ -88,8 +83,8 @@ def test_a_whisper_segment_break_never_survives_tidy() -> None:
 def test_a_segment_seam_inside_a_word_never_becomes_a_space() -> None:
     """The seam whisper leaves between two tokens of ONE word must close with nothing.
 
-    Reported 2026-08-20 from a real dictation: "zyxworks.gith ub.io", "z yxworks.com". Both tools
-    flatten whisper's per-segment newlines, so both tools own this half of it too.
+    Reported 2026-08-20 from a real dictation: a domain typed as "gith ub.io". Every tool that
+    flattens whisper's per-segment newlines owns this half of it too.
     """
     spec = CONTRACT["transcript_seams"]
     for raw, expected in spec["must_hold"]:
@@ -105,7 +100,7 @@ def test_boilerplate_appended_to_a_real_sentence_never_survives_tidy() -> None:
 
 # --- the core itself, not just the measurements -------------------------------------------------
 
-#: Every file that is byte-identical in zyx, and the one command that keeps them so.
+#: The files another tool may vendor verbatim, each with a digest in voice-core.sha256.
 SHARED = ("speech.py", "gesture.py")
 _HERE = Path(__file__).resolve().parents[1]
 
@@ -122,34 +117,31 @@ def _recorded(name: str) -> str:
 
 
 @pytest.mark.parametrize("name", SHARED)
-def test_the_shared_files_are_the_copies_both_tools_carry(name: str) -> None:
-    """ONE COPY, TWO TOOLS — and a copy nothing checks is two copies again in three weeks.
+def test_the_vendorable_files_match_their_recorded_digest(name: str) -> None:
+    """An edit to a file other tools may vendor is a deliberate act, and the digest says it moved.
 
     `voice-contract.json` pins the MEASUREMENTS and it did its job: the thresholds never drifted.
-    What drifted was everything around them — a wav header offset, a hallucination table, a
-    trailing-silence trim, a level scan, and a hold floor that waited its remainder here and the
-    whole floor again there — because "the same code in both repos" was a habit, and habits lose to
-    three weeks and 24 commits.
+    What drifted, back when this layer lived in two hand-kept copies, was everything around them —
+    a wav header offset, a hallucination table, a trailing-silence trim, a level scan, and a hold
+    floor that waited its remainder in one copy and the whole floor again in the other.
 
-    So the shared layer is TWO FILES (`speech.py`, the audio and the transcript; `gesture.py`, what
-    a hand does with one key) and both are byte-identical in zyx. This test cannot see zyx and does
-    not try: it checks that neither file has been edited since the two were last made equal. The
-    ritual is `make voice-sync`, run from the zyx checkout.
+    So the vendorable layer is TWO FILES (`speech.py`, the audio and the transcript; `gesture.py`,
+    what a hand does with one key). A consumer compares its copy against `voice-core.sha256`; this
+    test makes sure that file is never stale.
     """
     digest = hashlib.sha256(_core(name).read_bytes()).hexdigest()
     assert digest == _recorded(name), (
-        f"murmurflow/{name} changed. It is SHARED: zyx carries the same file byte for byte. Run "
-        "`make voice-sync` in the zyx checkout (it copies the file and rewrites the digest in both "
-        "repos), then commit both."
+        f"murmurflow/{name} changed. Other tools may vendor it, so record the new digest: "
+        "`(cd murmurflow && shasum -a 256 speech.py gesture.py) > voice-core.sha256`, and commit it."
     )
 
 
 def test_nothing_in_the_shared_core_asks_a_question_about_this_install() -> None:
-    """The floors are ARGUMENTS in there, never settings, or the file cannot be the same file.
+    """The floors are ARGUMENTS in there, never settings, or the file cannot be vendored unchanged.
 
-    The two tools name their settings differently (`quietFloor` against `voiceQuietFloor`) and read
-    them from different places, so one line of config in `speech` is a line that has to differ — and
-    one line that differs is a file that is no longer shared.
+    Every tool names its settings differently and reads them from a different place, so one line of
+    config in `speech` is a line a consumer has to change — and a copy that differs is no longer a
+    copy anybody can check against the digest.
     """
     for name in SHARED:
         src = _core(name).read_text("utf-8")
@@ -163,10 +155,10 @@ def test_nothing_in_the_shared_core_asks_a_question_about_this_install() -> None
 def test_the_polite_one_word_sentences_are_not_in_the_shared_table() -> None:
     """`deliberately_divergent.hallucination_list`, enforced where it can actually be enforced.
 
-    zyx's blocklist holds "thank you", "you", "so" and "bye", and that is right THERE: what reads
-    the transcript is a model that can decline to answer. Here the transcript is TYPED, so a real
-    sentence swallowed reads as broken hardware — and the shared table is the one place those two
-    bets could quietly be merged into one. This is the test that noticed when they were.
+    A tool whose reader is a model that can decline to answer may block "thank you", "you", "so"
+    and "bye" in its own list. Here the transcript is TYPED, so a real sentence swallowed reads as
+    broken hardware — and the shared table is the one place those two bets could quietly be merged
+    into one. This is the test that noticed when they were.
     """
     for word in ("thank you", "thank you.", "you", "so", "bye", "vielen dank", "."):
         assert word not in speech.HALLUCINATIONS, (

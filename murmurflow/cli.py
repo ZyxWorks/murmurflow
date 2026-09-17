@@ -1,7 +1,7 @@
 """``murmurflow`` — the command line. Ten verbs, and most people only ever type two.
 
 ``setup``, ``install``, ``on`` is the whole happy path; ``off`` and ``update`` mean what they mean
-in zyx and agent-office. Everything else here exists because dictation fails in exactly four ways
+in agent-office. Everything else here exists because dictation fails in exactly four ways
 — the key is not seen, the microphone is not heard, the model is not found, the text is not typed —
 and each of those has its own verb that answers it in one run.
 """
@@ -242,7 +242,7 @@ def _ready() -> bool:
 def _install() -> int:
     """Update the installed copy and warm the microphone. It never switches dictation ON.
 
-    `install` means the same in every tool here (zyx, agent-office): put it on the machine, start
+    `install` means the same as in agent-office: put it on the machine, start
     nothing — `on` starts it. A listener that is ALREADY on comes back on the new code, so
     `git pull && murmurflow install` is still a whole update; a first install ends by naming `on`.
     """
@@ -272,7 +272,7 @@ def _install() -> int:
 
 
 def _on() -> int:
-    """Dictation on, now and after every login, on the newest code — the same `on` as `zyx on`."""
+    """Dictation on, now and after every login, on the newest code — the same `on` as `office on`."""
     _update()  # may re-exec; anything after this line runs in the NEW copy
     if not _ready():
         return 2
@@ -326,13 +326,6 @@ def _start() -> int:
         else f"[!] could not switch it on: {detail}"
     )
     _out("")
-    # Installing is the exact moment a second daemon joins the key, so it is the moment to say so.
-    # Silence here costs the user a session of "it worked yesterday" before anyone runs the health
-    # report that already knew.
-    for name, pids, fix in dictate.rival_listeners():
-        _out(f"[!] {name} is listening on the same key ({', '.join(str(p) for p in pids)}).")
-        _out(f"    Both will chime and both will type. Switch one off: {fix}")
-        _out("")
     _out(f"{dictate.trigger_hint()} anywhere and talk. Release: the text types itself.")
     _out("")
     _out("macOS will ask for two permissions the first time. Neither can be granted from a script,")
@@ -513,26 +506,6 @@ def _doctor(*, verbs: bool = False) -> int:
                 "— every sentence is typed twice"
             ),
             "murmurflow off, then murmurflow on",
-        )
-    )
-    # A murmurflow-only count reads "listeners: 1 [OK]" on a Mac where a SECOND program holds the
-    # same key — which is the setup the user actually sees: one sentence pasted twice. Reinstalling
-    # murmurflow cannot fix that, so it is its own row with its own fix.
-    rivals = dictate.rival_listeners()
-    rows.append(
-        (
-            not rivals,
-            "other dictation: "
-            + (
-                "nothing else on this key"
-                if not rivals
-                else ", ".join(
-                    f"{name} IS LISTENING TOO ({', '.join(str(pid) for pid in pids)})"
-                    for name, pids, _ in rivals
-                )
-                + " — every sentence is typed twice"
-            ),
-            "; ".join(fix for _, _, fix in rivals),
         )
     )
     rows.append(

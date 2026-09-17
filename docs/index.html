@@ -27,7 +27,7 @@
   has asked for reduced motion.
 -->
 <style>
-  /* Self-hosted, copied from the zyx build. No Google Fonts request, ever. */
+  /* Self-hosted, copied from the ZyxWorks build. No Google Fonts request, ever. */
   @font-face {
     font-family: Sora; font-style: normal; font-weight: 400; font-display: swap;
     src: url("fonts/sora-400.woff2") format("woff2");
@@ -62,7 +62,7 @@
     --signal-ink: #0b0c10;
   }
   /* DARK ONLY, and that is the ratified brand rather than an omission. The light ramp exists in
-     the zyx codebase and is PARKED there by decision ("doesn't look this cool, park it for later"),
+     the studio's codebase and is PARKED there by decision ("doesn't look this cool, park it for later"),
      with the toggle still in the tree and nothing activating it. A product page that flips itself
      white because a visitor's OS is in light mode is a second brand, shown to exactly the people
      we did not choose it for. `color-scheme: dark` above is what keeps the scrollbars and any form
@@ -99,7 +99,7 @@
   strong { color: var(--ink); font-weight: 600; }
   code { font-family: "Geist Mono", ui-monospace, Menlo, monospace; font-size: 0.9em; }
 
-  /* --- the mark, and the tips-into-joint hover it shares with the zyx lockups --- */
+  /* --- the mark, and the tips-into-joint hover it shares with the ZyxWorks lockups --- */
   .mk line { stroke: currentColor; stroke-width: 9; stroke-linecap: round; }
   .mk-vanish line { stroke-dasharray: 44; stroke-dashoffset: 0; transition: stroke-dashoffset 0.55s cubic-bezier(0.22, 0.61, 0.36, 1); }
   @media (hover: hover) {
@@ -334,6 +334,16 @@
     public, and so is every claim on this page.</a></p>
   </section>
 
+  <section>
+    <h2>Plug your own agent in</h2>
+    <ul>
+      <li><strong>Borrow the key.</strong> <code>murmurflow trigger</code> prints the key it is on. <code>murmurflow pause --who "your agent's voice chat"</code> stands it down while your agent owns it, and the pause expires by itself.</li>
+      <li><strong>Reuse the warm model.</strong> While dictation is on, whisper.cpp's own <code>whisper-server</code> stays loaded on <code>127.0.0.1:8479</code>.</li>
+      <li><strong>Check against the measurements.</strong> <code>voice-contract.json</code> is the measured record, and the speech and gesture files are stdlib-only and yours to vendor.</li>
+    </ul>
+    <p class="after"><a href="https://github.com/ZyxWorks/murmurflow#plug-your-own-agent-in">How, in the README.</a></p>
+  </section>
+
   <!-- The studio pitch. This page is the widest-reaching thing ZyxWorks publishes, and a visitor
        who likes MurmurFlow enough to install it is exactly the visitor worth telling about the
        paid work. No new CSS: it reuses the .facts grid and .after that the sections above use. -->
@@ -344,13 +354,8 @@
     away. The paid work is putting the same engineering inside a company.</p>
     <div class="facts">
       <div class="fact">
-        <strong><a href="https://zyxworks.com#zyx">Zyx</a></strong>
-        <span>The AI company OS MurmurFlow came out of. It works inside the tools you already
-        use, and every step that matters waits for your approval.</span>
-      </div>
-      <div class="fact">
         <strong><a href="https://zyxworks.com#fde">Forward deployed engineering</a></strong>
-        <span>We map your business, connect Zyx, and hand your own people the keys inside
+        <span>We map your business, connect AI to it, and hand your own people the keys inside
         120 days.</span>
       </div>
     </div>
@@ -382,7 +387,6 @@
         <h4>Studio</h4>
         <a href="https://zyxworks.com/open-source">Our other tools</a>
         <a href="https://zyxworks.com">What we do for companies</a>
-        <a href="https://zyxworks.com#zyx">Zyx</a>
       </div>
       <div class="col">
         <h4>Legal</h4>
@@ -392,7 +396,7 @@
       </div>
     </div>
     <div class="copyright">
-      &copy; <span id="year">2026</span> ZYXWORKS &middot; ZYX &middot; FORWARD DEPLOYED AI FOR YOUR COMPANY
+      &copy; <span id="year">2026</span> ZYXWORKS &middot; FORWARD DEPLOYED AI FOR YOUR COMPANY
       <div class="disclaimer">MurmurFlow is not affiliated with, endorsed by, or connected to any
       other dictation product or vendor.</div>
     </div>
@@ -413,8 +417,8 @@
     });
   });
 
-  // The backdrop is the SHARED module now (`field.js`, beside this file). Edit it in the zyx repo -
-  // `dashboard/src/lib/field.js` - never here and never on the ZyxWorks site: all three used to
+  // The backdrop is the SHARED module now (`field.js`, beside this file). Edit it at its source in
+  // the ZyxWorks codebase - never here and never on the ZyxWorks site: all three used to
   // carry a hand-port of one idea, already diverged, and this copy's phases came from
   // `Math.random()` so the sky reshuffled on every reload.
   //

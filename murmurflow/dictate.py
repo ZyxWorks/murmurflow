@@ -491,14 +491,21 @@ def replace_words(text: str, mapping: dict[str, str]) -> str:
 
     ``vocabulary`` only PRIMES whisper; a name it has settled on hearing as "Ziggs" stays "Ziggs"
     however often "Zyx" is in the prompt. This is the deterministic half: nothing unlisted moves,
-    and a key inside a longer word ("Ziggsy") is left alone. Longest key first, so "Murmur Flow"
-    wins over a shorter "Murmur".
+    and a key inside a longer word ("Ziggsy") is left alone, while a hyphen is an edge ("Ziggs-Server").
+    ONE pass over the text, longest key first in the alternation, so a replacement's own output is
+    never replaced again: a chain ("Ziggs" -> "Zyx", "Zyx" -> ...) or a swap stays what was written.
     """
-    for key in sorted((k for k in mapping if k.strip()), key=len, reverse=True):
-        pattern = r"\s+".join(re.escape(part) for part in key.split())
-        typed = mapping[key].replace("\\", "\\\\")  # typed literally, never read as a group reference
-        text = re.sub(rf"(?<![\w-]){pattern}(?![\w-])", typed, text, flags=re.IGNORECASE)
-    return text
+    keys = sorted((k for k in mapping if k.strip()), key=len, reverse=True)
+    if not keys:
+        return text
+    norm = {" ".join(k.lower().split()): mapping[k] for k in keys}
+    alternation = "|".join(r"\s+".join(re.escape(part) for part in k.split()) for k in keys)
+    return re.sub(
+        rf"(?<!\w)(?:{alternation})(?!\w)",
+        lambda m: norm.get(" ".join(m.group(0).lower().split()), m.group(0)),
+        text,
+        flags=re.IGNORECASE,
+    )
 
 
 def _replacements() -> dict[str, str]:

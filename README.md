@@ -356,6 +356,13 @@ Teach it your own words — the cheapest accuracy win there is:
 murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reinsch"]'
 ```
 
+A name it still gets wrong after that, fix for good. Whole words, any case, typed exactly as you
+wrote it; nothing unlisted is ever touched:
+
+```sh
+murmurflow config set replacements '{"Ziggs": "Zyx", "Murmur Flow": "MurmurFlow"}'
+```
+
 ## Settings
 
 `~/.murmurflow/config.json`, one flat object. `murmurflow config` prints every key.
@@ -368,6 +375,7 @@ murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reins
 | `languages` | the languages you actually speak, e.g. `["de","en"]`. A clip whisper reads as any other one is dropped. Empty = accept all |
 | `inputName` | part of a microphone name. Default: system default. `murmurflow devices` lists them |
 | `vocabulary` | proper nouns to bias the transcriber toward |
+| `replacements` | words it keeps getting wrong and what to type instead, e.g. `{"Ziggs": "Zyx"}`. Whole words, any case |
 | `polishCommand` | see below |
 | `stripFillers` | `true` = delete the sounds `um` / `uh` / `erm` / `hmm`, and nothing else. **Off** — you get verbatim |
 | `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |

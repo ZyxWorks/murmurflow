@@ -485,6 +485,36 @@ def trim_trailing_quiet(wav: Path) -> bool:
     return speech.trim_trailing_quiet(wav, quiet_floor())
 
 
+def replace_words(text: str, mapping: dict[str, str]) -> str:
+    """The user's own corrections, applied to a finished transcript: each key, as a whole word or
+    phrase in any case (the spaces inside it matched loosely), becomes its value exactly as written.
+
+    ``vocabulary`` only PRIMES whisper; a name it has settled on hearing as "Ziggs" stays "Ziggs"
+    however often "Zyx" is in the prompt. This is the deterministic half: nothing unlisted moves,
+    and a key inside a longer word ("Ziggsy") is left alone, while a hyphen is an edge ("Ziggs-Server").
+    ONE pass over the text, longest key first in the alternation, so a replacement's own output is
+    never replaced again: a chain ("Ziggs" -> "Zyx", "Zyx" -> ...) or a swap stays what was written.
+    """
+    keys = sorted((k for k in mapping if k.strip()), key=len, reverse=True)
+    if not keys:
+        return text
+    norm = {" ".join(k.lower().split()): mapping[k] for k in keys}
+    alternation = "|".join(r"\s+".join(re.escape(part) for part in k.split()) for k in keys)
+    return re.sub(
+        rf"(?<!\w)(?:{alternation})(?!\w)",
+        lambda m: norm.get(" ".join(m.group(0).lower().split()), m.group(0)),
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def _replacements() -> dict[str, str]:
+    raw = _cfg().get("replacements", {})
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items() if isinstance(v, str)}
+
+
 def tidy(transcript: str) -> str:
     """Deterministic cleanup of a raw transcript. VERBATIM unless ``stripFillers`` is turned on.
 
@@ -515,6 +545,10 @@ def tidy(transcript: str) -> str:
     # right call) silently took the flattening with it, and the two have nothing to do with each
     # other.
     text = " ".join(text.split())
+    # The user's own corrections (`replacements`), after the flattening so a phrase split across a
+    # segment seam still matches, and before the punctuation repair so a replaced word is punctuated
+    # like any other. Empty unless configured: by default what you said is what you get.
+    text = replace_words(text, _replacements())
     # Seam repair is ONLY meaningful after a strip: it exists to close the ", ," a removed filler
     # leaves behind. Run unconditionally it would quietly eat a trailing comma somebody dictated on
     # purpose, which is the same class of bug as the strip itself - so `stripping` decides it, and

@@ -753,6 +753,15 @@ def _reject(key: str, value: object) -> str:
                 "on this list is thrown away. Write it as a JSON list of two-letter codes: "
                 '\'["de", "en"]\''
             )
+    elif key == "replacements":
+        ok = isinstance(value, dict) and all(
+            isinstance(k, str) and k.strip() and isinstance(v, str) for k, v in value.items()
+        )
+        if not ok:
+            return (
+                f"`replacements` is a JSON object of word -> what to type instead, not `{text}`: "
+                '\'{"Ziggs": "Zyx"}\''
+            )
     elif key == "model":
         # A bare NAME is legal here — an openai-whisper CLI downloads its own weights by name (see
         # `whisper.openai_model_name`). Only something shaped like a PATH is checked, because that

@@ -1990,7 +1990,10 @@ def test_zero_means_the_main_port_here_as_it_does_everywhere_else(monkeypatch):
     Nothing is ever listening there, so the answer was always no, and the daemon announced that its
     own running server was unavailable — then ran every clip on the cold path, all day.
     """
-    monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
+    # `speech.server_up`, the one `start_server` really asks. Patching `dictate.server_up` patched
+    # nothing it calls, so this passed only on a Mac where a real whisper-server holds the port,
+    # and failed on every CI runner, where nothing does.
+    monkeypatch.setattr(speech, "server_up", lambda at: at == dictate.port())
     asked: list[str] = []
 
     class _Found:

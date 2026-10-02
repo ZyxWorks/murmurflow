@@ -1440,19 +1440,61 @@ def listener_lock_path() -> Path:
     return config.home_root() / "listener.pid"
 
 
+#: The lock file of the listener this process runs, open and OS-locked until the process exits.
+#: Module state on purpose: closing it is what gives the trigger back, so it must outlive the call
+#: that took it. It is never inherited by the whisper-server or a recorder (Python opens every fd
+#: non-inheritable), so the lock dies with the listener and with nothing else.
+_LISTENER_LOCK: int | None = None
+
+
+def _read_listener_pid(path: Path) -> int:
+    try:
+        return int(path.read_text("utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _locked_elsewhere(path: Path) -> bool:
+    """True while some other process holds the OS lock on ``path``. POSIX only."""
+    import fcntl
+
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)  # also drops the probe's own lock
+    return False
+
+
 def listener_pid() -> int:
     """The PID of a live listener OTHER than this process, or 0 when the trigger is free.
 
-    A lock left behind by a crash or a hard reboot reads as free, because the process it names is
-    gone. Nobody is ever told to delete a lock file.
+    A lock left behind by a crash or a hard reboot reads as free. Nobody is ever told to delete a
+    lock file.
+
+    "Free" is decided by the OS lock the listener holds on the file, NOT by whether the PID in it
+    is alive. Live (2026-10-02): after a reboot the PID left in the file belonged to swcd, which is
+    very much alive, so the login agent read it as "another listener", stood down, and was started
+    again 76 times — and the double-tap did nothing all day. The kernel drops a lock the instant
+    its process dies, however it dies, so a reused PID cannot hold one.
     """
-    try:
-        pid = int(listener_lock_path().read_text("utf-8").strip())
-    except (OSError, ValueError):
+    path = listener_lock_path()
+    pid = _read_listener_pid(path)
+    if pid <= 0 or pid == os.getpid():
         return 0
-    if pid <= 0 or pid == os.getpid() or speech._exited(pid):
-        return 0
-    return pid
+    if sys.platform == "win32":
+        # ponytail: Windows still trusts the PID, so a reused one there blocks until reboot. The
+        # upgrade is ``msvcrt.locking`` in the two places that use ``fcntl``, and it is worth
+        # writing when somebody runs this on Windows, not blind from a Mac.
+        return 0 if speech._exited(pid) else pid
+    return pid if _locked_elsewhere(path) else 0
 
 
 def _pgrep(pattern: str) -> list[int]:
@@ -1500,13 +1542,55 @@ def claim_listener() -> int:
     the login agent is running and you start ``murmurflow listen`` in a terminal to watch it, or a
     second install lands its own agent — so the second one stands down and says why.
 
-    ``O_EXCL`` rather than read-then-write, because two agents CAN start in the same instant at
-    login and a check that is not atomic is exactly the race that produces the doubled sound it
-    was added to prevent.
+    An OS lock (``flock``) rather than read-then-write, because two agents CAN start in the same
+    instant at login and a check that is not atomic is exactly the race that produces the doubled
+    sound it was added to prevent. The lock, not the PID written next to it, is the claim: see
+    :func:`listener_pid` for the reboot that taught that. The file is never deleted, because a
+    lock on an unlinked file is a lock nobody else can see.
     """
+    global _LISTENER_LOCK
+    if _LISTENER_LOCK is not None:
+        return 0
     path = listener_lock_path()
     with contextlib.suppress(OSError):
         path.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        return _claim_listener_by_pid(path)
+    import fcntl
+
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError:
+        return 0  # a home we cannot write to is no reason to refuse to work
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        # The winner writes its PID just after it locks. Read only after that moment, or the PID
+        # named to the user is whatever the previous run left behind.
+        for _ in range(50):
+            time.sleep(0.02)
+            holder = _read_listener_pid(path)
+            if holder > 0 and holder != os.getpid():
+                return holder
+        return -1
+    except OSError:
+        os.close(fd)
+        return 0  # a filesystem without locks is no reason to refuse to work either
+    # A listener from before this lock existed holds the file without an OS lock. It is a real
+    # listener only if the PID is alive AND is a murmurflow listener, so a reused PID still passes.
+    previous = _read_listener_pid(path)
+    if previous > 0 and previous != os.getpid() and previous in listener_pids():
+        os.close(fd)
+        return previous
+    os.ftruncate(fd, 0)
+    os.write(fd, str(os.getpid()).encode())
+    _LISTENER_LOCK = fd
+    return 0
+
+
+def _claim_listener_by_pid(path: Path) -> int:
+    """Windows: ``O_EXCL`` on the file plus a liveness check of the PID in it."""
     for _ in range(2):
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -1518,7 +1602,7 @@ def claim_listener() -> int:
                 path.unlink()  # stale: whoever wrote it is gone
             continue
         except OSError:
-            return 0  # a home we cannot write to is no reason to refuse to work
+            return 0
         with os.fdopen(fd, "w") as handle:
             handle.write(str(os.getpid()))
         return 0

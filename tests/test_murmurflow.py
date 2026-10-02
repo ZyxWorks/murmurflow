@@ -43,6 +43,11 @@ def _isolated_home(tmp_path, monkeypatch):
     # `preroll` a no-op and its `preroll_claim` wait out the full claim timeout.
     dictate._PREROLL = None
     dictate._LEVELS.clear()
+    # And a claimed listener lock is module state: one kept from a test before makes every later
+    # `claim_listener` answer "already mine" without looking at the file at all.
+    if dictate._LISTENER_LOCK is not None:
+        os.close(dictate._LISTENER_LOCK)
+    dictate._LISTENER_LOCK = None
     # THE SUITE MUST NOT REACH OUT OF THIS DIRECTORY, and `MURMURFLOW_HOME` alone does not stop it:
     # `config set` bounces the warm servers whenever the listener is INSTALLED, and that question is
     # about the real machine. On a developer's Mac a config test therefore ran a real `pgrep` and a
@@ -307,23 +312,70 @@ def test_stop_server_survives_a_process_that_is_already_gone(monkeypatch):
 # --- one listener, never two --------------------------------------------------------------------
 
 
-def test_a_second_listener_is_refused_and_told_who_has_the_key(monkeypatch):
+def test_a_second_listener_is_refused_and_told_who_has_the_key():
     # The doubled-sound bug: the login agent is live and you run `murmurflow listen` to watch it.
-    dictate.listener_lock_path().parent.mkdir(parents=True, exist_ok=True)
-    dictate.listener_lock_path().write_text("4242", "utf-8")
-    monkeypatch.setattr(speech, "_exited", lambda pid: False)  # 4242 is alive
-    assert dictate.listener_pid() == 4242
-    assert dictate.claim_listener() == 4242
+    # A real second process holds the lock, the way the login agent would.
+    import subprocess
+
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time; from murmurflow import dictate;"
+            "sys.exit(1) if dictate.claim_listener() else print('ready', flush=True);"
+            "time.sleep(60)",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "ready"
+        assert dictate.listener_pid() == holder.pid
+        assert dictate.claim_listener() == holder.pid
+    finally:
+        holder.kill()
+        holder.wait()
+    # And the moment it dies, however it dies, the key is free again.
+    assert dictate.listener_pid() == 0
+    assert dictate.claim_listener() == 0
 
 
-def test_a_lock_left_by_a_crash_never_blocks_the_next_start(monkeypatch):
+def test_a_lock_left_by_a_crash_never_blocks_the_next_start():
     # A hard reboot must not leave dictation needing a file deleted by hand.
     dictate.listener_lock_path().parent.mkdir(parents=True, exist_ok=True)
     dictate.listener_lock_path().write_text("4242", "utf-8")
-    monkeypatch.setattr(speech, "_exited", lambda pid: True)  # 4242 is gone
     assert dictate.listener_pid() == 0
     assert dictate.claim_listener() == 0
     assert dictate.listener_lock_path().read_text("utf-8") == str(os.getpid())
+
+
+def test_a_lock_naming_a_reused_pid_never_blocks_the_next_start():
+    # Live (2026-10-02): after a reboot the PID in the lock belonged to swcd, which is alive, so
+    # the login agent stood down 76 times and the double-tap did nothing. Alive is not "a listener".
+    import subprocess
+
+    stranger = subprocess.Popen(["sleep", "60"])
+    try:
+        dictate.listener_lock_path().parent.mkdir(parents=True, exist_ok=True)
+        dictate.listener_lock_path().write_text(str(stranger.pid), "utf-8")
+        assert not speech._exited(stranger.pid)
+        assert dictate.listener_pid() == 0
+        assert dictate.claim_listener() == 0
+        assert dictate.listener_lock_path().read_text("utf-8") == str(os.getpid())
+    finally:
+        stranger.kill()
+        stranger.wait()
+
+
+def test_a_listener_from_before_the_os_lock_still_holds_the_key(monkeypatch):
+    # Mid-upgrade: the login agent still runs the old code, which wrote its PID but took no lock.
+    dictate.listener_lock_path().parent.mkdir(parents=True, exist_ok=True)
+    dictate.listener_lock_path().write_text("4242", "utf-8")
+    monkeypatch.setattr(dictate, "listener_pids", lambda: [4242])
+    assert dictate.claim_listener() == 4242
+    assert dictate.listener_lock_path().read_text("utf-8") == "4242"
 
 
 def test_claiming_twice_from_the_same_process_is_not_a_conflict():
@@ -1938,7 +1990,10 @@ def test_zero_means_the_main_port_here_as_it_does_everywhere_else(monkeypatch):
     Nothing is ever listening there, so the answer was always no, and the daemon announced that its
     own running server was unavailable — then ran every clip on the cold path, all day.
     """
-    monkeypatch.setattr(dictate, "server_up", lambda _at=0: True)
+    # `speech.server_up`, the one `start_server` really asks. Patching `dictate.server_up` patched
+    # nothing it calls, so this passed only on a Mac where a real whisper-server holds the port,
+    # and failed on every CI runner, where nothing does.
+    monkeypatch.setattr(speech, "server_up", lambda at: at == dictate.port())
     asked: list[str] = []
 
     class _Found:

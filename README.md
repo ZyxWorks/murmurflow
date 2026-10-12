@@ -7,7 +7,7 @@ talking**, in whatever app you are already in: Slack, your terminal, a browser, 
 transcribes on your own machine, so nothing you say ever leaves it.
 
 [![CI](https://github.com/ZyxWorks/murmurflow/actions/workflows/ci.yml/badge.svg)](https://github.com/ZyxWorks/murmurflow/actions/workflows/ci.yml)
-[![Licence: MIT](https://img.shields.io/badge/licence-MIT-c9903f)](LICENSE)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-FFD23C)](LICENSE)
 ![Platform: macOS and Windows](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-6a6c77)
 ![Dependencies: none](https://img.shields.io/badge/python%20dependencies-none-6a6c77)
 

@@ -51,10 +51,9 @@ and it is what macOS puts its own dictation on. (Rather hold a key while you tal
 A 200-word message is five minutes of typing. Say it instead and you are done in eighty seconds,
 hands still on the desk. Ten of those a day is most of an hour back, every day.
 
-Averages, not promises: conversational speech runs about 130 to 150 words a minute, and an average
-typist about 40. Your own numbers are yours to check, and [the product
-page](https://zyxworks.github.io/murmurflow/) shows the same figures with the measured speed
-table beside them.
+Conversational speech runs about 130 to 150 words a minute, and an average typist about 40.
+[The product page](https://zyxworks.github.io/murmurflow/) shows the same figures with the measured
+speed table beside them.
 
 <details>
 <summary>Rather do it by hand?</summary>
@@ -104,7 +103,7 @@ spellings of the same keys, so a config file moves between machines unchanged.
 One ceiling worth knowing: Windows does not let an ordinary program type into a window running as
 Administrator. Dictating into an elevated console needs MurmurFlow running elevated too.
 
-**Linux is not supported yet**, and that is a decision rather than an oversight. Recording and
+**Linux is not supported.** Recording and
 typing are both small there; the hotkey is not, because Wayland exposes no global hotkey API at
 all. `murmurflow doctor` runs on Linux and says exactly that.
 
@@ -113,10 +112,8 @@ all. `murmurflow doctor` runs on Linux and says exactly that.
 ### Two things worth knowing
 
 **The whole transcript lands at once, the moment you stop.** Tap twice, talk, tap again — nothing
-is typed until then. It used to paste in lumps while you were still talking, and that was removed:
-move the cursor mid-sentence (to click a file, switch windows) and a streamed chunk landed in the
-wrong place, with only the un-streamed tail pasted at the end — the rest of what you said was
-simply gone. One paste, at the end, like Wispr Flow, is the version that cannot lose words.
+is typed until then. Move the cursor mid-sentence (to click a file, switch windows) and nothing
+lands in the wrong place. One paste, at the end, cannot lose words.
 
 **On a Mac the listener makes no sound: a small waveform shows up instead.** A dark pill at the bottom of
 the screen opens with the microphone. Its bars move with your voice, so you can see it hearing you
@@ -127,11 +124,11 @@ two short sounds instead, one when the microphone opens and one when it closes �
 `murmurflow toggle` on a Mac, which runs in its own short process. Nothing marks a
 failure — that is a line in the log, not a noise in a meeting.
 
-**And the first word is not missing any more.** CoreAudio takes about 0.6s to hand over its first
+**The first word is not lost.** CoreAudio takes about 0.6s to hand over its first
 buffer, so a recorder opened on the second tap starts half a sentence late and no decoder can get
 that audio back. The recorder is now opened on the **first** tap instead and the second tap claims
 it, already live — which is also why the waveform usually moves the instant you finish tapping.
-Measured over a five-second sentence: 0.35s of speech lost before, 0.04s after. A tap that never
+Measured over a five-second sentence: 0.04s of speech lost. A tap that never
 becomes a pair stops the recorder within 1.5s and deletes what it caught.
 
 **What you said is what you get.** Nothing is removed, reworded or reordered. If you say
@@ -297,8 +294,8 @@ leaving it on `auto`: forcing `en` onto German speech makes whisper translate ra
 transcribe, and a fluent English paraphrase of what you said is far more confusing than a slow
 transcript. That is why the default stays `auto`.
 
-These numbers move a lot with your machine and what else is resident — two whisper-servers on one
-Mac roughly doubled every row. Measure your own before believing any of them, including ours.
+These numbers move with your machine and what else is resident - two whisper-servers on one
+Mac roughly doubled every row.
 
 ## What it does not do
 
@@ -349,8 +346,7 @@ change: the best model **present** wins.
 murmurflow setup base            # smaller and faster, noticeably worse
 ```
 
-ONE model transcribes everything. There used to be a second, small one for a faster live pass;
-it was retired when the live pass began typing punctuation the big model would not have chosen.
+ONE model transcribes everything.
 
 Teach it your own words — the cheapest accuracy win there is:
 
@@ -464,8 +460,8 @@ bad dictation and want them? `keepAudio` keeps the clip and the transcript toget
 you leave it on, and deletes the clip when you turn it off.
 
 `config set` refuses a setting it does not recognise and a value that cannot work — a trigger name
-this machine cannot poll, a model path that is not there, a language you did not say you speak. All of those
-used to be accepted and then fail silently, which is the same symptom as broken hardware.
+this machine cannot poll, a model path that is not there, a language you did not say you speak. Nothing fails
+silently.
 
 **`update` is the update.** The listener does not run your checkout — `uv tool install` made
 a copy of the package and launchd runs that — so a `git pull` alone changes a directory the running
@@ -497,8 +493,7 @@ indistinguishable. One run of each separates them.
   still appending to. It lives for the length of one decode and it is inside the same directory the
   clip is, so it is covered by the same deletion and the same 10-minute ceiling.
 - The recorder bounds its own life at 10 minutes, so a daemon killed mid-clip can't leave the
-  microphone hot. (This is not hypothetical: it was found in development as three orphaned
-  recorders, 4.5 hours each, 1.4 GB of audio, microphone open the whole time.)
+  microphone hot.
 - The transcript is never inspected, filtered, or written down. It goes to your clipboard, then
   your cursor, and your previous clipboard contents are put back — all of them, not just text. Copy
   a screenshot while a dictation is in flight and the screenshot is still on your clipboard
@@ -520,8 +515,8 @@ uv run pytest        # hermetic: no microphone, no whisper, no network
 uv run ruff check .
 ```
 
-The hardware paths (`start`/`finish`/`inject`) have no unit tests on purpose — a mock of CoreAudio
-only ever tests the mock. `murmurflow doctor` and `murmurflow keytest` are how those are exercised.
+The hardware paths (`start`/`finish`/`inject`) are exercised by `murmurflow doctor` and
+`murmurflow keytest` on the real machine.
 
 ## License
 
@@ -548,6 +543,3 @@ on you says so on its border.
 **Legal:** [MIT licence](LICENSE) ·
 [privacy](https://zyxworks.com/legal#privacy) ·
 [imprint](https://zyxworks.com/legal#imprint)
-
-*MurmurFlow is not affiliated with, endorsed by, or connected to Wispr AI, Inc. or any other
-dictation product. Product names mentioned are the trademarks of their respective owners.*

@@ -42,7 +42,7 @@
     --ink: #111111; --muted: #444444; --faint: #666666;
     /* The signal is a highlighter: fill and button only. On a light ground it is never text. */
     --signal: #ffd23c; --on-signal: #14130f; --btn-edge: #111111;
-    --shadow: 4px 4px 0 rgba(0, 0, 0, 0.12);
+    --shadow: 3px 3px 0 var(--ink);
     --sans: "Atkinson Hyperlegible Next", Verdana, system-ui, sans-serif;
     --mono: "Atkinson Hyperlegible Mono", ui-monospace, Menlo, monospace;
     --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -64,7 +64,7 @@
   p.lead { font-size: 21px; margin-top: 22px; max-width: 44ch; }
   a { color: var(--ink); text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
   a:hover { text-decoration-color: var(--ink); }
-  :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 5px; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
   strong { color: var(--ink); font-weight: 700; }
   code { font-family: var(--mono); font-size: 0.9em; }
 
@@ -91,7 +91,7 @@
      has none. */
   nav .right, a.pill {
     font-size: 13.5px; color: var(--ink); text-decoration: none; white-space: nowrap;
-    background: var(--surface); border: 2px solid var(--line-strong); border-radius: 8px; padding: 7px 13px;
+    background: var(--surface); border: 2px solid var(--line-strong); padding: 7px 13px;
     transition: border-color 180ms var(--ease), box-shadow 180ms var(--ease), transform 180ms var(--ease);
   }
   nav .right:hover, a.pill:hover { border-color: var(--ink); box-shadow: var(--shadow); transform: translate(-2px, -2px); }
@@ -112,8 +112,7 @@
   .cta { margin-top: 34px; }
   .cmd {
     display: flex; align-items: center; gap: 12px;
-    background: var(--surface); border: 2px solid var(--line); box-shadow: var(--shadow);
-    border-radius: 12px; padding: 14px 14px 14px 16px; margin: 10px 0 6px;
+    background: var(--surface); border: 2px solid var(--ink); box-shadow: var(--shadow); padding: 14px 14px 14px 16px; margin: 10px 0 6px;
   }
   /* The COMMAND scrolls, not the row: a copy button that scrolls out of sight with a long install
      line is a copy button nobody finds on a phone. */
@@ -121,7 +120,7 @@
   .cmd code { line-height: 1.5; color: var(--ink); white-space: pre; font-size: 13.5px; }
   .cmd button {
     flex: none; font: inherit; font-family: var(--mono); font-weight: 700;
-    font-size: 12.5px; line-height: 1; padding: 10px 14px; border-radius: 8px; cursor: pointer;
+    font-size: 12.5px; line-height: 1; padding: 10px 14px; cursor: pointer;
     color: var(--on-signal); background: var(--signal); border: 2px solid var(--btn-edge);
     transition: box-shadow 180ms var(--ease), transform 180ms var(--ease);
   }
@@ -131,7 +130,7 @@
   .after { color: var(--muted); font-size: 15px; margin-top: 22px; }
   kbd {
     font-family: var(--mono); font-size: 0.84em; background: var(--surface);
-    border: 2px solid var(--line-strong); border-radius: 5px; padding: 1px 6px; color: var(--ink);
+    border: 2px solid var(--line-strong); padding: 1px 6px; color: var(--ink);
   }
 
   /* --- the numbers that do the selling --- */
@@ -141,7 +140,7 @@
   .stat .l { color: var(--muted); font-size: 15px; margin-top: 10px; }
   .punch { font-size: 19px; color: var(--ink); margin: 34px 0 0; max-width: 50ch; letter-spacing: -0.011em; }
   /* The highlighter: the one place yellow marks text. Dark ink on yellow. */
-  .punch strong { background: var(--signal); color: var(--on-signal); padding: 0 0.2em; border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .punch strong { background: var(--signal); color: var(--on-signal); padding: 0 0.2em; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 
   .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 28px 34px; }
   .fact strong { display: block; font-size: 16px; margin-bottom: 4px; }

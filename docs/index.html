@@ -126,6 +126,8 @@
   @keyframes blink { 0% { opacity: 0; } 50%, 100% { opacity: 1; } }
   @media (prefers-reduced-motion: no-preference) {
     .mk { animation: draw 560ms var(--ease) both; }
+    /* The product mark sits on the ink cell and never draws in: a restarted draw would leave the cell empty. */
+    nav .pm { animation: none; }
     /* "draw" stays in the list, so the mark is not drawn in again when the hover ends. */
     a:hover > .mk { animation: draw 560ms var(--ease) both, hop 180ms step-start 1; }
 

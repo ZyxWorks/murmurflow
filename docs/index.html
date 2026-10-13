@@ -128,8 +128,12 @@
   .lockup .name { font-weight: 700; letter-spacing: -0.025em; font-size: 17px; }
   /* The parent half of the breadcrumb: muted, so the page you are ON is the one that reads first. */
   .lockup .up { display: flex; align-items: center; align-self: stretch; gap: 10px; padding: 0 14px; border-right: var(--rule); color: var(--muted); font-weight: 700; letter-spacing: -0.025em; font-size: 17px; }
-  .lockup .crumb { color: var(--faint); font-weight: 400; padding: 0 10px 0 14px; }
-  .lockup .pm { margin-right: 10px; }
+  /* The page you are on is the selected cell: ink, white text, its own mark. The ink edge of the
+     cell stands in for the "/" of the breadcrumb, so the crumb is not shown. */
+  .lockup .crumb { display: none; }
+  nav .pm, nav .name { align-self: stretch; background: var(--ink); color: var(--surface); }
+  nav .pm { box-sizing: content-box; height: auto; padding: 0 10px 0 14px; }
+  nav .name { display: flex; align-items: center; padding-right: 14px; }
   /* GitHub carries weight because the licence is the pitch: a cell of its own rather than a word
      in a corner. Not the main button, though. That is the install, and a page with two primary
      buttons has none. */
@@ -138,7 +142,7 @@
      lockup on its own reads as a title rather than as a door. The cell is as tall as the bar, so the
      tap target is 44px. */
   @media (max-width: 560px) {
-    .lockup .name, .lockup .crumb, .lockup .pm { display: none; }
+    .lockup .name, .lockup .pm { display: none; }
     .lockup .up { flex: 1; min-width: 0; padding: 0 12px; border-right: 0; }
     .lockup .up::before { content: "\2190"; font-weight: 400; }
     nav .right { padding: 0 12px; }
@@ -160,8 +164,8 @@
   .cmd code { line-height: 1.5; color: var(--ink); white-space: pre; font-size: 13.5px; }
   /* The main button: ink, on a yellow shadow. Hover lifts it, a press lands it in the shadow. */
   .cmd button {
-    flex: none; font: inherit; font-family: var(--mono); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-    font-size: 12px; line-height: 1; min-height: 40px; padding: 0 15px; cursor: pointer;
+    flex: none; font: inherit; font-family: var(--mono); font-weight: 700;
+    font-size: 12.5px; line-height: 1; min-height: 40px; padding: 0 14px; cursor: pointer;
     color: var(--surface); background: var(--ink); border: var(--rule);
     box-shadow: var(--shadow-cta);
     transition: box-shadow 120ms var(--ease), transform 120ms var(--ease);

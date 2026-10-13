@@ -31,11 +31,11 @@
 
   The look is "hard print": the parts are hard, the page is calm. Lines carry the layout - a 2px ink
   rule opens every section, and a group of siblings (nav, number and fact grids, the footer) is a
-  ruled grid of cells with no gaps. The main button floats on its shadow, a secondary button presses
-  in on hover and inverts on press. The main blocks stand on a 4px ink shadow.
+  ruled grid of cells with no gaps. The main button stands on its yellow shadow and presses into it on
+  hover, a secondary button presses in on hover and inverts on press. The main blocks stand on a 4px ink shadow.
 
-  Movement is short, stepped and runs once: a block lands on its shadow and a section rule draws
-  when it scrolls in, a hover fill wipes in from the left, an icon hops, an arrow steps right, the
+  Movement is short and runs once: a block lands on its shadow and a section rule draws
+  when it scrolls in, a hover fill wipes in from the left in one smooth move, an icon hops, an arrow steps right, the
   yellow marker wipes in, the numbers tick up and the caret blinks three times. Everything that
   waits for a scroll is behind the "js" class on <html>, so the page is complete without script,
   and all of it is inside prefers-reduced-motion: no-preference, so reduced motion shows the end
@@ -62,8 +62,8 @@
     --shadow: 4px 4px 0 var(--ink);
     /* A secondary button is pushed in on hover: the same hard shadow, inside. */
     --shadow-in: inset 3px 3px 0 var(--ink);
-    /* The main button (copy) floats on a yellow shadow and lands in it when pressed. */
-    --shadow-cta: 3px 3px 0 var(--signal); --shadow-cta-far: 5px 5px 0 var(--signal); --shadow-cta-near: 1px 1px 0 var(--signal);
+    /* The main button (copy) stands on a 5px yellow shadow. Hover presses it 2px in, a press lands it. */
+    --shadow-cta: 5px 5px 0 var(--signal); --shadow-cta-in: 3px 3px 0 var(--signal); --shadow-cta-down: 0 0 0 var(--signal);
     --sans: "Atkinson Hyperlegible Next", Verdana, system-ui, sans-serif;
     --mono: "Atkinson Hyperlegible Mono", ui-monospace, Menlo, monospace;
     --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -119,7 +119,6 @@
   /* The icon of a hovered cell hops: up 3px and back in two hard steps, once per hover. */
   @keyframes hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
   @keyframes land { from { box-shadow: 0 0 0 var(--ink); transform: translate(4px, 4px); } }
-  @keyframes land-quiet { from { transform: translate(4px, 4px); } }
   @keyframes rule { from { transform: scaleX(0); } }
   @keyframes stamp { from { transform: scale(0); } }
   @keyframes mark { from { background-size: 0 100%; } }
@@ -131,8 +130,8 @@
     /* "draw" stays in the list, so the mark is not drawn in again when the hover ends. */
     a:hover > .mk { animation: draw 560ms var(--ease) both, hop 180ms step-start 1; }
 
-    /* A cell's hover fill wipes in from the left in four steps; the text turns half way. */
-    nav .up, nav .right, footer .lockup, .col a { transition: background-size 160ms steps(4), color 80ms step-end; }
+    /* A cell's hover fill wipes in from the left in one smooth move; the text turns half way. */
+    nav .up, nav .right, footer .lockup, .col a { transition: background-size 180ms cubic-bezier(.2, .7, .2, 1), color 90ms step-end; }
     /* The arrow of a link row steps 3px to the right and stays there while the row is hovered. */
     .col a::after { transition: transform 120ms steps(3); }
     .col a:hover::after { transform: translateX(3px); }
@@ -142,7 +141,6 @@
     .js :is(nav, .stats, .facts, .cmd, .foot-top):not(.in), .js .foot-top:not(.in) + .copyright { box-shadow: 0 0 0 var(--ink); transform: translate(4px, 4px); }
     .js :is(nav, .stats, .facts, .cmd, .foot-top).in, .js .foot-top.in + .copyright { animation: land 240ms steps(3, jump-none) 80ms backwards; }
     .js .cmd.in ~ .cmd.in { animation-delay: 160ms; }
-    .js .facts.in:has(> .fact:only-child) { animation-name: land-quiet; }
     /* A section's rule draws from the left, then its ink square stamps in. */
     .js section:not(.in)::after { transform: scaleX(0); }
     .js section.in::after { animation: rule 320ms steps(8) backwards; }
@@ -232,18 +230,18 @@
     content: ""; display: inline-block; width: 0.55em; height: 1.1em; margin-left: 6px; vertical-align: -0.2em;
     background: var(--ink); position: sticky; right: 0; box-shadow: -6px 0 0 var(--surface);
   }
-  /* The main button: ink, on a yellow shadow. Hover lifts it, a press lands it in the shadow, and
-     it comes back in two hard steps. After a copy it is an inverted block for a moment. */
+  /* The main button: ink, on a yellow shadow. It never lifts: hover moves it 2px into the shadow,
+     a press lands it fully. After a copy it is an inverted block for a moment. */
   .cmd button {
     flex: none; font: inherit; font-family: var(--mono); font-weight: 700;
     font-size: 12.5px; line-height: 1; min-height: 40px; min-width: calc(6ch + 32px); padding: 0 14px; cursor: pointer;
     color: var(--surface); background: var(--ink); border: var(--rule);
     box-shadow: var(--shadow-cta);
-    transition: box-shadow 120ms steps(2), transform 120ms steps(2);
+    transition: box-shadow 120ms ease-out, transform 120ms ease-out;
   }
   .cmd button.ok { background: var(--surface); color: var(--ink); }
-  .cmd button:hover { box-shadow: var(--shadow-cta-far); transform: translate(-1px, -1px); }
-  .cmd button:active { box-shadow: var(--shadow-cta-near); transform: translate(2px, 2px); transition-duration: 0ms; }
+  .cmd button:hover { box-shadow: var(--shadow-cta-in); transform: translate(2px, 2px); }
+  .cmd button:active { box-shadow: var(--shadow-cta-down); transform: translate(5px, 5px); }
   @media (prefers-reduced-motion: reduce) { .cmd button { transition: none; } .cmd button:hover, .cmd button:active { transform: none; box-shadow: var(--shadow-cta); } }
   .os { margin: 24px 0 0; }
   .after { color: var(--muted); font-size: 15px; margin-top: 22px; }
@@ -279,12 +277,6 @@
   .facts { grid-template-columns: repeat(2, 1fr); }
   .fact { padding: 18px 20px 20px; }
   .fact:only-child { grid-column: 1 / -1; }
-  /* A quiet block (one fact on its own) stands on the print hatch instead of the solid shadow. */
-  .facts:has(> .fact:only-child) { position: relative; isolation: isolate; box-shadow: none; }
-  .facts:has(> .fact:only-child)::after {
-    content: ""; position: absolute; z-index: -1; inset: 6px -8px -8px 6px;
-    background: repeating-linear-gradient(-45deg, var(--ink) 0 1px, transparent 1px 6px);
-  }
   .fact strong { display: block; font-size: 16px; margin-bottom: 4px; }
   .fact span { color: var(--muted); font-size: 15px; }
   @media (max-width: 600px) { .stats, .facts { grid-template-columns: 1fr; } }

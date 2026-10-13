@@ -1,3 +1,5 @@
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/logo/mark-on-dark.svg"><img src="docs/logo/mark-on-light.svg" width="72" height="72" alt="MurmurFlow logo"></picture>
+
 # MurmurFlow
 
 ### Write at the speed you talk.

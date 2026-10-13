@@ -32,8 +32,14 @@
   The look is "hard print": the parts are hard, the page is calm. Lines carry the layout - a 2px ink
   rule opens every section, and a group of siblings (nav, number and fact grids, the footer) is a
   ruled grid of cells with no gaps. The main button floats on its shadow, a secondary button presses
-  in on hover and inverts on press. The only motion besides the one draw-in of the mark is a short
-  stepped hop of an icon when its cell is hovered, and none at all with reduced motion.
+  in on hover and inverts on press. The main blocks stand on a 4px ink shadow.
+
+  Movement is short, stepped and runs once: a block lands on its shadow and a section rule draws
+  when it scrolls in, a hover fill wipes in from the left, an icon hops, an arrow steps right, the
+  yellow marker wipes in, the numbers tick up and the caret blinks three times. Everything that
+  waits for a scroll is behind the "js" class on <html>, so the page is complete without script,
+  and all of it is inside prefers-reduced-motion: no-preference, so reduced motion shows the end
+  state and nothing moves.
 -->
 <style>
   /* Self-hosted, same files as the ZyxWorks index. No Google Fonts request, ever. */
@@ -50,7 +56,8 @@
     /* The signal is a highlighter: fill and button shadow only. On a light ground it is never text. */
     --signal: #ffd23c; --on-signal: #14130f;
     --rule: 2px solid var(--ink);
-    --shadow: 3px 3px 0 var(--ink);
+    /* A main block stands on this. */
+    --shadow: 4px 4px 0 var(--ink);
     /* A secondary button is pushed in on hover: the same hard shadow, inside. */
     --shadow-in: inset 3px 3px 0 var(--ink);
     /* The main button (copy) floats on a yellow shadow and lands in it when pressed. */
@@ -65,24 +72,31 @@
     margin: 0; color: var(--ink); font-size: 17px; line-height: 1.6;
     font-family: var(--sans); -webkit-font-smoothing: antialiased;
   }
+  body { counter-reset: sec; }
   ::selection { background: var(--ink); color: var(--surface); }
   .shell { max-width: 820px; margin: 0 auto; padding: 0 24px; }
   /* A section is a band as wide as the window: white and ground take turns, and a full-width ink
-     rule opens it. The band is drawn behind the text column, so the column itself never moves. */
-  section { padding: 68px 0; position: relative; }
+     rule opens it. The band is drawn behind the text column, so the column itself never moves. The
+     rule is its own layer, so it can draw in from the left. */
+  section { padding: 68px 0; position: relative; counter-increment: sec; }
+  section::after {
+    content: ""; position: absolute; top: 0; left: calc(50% - 50vw); width: 100vw; height: 2px;
+    background: var(--ink); transform-origin: 0 50%;
+  }
   section::before {
     content: ""; position: absolute; z-index: -1; top: 0; bottom: 0; left: calc(50% - 50vw); width: 100vw;
-    background: var(--ground); border-top: var(--rule);
+    background: var(--ground);
   }
   section:nth-of-type(odd)::before { background: var(--surface); }
   .mono { font-family: var(--mono); }
 
   h1 { font-size: clamp(40px, 8.4vw, 66px); line-height: 1.02; letter-spacing: -0.03em; margin: 0; font-weight: 800; }
   /* One label style for a section, a footer column and a table head: small mono upper case. A
-     section label carries a solid ink square in front of it. */
+     section label carries its number and a solid ink square in front of it. */
   h2, .col h4, th, .os { font-family: var(--mono); font-size: 12px; font-weight: 700; line-height: 1.5; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); }
   h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 28px; }
-  h2::before { content: ""; flex: none; width: 8px; height: 8px; background: var(--ink); }
+  h2::before { content: counter(sec, decimal-leading-zero); content: counter(sec, decimal-leading-zero) / ""; order: -2; flex: none; color: var(--faint); }
+  h2::after { content: ""; order: -1; flex: none; width: 8px; height: 8px; background: var(--ink); }
   h3 { font-size: 21px; letter-spacing: -0.022em; font-weight: 700; margin: 0 0 8px; }
   p { margin: 0 0 16px; color: var(--muted); }
   p.lead { font-size: 21px; margin-top: 22px; max-width: 44ch; }
@@ -99,30 +113,63 @@
   .mk { fill: currentColor; flex: none; }
   .mk-panels { fill: var(--signal); }
   @keyframes draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
-  /* The icon of a hovered cell hops: up 3px and back in two hard steps, once per hover, never a
-     loop. No easing, no rotate, no scale. */
+  /* Every keyframe set below names only its start: the end is the element as it stands at rest. */
+  /* The icon of a hovered cell hops: up 3px and back in two hard steps, once per hover. */
   @keyframes hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+  @keyframes land { from { box-shadow: 0 0 0 var(--ink); transform: translate(4px, 4px); } }
+  @keyframes land-quiet { from { transform: translate(4px, 4px); } }
+  @keyframes rule { from { transform: scaleX(0); } }
+  @keyframes stamp { from { transform: scale(0); } }
+  @keyframes mark { from { background-size: 0 100%; } }
+  @keyframes blink { 0% { opacity: 0; } 50%, 100% { opacity: 1; } }
   @media (prefers-reduced-motion: no-preference) {
     .mk { animation: draw 560ms var(--ease) both; }
     /* "draw" stays in the list, so the mark is not drawn in again when the hover ends. */
     a:hover > .mk { animation: draw 560ms var(--ease) both, hop 180ms step-start 1; }
-    .col a:hover::after { animation: hop 180ms step-start 1; }
+
+    /* A cell's hover fill wipes in from the left in four steps; the text turns half way. */
+    nav .up, nav .right, footer .lockup, .col a { transition: background-size 160ms steps(4), color 80ms step-end; }
+    /* The arrow of a link row steps 3px to the right and stays there while the row is hovered. */
+    .col a::after { transition: transform 120ms steps(3); }
+    .col a:hover::after { transform: translateX(3px); }
+
+    /* Scroll-in, once. The script puts "in" on a block when it comes into view; until then the
+       block waits in its start state. A block lands on its shadow in three steps. */
+    .js :is(nav, .stats, .facts, .cmd, .foot-top):not(.in), .js .foot-top:not(.in) + .copyright { box-shadow: 0 0 0 var(--ink); transform: translate(4px, 4px); }
+    .js :is(nav, .stats, .facts, .cmd, .foot-top).in, .js .foot-top.in + .copyright { animation: land 240ms steps(3, jump-none) 80ms backwards; }
+    .js .cmd.in ~ .cmd.in { animation-delay: 160ms; }
+    .js .facts.in:has(> .fact:only-child) { animation-name: land-quiet; }
+    /* A section's rule draws from the left, then its ink square stamps in. */
+    .js section:not(.in)::after { transform: scaleX(0); }
+    .js section.in::after { animation: rule 320ms steps(8) backwards; }
+    .js section:not(.in) h2::after { transform: scale(0); }
+    .js section.in h2::after { animation: stamp 120ms steps(2) 320ms backwards; }
+    /* The yellow marker wipes in behind its words, one after the other. */
+    .js .punch:not(.in) strong { background-size: 0 100%; }
+    .js .punch.in strong { animation: mark 240ms steps(4) 160ms backwards; }
+    .js .punch.in strong ~ strong { animation-delay: 480ms; }
+    /* The caret blinks three times after its box has landed, then it stays solid. */
+    .js .cmd.in code::after { animation: blink 300ms step-end 400ms 3 backwards; }
+    .js .cmd.in ~ .cmd.in code::after { animation-delay: 1400ms; }
   }
 
   /* --- cells ---
      A link that is a cell of a ruled grid (nav, footer). It fills its whole cell, a hover fills the
      cell with ink, and the focus ring sits inside so the lines around it stay whole. */
-  nav .up, nav .right, footer .lockup, .col a { text-decoration: none; }
+  nav .up, nav .right, footer .lockup, .col a {
+    text-decoration: none;
+    background-image: linear-gradient(var(--ink), var(--ink)); background-repeat: no-repeat; background-size: 0 100%;
+  }
   nav .up:hover, nav .right:hover, footer .lockup:hover, .col a:hover,
   nav .up:focus-visible, nav .right:focus-visible, footer .lockup:focus-visible, .col a:focus-visible {
-    background: var(--ink); color: var(--surface);
+    background-size: 100% 100%; color: var(--surface);
   }
   nav .up:focus-visible, nav .right:focus-visible, footer .lockup:focus-visible, .col a:focus-visible {
     outline: 2px solid var(--surface); outline-offset: -6px;
   }
 
   /* --- nav: one ruled bar, three cells --- */
-  nav { display: flex; align-items: stretch; min-height: 48px; margin-top: 26px; background: var(--surface); border: var(--rule); }
+  nav { display: flex; align-items: stretch; min-height: 48px; margin-top: 26px; background: var(--surface); border: var(--rule); box-shadow: var(--shadow); }
   .lockup { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
   nav .lockup { display: flex; flex: 1; min-width: 0; gap: 0; }
   .lockup .name { font-weight: 700; letter-spacing: -0.025em; font-size: 17px; }
@@ -162,14 +209,18 @@
   .cmd .line { flex: 1; min-width: 0; overflow-x: auto; }
   .cmd .line, .scroll { scrollbar-width: thin; scrollbar-color: var(--ink) transparent; }
   .cmd code { line-height: 1.5; color: var(--ink); white-space: pre; font-size: 13.5px; }
-  /* The main button: ink, on a yellow shadow. Hover lifts it, a press lands it in the shadow. */
+  /* A block caret after the command. Drawn by CSS, so it is not part of what "copy" copies. */
+  .cmd code::after { content: ""; display: inline-block; width: 8px; height: 15px; margin-left: 6px; vertical-align: -2px; background: var(--ink); }
+  /* The main button: ink, on a yellow shadow. Hover lifts it, a press lands it in the shadow, and
+     it comes back in two hard steps. After a copy it is an inverted block for a moment. */
   .cmd button {
     flex: none; font: inherit; font-family: var(--mono); font-weight: 700;
-    font-size: 12.5px; line-height: 1; min-height: 40px; padding: 0 14px; cursor: pointer;
+    font-size: 12.5px; line-height: 1; min-height: 40px; min-width: calc(6ch + 32px); padding: 0 14px; cursor: pointer;
     color: var(--surface); background: var(--ink); border: var(--rule);
     box-shadow: var(--shadow-cta);
-    transition: box-shadow 120ms var(--ease), transform 120ms var(--ease);
+    transition: box-shadow 120ms steps(2), transform 120ms steps(2);
   }
+  .cmd button.ok { background: var(--surface); color: var(--ink); }
   .cmd button:hover { box-shadow: var(--shadow-cta-far); transform: translate(-1px, -1px); }
   .cmd button:active { box-shadow: var(--shadow-cta-near); transform: translate(2px, 2px); transition-duration: 0ms; }
   @media (prefers-reduced-motion: reduce) { .cmd button { transition: none; } .cmd button:hover, .cmd button:active { transform: none; box-shadow: var(--shadow-cta); } }
@@ -191,22 +242,28 @@
   a.pill:active { box-shadow: none; background: var(--ink); color: var(--surface); }
 
   /* --- ruled grids: the cells fill the whole box, a 2px ink line between them, no gap --- */
-  .stats, .facts, .foot-top { display: grid; gap: 2px; background: var(--ink); border: var(--rule); }
+  .stats, .facts, .foot-top { display: grid; gap: 2px; background: var(--ink); border: var(--rule); box-shadow: var(--shadow); }
   .stat, .fact, .foot-top > div { background: var(--surface); min-width: 0; }
 
   /* --- the numbers that do the selling --- */
   .stats { grid-template-columns: repeat(3, 1fr); }
   .stat { padding: 22px 20px 20px; }
-  .stat .n { font-size: clamp(34px, 6vw, 46px); font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--ink); }
+  .stat .n { font-variant-numeric: tabular-nums; font-size: clamp(34px, 6vw, 46px); font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--ink); }
   .stat .n small { font-size: 0.42em; font-weight: 400; letter-spacing: 0; color: var(--muted); margin-left: 4px; }
   .stat .l { color: var(--muted); font-size: 15px; margin-top: 10px; }
   .punch { font-size: 19px; color: var(--ink); margin: 34px 0 0; max-width: 50ch; letter-spacing: -0.011em; }
   /* The highlighter: the one place yellow marks text. Dark ink on yellow. */
-  .punch strong { background: var(--signal); color: var(--on-signal); padding: 0 0.2em; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .punch strong { background: linear-gradient(var(--signal), var(--signal)) no-repeat 0 0 / 100% 100%; color: var(--on-signal); padding: 0 0.2em; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 
   .facts { grid-template-columns: repeat(2, 1fr); }
   .fact { padding: 18px 20px 20px; }
   .fact:only-child { grid-column: 1 / -1; }
+  /* A quiet block (one fact on its own) stands on the print hatch instead of the solid shadow. */
+  .facts:has(> .fact:only-child) { position: relative; isolation: isolate; box-shadow: none; }
+  .facts:has(> .fact:only-child)::after {
+    content: ""; position: absolute; z-index: -1; inset: 6px -8px -8px 6px;
+    background: repeating-linear-gradient(-45deg, var(--ink) 0 1px, transparent 1px 6px);
+  }
   .fact strong { display: block; font-size: 16px; margin-bottom: 4px; }
   .fact span { color: var(--muted); font-size: 15px; }
   @media (max-width: 600px) { .stats, .facts { grid-template-columns: 1fr; } }
@@ -240,11 +297,12 @@
   .col a + a { border-top: 1px solid var(--ink); }
   .col a::after { content: "\2192"; content: "\2192" / ""; flex: none; font-family: var(--mono); }
   .copyright {
-    padding: 13px 14px; background: var(--surface); border: var(--rule); border-top: 0;
+    padding: 13px 14px; background: var(--surface); border: var(--rule); border-top: 0; box-shadow: var(--shadow);
     font-family: var(--mono); font-size: 12px; color: var(--muted);
   }
   .disclaimer { font-size: 12px; color: var(--faint); margin-top: 14px; font-family: var(--sans); }
 </style>
+<script>if ("IntersectionObserver" in window) document.documentElement.className = "js";</script>
 </head>
 <body>
 
@@ -431,18 +489,42 @@
 </footer>
 
 <script>
-  document.getElementById("year").textContent = new Date().getFullYear();
+(function (d) {
+  d.getElementById("year").textContent = new Date().getFullYear();
 
-  // Copy button.
-  document.querySelectorAll("[data-copy]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      var text = document.getElementById(button.dataset.copy).textContent;
-      navigator.clipboard.writeText(text).then(function () {
-        button.textContent = "copied";
-        setTimeout(function () { button.textContent = "copy"; }, 1600);
+  // Copy button: an inverted "copied" block for 1.2 s.
+  d.querySelectorAll("[data-copy]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      navigator.clipboard.writeText(d.getElementById(b.dataset.copy).textContent).then(function () {
+        b.textContent = "copied"; b.classList.add("ok");
+        setTimeout(function () { b.textContent = "copy"; b.classList.remove("ok"); }, 1200);
       });
     });
   });
+
+  // Scroll-in: "in" goes on a block once, when it comes into view. The CSS does the rest.
+  if (!d.documentElement.classList.contains("js")) return;
+  var move = matchMedia("(prefers-reduced-motion: no-preference)").matches;
+  // A number counts up to its value in 8 steps, after its block has landed. The start has as many
+  // digits as the end, so nothing next to it shifts.
+  function tick(n) {
+    var t = n.firstChild, v = +t.data, lo = Math.pow(10, t.data.length - 1), i = -6;
+    if (!v) return;
+    t.data = lo;
+    var id = setInterval(function () {
+      t.data = Math.round(lo + (v - lo) * Math.max(0, ++i) / 8);
+      if (i > 7) clearInterval(id);
+    }, 50);
+  }
+  var io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      io.unobserve(e.target); e.target.classList.add("in");
+      if (move && e.target.matches(".stats")) e.target.querySelectorAll(".n").forEach(tick);
+    });
+  }, { rootMargin: "0px 0px -8% 0px" });
+  d.querySelectorAll("nav,section,.stats,.facts,.cmd,.foot-top,.punch").forEach(function (el) { io.observe(el); });
+})(document);
 </script>
 
 </body>

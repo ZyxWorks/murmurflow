@@ -38,7 +38,7 @@
   The look is "hard print": the parts are hard, the page is calm. Lines carry the layout - a 2px ink
   rule opens every section, and a group of siblings (nav, number and fact grids, the footer) is a
   ruled grid of cells with no gaps. The main button stands on its yellow shadow; on hover it clicks down
-  onto it and turns yellow, a secondary button presses in on hover and inverts on press. The main blocks stand on a 4px ink shadow.
+  onto it and turns yellow, a secondary button presses in on hover; a click presses deeper for a moment. The main blocks stand on a 4px ink shadow.
 
   Movement is short and runs once: a block lands on its shadow and a section rule draws
   when it scrolls in, a hover fill runs through its cell from the left in one smooth move, an icon hops, an arrow steps right, the
@@ -76,7 +76,7 @@
     --edge: var(--z-bw-block) solid var(--ink);
     /* A main block stands on this. */
     --shadow: var(--z-shadow-block);
-    /* A secondary button is pushed in on hover: the same hard shadow, inside. */
+    /* A secondary button is pushed in on hover: a hard grey shadow, inside. */
     --shadow-in: var(--z-shadow-in);
     /* The main button (copy) stands on the yellow shadow and clicks all the way down onto it. */
     --shadow-cta: var(--z-shadow-cta); --shadow-cta-down: var(--z-shadow-cta-down);
@@ -170,8 +170,8 @@
 
   /* --- cells ---
      A link that is a cell of a ruled grid (nav, footer). It fills its whole cell. One hover for
-     every control (brand sheet): the cell is pressed in, the hard inner ink shadow; nothing slides
-     in. A press turns it to ink at once. The focus ring sits inside so the lines stay whole. */
+     every control (brand sheet): the cell is pressed in, the hard inner grey shadow; nothing slides
+     in. A click presses it deeper at once and fills nothing; ink fill is for states only. The focus ring sits inside so the lines stay whole. */
   nav .up, nav .right, footer .lockup, .col a {
     text-decoration: none;
     transition: box-shadow var(--z-d-press) ease-out;
@@ -180,7 +180,7 @@
   nav .up:focus-visible, nav .right:focus-visible, footer .lockup:focus-visible, .col a:focus-visible {
     box-shadow: var(--z-shadow-in);
   }
-  nav .up:active, nav .right:active, footer .lockup:active, .col a:active { background: var(--z-ink); color: var(--surface); box-shadow: none; }
+  nav .up:active, nav .right:active, footer .lockup:active, .col a:active { box-shadow: var(--z-shadow-in-deep); transition-duration: 0s; }
   nav .up:focus-visible, nav .right:focus-visible, footer .lockup:focus-visible, .col a:focus-visible {
     outline: var(--z-bw) solid var(--z-ink); outline-offset: -6px;
   }
@@ -207,7 +207,7 @@
      lockup on its own reads as a title rather than as a door. The cell is as tall as the bar, so the
      tap target is 44px. */
   @media (max-width: 560px) {
-    .lockup .name, .lockup .pm { display: none; }
+    nav .lockup .name, nav .lockup .pm { display: none; }
     .lockup .up { flex: 1; min-width: 0; padding: 0 12px; border-right: 0; }
     .lockup .up::before { content: "\2190"; font-weight: 400; }
     nav .right { padding: 0 12px; }
@@ -246,7 +246,7 @@
     background: var(--ink); position: sticky; right: 0; box-shadow: -6px 0 0 var(--surface);
   }
   /* The main button: ink, on a yellow shadow. On hover and keyboard focus it clicks all the
-     way down onto the shadow, and the button itself turns yellow with ink text. After a copy
+     way down onto the shadow, and the button itself turns yellow with ink text; a click presses it deeper at once. After a copy
      it stays yellow for a moment. The place a click lands stays still: an unseen layer covers the
      button and, once the button has moved, reaches back over the strip it left, so a pointer on
      the old top or left edge still holds it. */
@@ -262,6 +262,7 @@
   .cmd button:hover::after, .cmd button:focus-visible::after, .cmd button:active::after { inset: calc(var(--z-cta-travel) * -1) 0 0 calc(var(--z-cta-travel) * -1); }
   .cmd button:hover, .cmd button:focus-visible, .cmd button:active, .cmd button.ok { background: var(--signal); color: var(--on-signal); }
   .cmd button:hover, .cmd button:focus-visible, .cmd button:active { box-shadow: var(--shadow-cta-down); transform: translate(var(--z-cta-travel), var(--z-cta-travel)); }
+  .cmd button:active { box-shadow: var(--z-shadow-cta-deep); transition-duration: 0s; }
   /* Reduced motion: the tokens set the travel and the press time to 0, so the button turns yellow
      at once and stays where it is, on its shadow. */
   @media (prefers-reduced-motion: reduce) { .cmd button:hover, .cmd button:focus-visible, .cmd button:active { box-shadow: var(--shadow-cta); } }
@@ -274,13 +275,13 @@
   }
 
   /* The secondary button: white, ink edged, no shadow at rest. Hover pushes it in (the hard shadow
-     inside, the label 1px down and right), a press inverts it. */
+     inside, the label 1px down and right), a click presses it deeper at once. */
   a.pill {
     display: inline-block; font-size: 15px; font-weight: 700; color: var(--ink); text-decoration: none; white-space: nowrap;
     background: var(--surface); border: var(--rule); padding: 10px 17px;
   }
   a.pill:hover { box-shadow: var(--shadow-in); padding: 11px 16px 9px 18px; }
-  a.pill:active { box-shadow: none; background: var(--ink); color: var(--surface); }
+  a.pill:active { box-shadow: var(--z-shadow-in-deep); transition-duration: 0s; }
 
   /* --- ruled grids: the cells fill the whole box, a 2px ink line between them, no gap --- */
   .stats, .facts, .foot-top { display: grid; gap: var(--z-bw-rule); background: var(--ink); border: var(--edge); box-shadow: var(--shadow); }
@@ -305,7 +306,8 @@
   .punch + .scroll, p + .facts { margin-top: 28px; }
 
   .scroll { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 15px; min-width: 440px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  td:first-child, th:first-child { padding-right: 16px; }
   th, td { text-align: left; padding: 11px 0; border-bottom: var(--z-bw-hair) solid var(--line); color: var(--muted); }
   th { color: var(--ink); border-bottom: var(--rule); }
   td:last-child, th:last-child { text-align: right; }

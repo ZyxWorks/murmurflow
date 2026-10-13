@@ -279,6 +279,7 @@
   a.pill {
     display: inline-block; font-size: 15px; font-weight: 700; color: var(--ink); text-decoration: none; white-space: nowrap;
     background: var(--surface); border: var(--rule); padding: 10px 17px;
+    transition: box-shadow var(--z-d-press) ease-out;
   }
   a.pill:hover { box-shadow: var(--shadow-in); padding: 11px 16px 9px 18px; }
   a.pill:active { box-shadow: var(--z-shadow-in-deep); transition-duration: 0s; }
@@ -445,7 +446,7 @@
       <li><strong>No always-on microphone.</strong> Nothing listens between sentences, and a clip you forget about closes itself after fifteen seconds of quiet - pasting what you said rather than throwing it away.</li>
       <li><strong>No wall of settings.</strong> A small waveform while the microphone is open, and a soft pulse while it transcribes. No sounds, no presets.</li>
       <li><strong>No LLM on the hot path</strong>, unless you ask for one.</li>
-      <li><strong>No Linux.</strong> Wayland exposes no global hotkey API at all,</li>
+      <li><strong>No Linux.</strong> Wayland exposes no global hotkey API at all, so the answer is honest rather than half working.</li>
     </ul>
   </section>
 

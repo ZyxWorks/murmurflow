@@ -56,6 +56,8 @@
     /* The signal is a highlighter: fill and button shadow only. On a light ground it is never text. */
     --signal: #ffd23c; --on-signal: #14130f;
     --rule: 2px solid var(--ink);
+    /* The outer edge of a main block is a step thicker than the lines inside it. */
+    --edge: 3px solid var(--ink);
     /* A main block stands on this. */
     --shadow: 4px 4px 0 var(--ink);
     /* A secondary button is pushed in on hover: the same hard shadow, inside. */
@@ -95,7 +97,7 @@
      section label carries its number and a solid ink square in front of it. */
   h2, .col h4, th, .os { font-family: var(--mono); font-size: 12px; font-weight: 700; line-height: 1.5; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); }
   h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 28px; }
-  h2::before { content: counter(sec, decimal-leading-zero); content: counter(sec, decimal-leading-zero) / ""; order: -2; flex: none; color: var(--faint); }
+  h2::before { content: counter(sec, decimal-leading-zero); content: counter(sec, decimal-leading-zero) / ""; order: -2; flex: none; }
   h2::after { content: ""; order: -1; flex: none; width: 8px; height: 8px; background: var(--ink); }
   h3 { font-size: 21px; letter-spacing: -0.022em; font-weight: 700; margin: 0 0 8px; }
   p { margin: 0 0 16px; color: var(--muted); }
@@ -169,7 +171,7 @@
   }
 
   /* --- nav: one ruled bar, three cells --- */
-  nav { display: flex; align-items: stretch; min-height: 48px; margin-top: 26px; background: var(--surface); border: var(--rule); box-shadow: var(--shadow); }
+  nav { display: flex; align-items: stretch; min-height: 48px; margin-top: 26px; background: var(--surface); border: var(--edge); box-shadow: var(--shadow); }
   .lockup { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
   nav .lockup { display: flex; flex: 1; min-width: 0; gap: 0; }
   .lockup .name { font-weight: 700; letter-spacing: -0.025em; font-size: 17px; }
@@ -178,9 +180,10 @@
   /* The page you are on is the selected cell: ink, white text, its own mark. The ink edge of the
      cell stands in for the "/" of the breadcrumb, so the crumb is not shown. */
   .lockup .crumb { display: none; }
-  nav .pm, nav .name { align-self: stretch; background: var(--ink); color: var(--surface); }
-  nav .pm { box-sizing: content-box; height: auto; padding: 0 10px 0 14px; }
-  nav .name { display: flex; align-items: center; padding-right: 14px; }
+  /* The mark keeps its own 22px box and lies on top; the name is the ink cell and reaches back
+     under it (14px edge + 22px mark = 36px), so the two read as one cell with 14px on each side. */
+  nav .pm { position: relative; z-index: 1; margin-left: 14px; color: var(--surface); }
+  nav .name { display: flex; align-items: center; align-self: stretch; margin-left: -36px; padding: 0 14px 0 46px; background: var(--ink); color: var(--surface); }
   /* GitHub carries weight because the licence is the pitch: a cell of its own rather than a word
      in a corner. Not the main button, though. That is the install, and a page with two primary
      buttons has none. */
@@ -196,21 +199,37 @@
   }
   @media (max-width: 360px) { nav .right { white-space: normal; line-height: 1.2; padding: 6px 10px; } }
 
-  header { padding: 76px 0 44px; }
+  /* The one print ornament: crop marks at the four corners of the head, 14px outside it. The box
+     starts 14px above the nav bar (48px tall, right above the header) and ends 14px under the
+     last line of the intro. */
+  header { position: relative; padding: 76px 0 44px; }
+  header::after {
+    --m: linear-gradient(var(--ink), var(--ink));
+    content: ""; position: absolute; inset: -62px -14px 46px; pointer-events: none;
+    background: var(--m) 0 0 / 8px 2px, var(--m) 0 0 / 2px 8px, var(--m) 100% 0 / 8px 2px, var(--m) 100% 0 / 2px 8px,
+      var(--m) 0 100% / 8px 2px, var(--m) 0 100% / 2px 8px, var(--m) 100% 100% / 8px 2px, var(--m) 100% 100% / 2px 8px;
+    background-repeat: no-repeat;
+  }
+  @media (max-width: 480px) { header::after { display: none; } }
 
   /* --- the call to action --- */
   .cta { margin-top: 34px; }
   .cmd {
     display: flex; align-items: center; gap: 12px;
-    background: var(--surface); border: var(--rule); box-shadow: var(--shadow); padding: 12px 14px 12px 16px; margin: 10px 0 6px;
+    background: var(--surface); border: var(--edge); box-shadow: var(--shadow); padding: 12px 14px 12px 16px; margin: 10px 0 6px;
   }
   /* The COMMAND scrolls, not the row: a copy button that scrolls out of sight with a long install
      line is a copy button nobody finds on a phone. */
   .cmd .line { flex: 1; min-width: 0; overflow-x: auto; }
   .cmd .line, .scroll { scrollbar-width: thin; scrollbar-color: var(--ink) transparent; }
   .cmd code { line-height: 1.5; color: var(--ink); white-space: pre; font-size: 13.5px; }
-  /* A block caret after the command. Drawn by CSS, so it is not part of what "copy" copies. */
-  .cmd code::after { content: ""; display: inline-block; width: 8px; height: 15px; margin-left: 6px; vertical-align: -2px; background: var(--ink); }
+  /* A block caret after the command. Drawn by CSS, so it is not part of what "copy" copies. When
+     the command is longer than its box the caret sticks to the right edge, on a white gap, instead
+     of being cut in half or scrolled out of sight. */
+  .cmd code::after {
+    content: ""; display: inline-block; width: 0.55em; height: 1.1em; margin-left: 6px; vertical-align: -0.2em;
+    background: var(--ink); position: sticky; right: 0; box-shadow: -6px 0 0 var(--surface);
+  }
   /* The main button: ink, on a yellow shadow. Hover lifts it, a press lands it in the shadow, and
      it comes back in two hard steps. After a copy it is an inverted block for a moment. */
   .cmd button {
@@ -242,7 +261,7 @@
   a.pill:active { box-shadow: none; background: var(--ink); color: var(--surface); }
 
   /* --- ruled grids: the cells fill the whole box, a 2px ink line between them, no gap --- */
-  .stats, .facts, .foot-top { display: grid; gap: 2px; background: var(--ink); border: var(--rule); box-shadow: var(--shadow); }
+  .stats, .facts, .foot-top { display: grid; gap: 2px; background: var(--ink); border: var(--edge); box-shadow: var(--shadow); }
   .stat, .fact, .foot-top > div { background: var(--surface); min-width: 0; }
 
   /* --- the numbers that do the selling --- */
@@ -284,7 +303,8 @@
   /* --- footer: one ruled grid, the copyright line is its bottom row --- */
   footer { background: var(--deep); border-top: var(--rule); }
   footer .shell { padding-top: 56px; padding-bottom: 72px; }
-  .foot-top { grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(0, 1fr)); }
+  /* The copyright row closes the grid, so the line between the two is an inner one. */
+  .foot-top { border-bottom-width: 2px; grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(0, 1fr)); }
   @media (max-width: 640px) {
     .foot-top { grid-template-columns: 1fr 1fr; }
     .foot-top > div:first-child, .foot-top > div:last-child { grid-column: 1 / -1; }
@@ -297,8 +317,8 @@
   .col a + a { border-top: 1px solid var(--ink); }
   .col a::after { content: "\2192"; content: "\2192" / ""; flex: none; font-family: var(--mono); }
   .copyright {
-    padding: 13px 14px; background: var(--surface); border: var(--rule); border-top: 0; box-shadow: var(--shadow);
-    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    padding: 13px 14px; background: var(--ground); border: var(--edge); border-top: 0; box-shadow: var(--shadow);
+    font-family: var(--mono); font-size: 12px; color: var(--faint);
   }
   .disclaimer { font-size: 12px; color: var(--faint); margin-top: 14px; font-family: var(--sans); }
 </style>

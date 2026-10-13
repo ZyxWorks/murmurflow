@@ -169,22 +169,20 @@
   }
 
   /* --- cells ---
-     A link that is a cell of a ruled grid (nav, footer). It fills its whole cell, a hover fills the
-     cell with ink, and the focus ring sits inside so the lines around it stay whole. The fill runs
-     in from the left in one smooth move and the text turns half way. Direction, time and curve are
-     the brand's wipe tokens, so one edit there turns it everywhere; with reduced motion the time
-     is 0 and the cell is just filled. */
+     A link that is a cell of a ruled grid (nav, footer). It fills its whole cell. One hover for
+     every control (brand sheet): the cell is pressed in, the hard inner ink shadow; nothing slides
+     in. A press turns it to ink at once. The focus ring sits inside so the lines stay whole. */
   nav .up, nav .right, footer .lockup, .col a {
     text-decoration: none;
-    background: linear-gradient(var(--z-ink), var(--z-ink)) var(--z-wipe-pos) / var(--z-wipe-rest) no-repeat;
-    transition: background-size var(--z-d-wipe) var(--z-ease-wipe), color 0s calc(var(--z-d-wipe) / 2);
+    transition: box-shadow var(--z-d-press) ease-out;
   }
   nav .up:hover, nav .right:hover, footer .lockup:hover, .col a:hover,
   nav .up:focus-visible, nav .right:focus-visible, footer .lockup:focus-visible, .col a:focus-visible {
-    background-size: var(--z-wipe-full); color: var(--surface);
+    box-shadow: var(--z-shadow-in);
   }
+  nav .up:active, nav .right:active, footer .lockup:active, .col a:active { background: var(--z-ink); color: var(--surface); box-shadow: none; }
   nav .up:focus-visible, nav .right:focus-visible, footer .lockup:focus-visible, .col a:focus-visible {
-    outline: var(--z-bw) solid var(--surface); outline-offset: -6px;
+    outline: var(--z-bw) solid var(--z-ink); outline-offset: -6px;
   }
 
   /* --- nav: one ruled bar, three cells --- */

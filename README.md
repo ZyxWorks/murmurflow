@@ -543,3 +543,6 @@ on you says so on its border.
 **Legal:** [MIT licence](LICENSE) ·
 [privacy](https://zyxworks.com/legal#privacy) ·
 [imprint](https://zyxworks.com/legal#imprint)
+
+*MurmurFlow is not affiliated with, endorsed by, or connected to Wispr AI, Inc. or any other
+dictation product. Product names mentioned are the trademarks of their respective owners.*

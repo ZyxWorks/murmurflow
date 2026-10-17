@@ -90,6 +90,8 @@
      The wipe sits on the svg, so it covers both paths. */
   .mk { fill: currentColor; flex: none; }
   .mk-panels { fill: var(--z-icon-fill); }
+  /* Brand rule: the lines are ink on every ground. On the ink cell the mark sits in a white box. */
+  .zyx-cell-ink > .mk { box-sizing: content-box; padding: 3px; background: var(--z-surface); fill: var(--z-ink); }
   @keyframes draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
   /* The marker wipes in behind its words (the library's zyx-marker has no motion of its own yet). */
   @keyframes mark { from { background-size: 0 100%; } }

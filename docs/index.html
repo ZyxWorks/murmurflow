@@ -18,376 +18,171 @@
      is a proper Impressum. -->
 <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
 <meta name="ai-content-declaration" content="noai, noimageai">
-<link rel="preload" href="fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="ui/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <!--
-  One page, one brand token file and three font files, no build step and no request to another
-  host, which is what lets GitHub Pages serve this straight out of /docs and keeps the same promise
-  the product makes.
+  One page plus ui/, a copy of the ZyxWorks UI library: no build step and no request to another host,
+  which is what lets GitHub Pages serve this straight out of /docs and keeps the same promise the
+  product makes.
 
-  zyx-tokens.css is the one source of every colour, hard shadow, edge width and motion value. It is
-  a verbatim copy from the Zyx repo ("make brand-tokens" there overwrites it): never edit it here.
-  The page's own names below (ink, surface, rule, shadow) are aliases of its --z-* values. The page
-  is light only, so it never sets data-theme="dark".
+  The look comes from @zyxworks/ui (repo ZyxWorks/ui): tokens, the self-hosted Atkinson Hyperlegible
+  Next and Mono, and every shared part (bar, cell, grid, stand, main and second button, eyebrow, rule,
+  label, rows, table, marker, crop marks, command and its copy button, footer, link, arrow, the
+  ZyxWorks mark and the scroll-in). ui/ is a copy written by `npm run ship -- <this repo> --static
+  docs/ui` in the library repo; never edit it by hand. Below is only what belongs to this page: its
+  layout, the hero, the full-width section bands and the product's own mark. Every colour, edge,
+  shadow and time reads var(--z-*). The page is light only, so it never sets data-theme.
 
-  The brand is Zyx Textmarker, the same as the ZyxWorks index this page links to: pure neutrals,
-  light only, Atkinson Hyperlegible Next and Mono self-hosted, radius 0, solid shadows with no blur,
-  2px ink borders and the cube mark. Yellow is a highlighter here: the panels of the cube, the hard
-  shadow the copy buttons stand on and the marked figures. It is never a text colour on the light
-  ground and never a page background.
+  Yellow is a highlighter here: the panels of the cube, the shadow the copy buttons stand on and the
+  marked figures. It is never a text colour on the light ground and never a page background.
 
-  The look is "hard print": the parts are hard, the page is calm. Lines carry the layout - a 2px ink
-  rule opens every section, and a group of siblings (nav, number and fact grids, the footer) is a
-  ruled grid of cells with no gaps. The main button stands on its yellow shadow; on hover it clicks down
-  onto it and turns yellow, a secondary button presses in on hover; a click presses deeper for a moment. The main blocks stand on a 4px ink shadow.
+  The look is "hard print": the parts are hard, the page is calm. A 2px ink rule opens every
+  section, and a group of siblings (nav, number and fact grids, the footer) is a ruled grid of
+  cells with no gaps. The main button stands on its yellow shadow and turns yellow under the
+  pointer; every other control is pressed in on hover and pressed deeper while clicked.
 
-  Movement is short and runs once: a block lands on its shadow and a section rule draws
-  when it scrolls in, a hover fill runs through its cell from the left in one smooth move, an icon hops, an arrow steps right, the
-  yellow marker wipes in, the numbers tick up and the caret blinks three times. Everything that
-  waits for a scroll is behind the "js" class on <html>, so the page is complete without script,
-  and all of it is inside prefers-reduced-motion: no-preference, so reduced motion shows the end
-  state and nothing moves.
+  Movement is short and runs once: the mark draws in, a block lands on its shadow and a section
+  rule draws when it scrolls in, an icon hops, an arrow steps right, the yellow marker wipes in, the
+  numbers tick up and the caret blinks three times. What waits for a scroll is the library's reveal
+  (data-zyx-reveal and ui/reveal.js), so the page is complete without script, and with reduced
+  motion the library shows the end state and nothing moves.
 -->
-<link rel="stylesheet" href="zyx-tokens.css">
+<link rel="stylesheet" href="ui/zyx/fonts.css">
+<link rel="stylesheet" href="ui/zyx/zyx-ui.css">
+<script src="ui/reveal.js" defer></script>
+<script src="ui/copy.js" defer></script>
 <style>
-  /* Self-hosted, same files as the ZyxWorks index. No Google Fonts request, ever. */
-  @font-face { font-family: "Atkinson Hyperlegible Next"; font-weight: 200 800; font-display: swap; src: url("fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-  @font-face { font-family: "Atkinson Hyperlegible Next"; font-weight: 200 800; font-display: swap; src: url("fonts/atkinson-hyperlegible-next-latin-ext-wght-normal.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
-  @font-face { font-family: "Atkinson Hyperlegible Mono"; font-weight: 200 800; font-display: swap; src: url("fonts/atkinson-hyperlegible-mono-latin-wght-normal.woff2") format("woff2"); }
-
   /* --- own identity ---
-     What is this page's own and not a brand token: the type is a step bolder and tighter than the
-     brand default, and a label is small mono upper case. */
-  :root {
-    color-scheme: light;
-    --head-weight: 800; --head-track: -0.03em;
-    --label-size: 12px; --label-track: 0.06em; --label-case: uppercase;
-    --page: 820px;
+     What is this page's own and not the library's: the type is a step bolder and tighter than the
+     brand default. */
+  :root { --head-weight: 800; --head-track: -0.03em; --page: 820px; }
+
+  body { margin: 0; font-size: 17px; line-height: 1.6; }
+  /* Element defaults of this page's prose. They sit in the library's base layer, so a library
+     part on the same element (a label on a <p>, a button on an <a>) still wins. */
+  @layer zyx-base {
+    p { margin: 0 0 16px; color: var(--z-muted); }
+    strong { color: var(--z-ink); font-weight: 700; }
+    code { font-family: var(--z-font-mono); font-size: 0.9em; }
   }
-  /* --- aliases of the brand tokens: no value of its own in here --- */
-  :root {
-    /* Flat fields with hard edges: ink, white, the ground grey, one deeper step for the footer band,
-       one mid grey for a control at rest and one light grey for row lines. */
-    --ground: var(--z-ground); --surface: var(--z-surface); --deep: var(--z-raised); --line: var(--z-line); --ctl: var(--z-ctl);
-    --ink: var(--z-ink); --muted: var(--z-muted); --faint: var(--z-faint);
-    /* The signal is a highlighter: fill and button shadow only. On a light ground it is never text. */
-    --signal: var(--z-signal); --on-signal: var(--z-on-signal);
-    --rule: var(--z-bw-rule) solid var(--ink);
-    /* The outer edge of a main block is a step thicker than the lines inside it. */
-    --edge: var(--z-bw-block) solid var(--ink);
-    /* A main block stands on this. */
-    --shadow: var(--z-shadow-block);
-    /* A secondary button is pushed in on hover: a hard grey shadow, inside. */
-    --shadow-in: var(--z-shadow-in);
-    /* The main button (copy) stands on the yellow shadow and clicks all the way down onto it. */
-    --shadow-cta: var(--z-shadow-cta); --shadow-cta-down: var(--z-shadow-cta-down);
-    --sans: var(--z-font-text); --mono: var(--z-font-mono);
-    --ease: var(--z-ease);
-  }
-  *, *::before, *::after { box-sizing: border-box; }
-  html { background: var(--ground); -webkit-text-size-adjust: 100%; overflow-x: clip; }
-  body {
-    margin: 0; color: var(--ink); font-size: 17px; line-height: 1.6;
-    font-family: var(--sans); -webkit-font-smoothing: antialiased;
-  }
-  body { counter-reset: sec; }
-  ::selection { background: var(--ink); color: var(--surface); }
   .shell { max-width: var(--page); margin: 0 auto; padding: 0 24px; }
-  /* A section is a band as wide as the window: white and ground take turns, and a full-width ink
-     rule opens it. The band is drawn behind the text column, so the column itself never moves. The
-     rule is its own layer, so it can draw in from the left. */
-  section { padding: 68px 0; position: relative; counter-increment: sec; }
-  section::after {
-    content: ""; position: absolute; top: 0; left: calc(50% - 50vw); width: 100vw; height: var(--z-bw-rule);
-    background: var(--ink); transform-origin: 0 50%;
-  }
-  section::before {
-    content: ""; position: absolute; z-index: -1; top: 0; bottom: 0; left: calc(50% - 50vw); width: 100vw;
-    background: var(--ground);
-  }
-  section:nth-of-type(odd)::before { background: var(--surface); }
-  .mono { font-family: var(--mono); }
+  /* A section is a band as wide as the window (zyx-band): white and ground take turns, and a window-wide ink
+     rule (zyx-rule zyx-rule-bleed) opens it. The band is drawn behind the text column, so the
+     column never moves. */
+  section { padding: 66px 0 68px; }
+  section { --zyx-band: var(--z-ground); }
+  section:nth-of-type(odd) { --zyx-band: var(--z-surface); }
 
   h1 { font-size: clamp(40px, 8.4vw, 66px); line-height: 1.02; letter-spacing: var(--head-track); margin: 0; font-weight: var(--head-weight); }
-  /* One label style for a section, a footer column and a table head: small mono upper case. A
-     section label carries its number and a solid ink square in front of it. */
-  h2, .col h4, th, .os { font-family: var(--mono); font-size: var(--label-size); font-weight: var(--z-label-weight); line-height: 1.5; letter-spacing: var(--label-track); text-transform: var(--label-case); color: var(--ink); }
-  h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 28px; }
-  h2::before { content: counter(sec, decimal-leading-zero); content: counter(sec, decimal-leading-zero) / ""; order: -2; flex: none; }
-  h2::after { content: ""; order: -1; flex: none; width: 8px; height: 8px; background: var(--ink); }
-  h3 { font-size: 21px; letter-spacing: var(--z-dt); font-weight: var(--z-hw); margin: 0 0 8px; }
-  p { margin: 0 0 16px; color: var(--muted); }
   p.lead { font-size: 21px; margin-top: 22px; max-width: 44ch; }
-  /* A link in running text: a thick underline, mid grey at rest and ink on hover. */
-  a { color: var(--ink); text-decoration-thickness: var(--z-bw); text-decoration-color: var(--ctl); text-underline-offset: 4px; }
-  a:hover { text-decoration-color: var(--ink); }
-  :focus-visible { outline: var(--z-bw) solid var(--z-focus); outline-offset: 3px; }
-  strong { color: var(--ink); font-weight: 700; }
-  code { font-family: var(--mono); font-size: 0.9em; }
+  /* zyx-ui-allow: a link in this page's grey prose is ink, so it can be found without the underline */
+  .zyx-link { color: var(--z-ink); }
 
-  /* The cube is two paths: a yellow hexagon, and over it one filled shape in the text colour
-     (outline, xyz axis and three open panels), so the yellow shows through the panels. One
-     draw-in at load. The wipe sits on the svg, so it covers both paths. */
-  .mk { fill: currentColor; flex: none; }
-  .mk-panels { fill: var(--z-icon-fill); }
-  @keyframes draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
-  /* Every keyframe set below names only its start: the end is the element as it stands at rest. */
-  /* The icon of a hovered cell hops: up 3px and back in two hard steps, once per hover. */
-  @keyframes hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-  @keyframes land { from { box-shadow: 0 0 0 var(--ink); transform: translate(var(--z-block-travel), var(--z-block-travel)); } }
-  @keyframes rule { from { transform: scaleX(0); } }
-  @keyframes stamp { from { transform: scale(0); } }
-  @keyframes mark { from { background-size: 0 100%; } }
-  @keyframes blink { 0% { opacity: 0; } 50%, 100% { opacity: 1; } }
-  @media (prefers-reduced-motion: no-preference) {
-    .mk { animation: draw var(--z-d3) var(--ease) both; }
-    /* The product mark sits on the ink cell and never draws in: a restarted draw would leave the cell empty. */
-    nav .pm { animation: none; }
-    /* "draw" stays in the list, so the mark is not drawn in again when the hover ends. */
-    a:hover > .mk { animation: draw var(--z-d3) var(--ease) both, hop var(--z-d1) step-start 1; }
+  /* The product's own glyph (the ZyxWorks cube is the library's zyx-mark): a yellow shape under one
+     filled shape of ink lines, so the yellow shows through. Brand rule: the lines are ink on every
+     ground, so on the ink cell of the bar the glyph sits in a white box. It never draws in: a
+     restarted draw would leave the cell empty. */
+  .mk { flex: none; box-sizing: content-box; padding: 3px; background: var(--z-mark-paper); fill: var(--z-mark-line); }
+  .mk-panels { fill: var(--z-cube); }
 
-    /* The arrow of a link row steps 3px to the right and stays there while the row is hovered. */
-    .col a::after { transition: transform 120ms steps(3); }
-    .col a:hover::after { transform: translateX(3px); }
+  /* --- the bar (zyx-bar): the way up to ZyxWorks, this page as the ink cell, and the source at the
+     end. GitHub carries weight because the licence is the pitch: a cell of its own rather than a
+     word in a corner. Not the main button, though. That is the install, and a page with two
+     primary buttons has none. --- */
+  nav { margin-top: 26px; }
 
-    /* Scroll-in, once. The script puts "in" on a block when it comes into view; until then the
-       block waits in its start state. A block lands on its shadow in three steps. */
-    .js :is(nav, .stats, .facts, .cmd, .foot-top):not(.in), .js .foot-top:not(.in) + .copyright { box-shadow: 0 0 0 var(--ink); transform: translate(var(--z-block-travel), var(--z-block-travel)); }
-    .js :is(nav, .stats, .facts, .cmd, .foot-top).in, .js .foot-top.in + .copyright { animation: land 240ms steps(3, jump-none) 80ms backwards; }
-    .js .cmd.in ~ .cmd.in { animation-delay: 160ms; }
-    /* A section's rule draws from the left, then its ink square stamps in. */
-    .js section:not(.in)::after { transform: scaleX(0); }
-    .js section.in::after { animation: rule var(--z-d2) steps(8) backwards; }
-    .js section:not(.in) h2::after { transform: scale(0); }
-    .js section.in h2::after { animation: stamp 120ms steps(2) var(--z-d2) backwards; }
-    /* The yellow marker wipes in behind its words, one after the other. */
-    .js .punch:not(.in) strong { background-size: 0 100%; }
-    .js .punch.in strong { animation: mark 240ms steps(4) 160ms backwards; }
-    .js .punch.in strong ~ strong { animation-delay: 480ms; }
-    /* The caret blinks three times after its box has landed, then it stays solid. */
-    .js .cmd.in code::after { animation: blink 300ms step-end 400ms 3 backwards; }
-    .js .cmd.in ~ .cmd.in code::after { animation-delay: 1400ms; }
-  }
-
-  /* --- cells ---
-     A link that is a cell of a ruled grid (nav, footer). It fills its whole cell. One hover for
-     every control (brand sheet): the cell is pressed in, the hard inner grey shadow; nothing slides
-     in. A click presses it deeper at once and fills nothing; ink fill is for states only. The focus ring sits inside so the lines stay whole. */
-  nav .up, nav .right, footer .lockup, .col a {
-    text-decoration: none;
-    transition: box-shadow var(--z-d-press) ease-out;
-  }
-  nav .up:hover, nav .right:hover, footer .lockup:hover, .col a:hover,
-  nav .up:focus-visible, nav .right:focus-visible, footer .lockup:focus-visible, .col a:focus-visible {
-    box-shadow: var(--z-shadow-in);
-  }
-  nav .up:active, nav .right:active, footer .lockup:active, .col a:active { box-shadow: var(--z-shadow-in-deep); transition-duration: 0s; }
-  nav .up:focus-visible, nav .right:focus-visible, footer .lockup:focus-visible, .col a:focus-visible {
-    outline: var(--z-bw) solid var(--z-ink); outline-offset: -6px;
-  }
-
-  /* --- nav: one ruled bar, three cells --- */
-  nav { display: flex; align-items: stretch; min-height: 48px; margin-top: 26px; background: var(--surface); border: var(--edge); box-shadow: var(--shadow); }
-  .lockup { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
-  nav .lockup { display: flex; flex: 1; min-width: 0; gap: 0; }
-  .lockup .name { font-weight: var(--z-wm-weight); letter-spacing: var(--z-wm-track); font-size: 17px; }
-  /* The parent half of the breadcrumb: muted, so the page you are ON is the one that reads first. */
-  .lockup .up { display: flex; align-items: center; align-self: stretch; gap: 10px; padding: 0 14px; border-right: var(--rule); color: var(--muted); font-weight: var(--z-wm-weight); letter-spacing: var(--z-wm-track); font-size: 17px; }
-  /* The page you are on is the selected cell: ink, white text, its own mark. The ink edge of the
-     cell stands in for the "/" of the breadcrumb, so the crumb is not shown. */
-  .lockup .crumb { display: none; }
-  /* The mark keeps its own 22px box and lies on top; the name is the ink cell and reaches back
-     under it (14px edge + 22px mark = 36px), so the two read as one cell with 14px on each side. */
-  nav .pm { position: relative; z-index: 1; margin-left: 14px; color: var(--surface); }
-  nav .name { display: flex; align-items: center; align-self: stretch; margin-left: -36px; padding: 0 14px 0 46px; background: var(--ink); color: var(--surface); }
-  /* GitHub carries weight because the licence is the pitch: a cell of its own rather than a word
-     in a corner. Not the main button, though. That is the install, and a page with two primary
-     buttons has none. */
-  nav .right { display: flex; align-items: center; padding: 0 16px; border-left: var(--rule); font-size: 13.5px; font-weight: 700; color: var(--ink); white-space: nowrap; }
-  /* On a phone the WAY BACK is what survives, not the page you are already on. An arrow, because a
-     lockup on its own reads as a title rather than as a door. The cell is as tall as the bar, so the
-     tap target is 44px. */
-  @media (max-width: 560px) {
-    nav .lockup .name, nav .lockup .pm { display: none; }
-    .lockup .up { flex: 1; min-width: 0; padding: 0 12px; border-right: 0; }
-    .lockup .up::before { content: "\2190"; font-weight: 400; }
-    nav .right { padding: 0 12px; }
-  }
-  @media (max-width: 360px) { nav .right { white-space: normal; line-height: 1.2; padding: 6px 10px; } }
-
-  /* The one print ornament: crop marks at the four corners of the head, 14px outside it. The box
-     starts 14px above the nav bar (48px tall, right above the header) and ends 14px under the
+  /* The one print ornament: crop marks at the four corners of the head (zyx-crop). Local change:
+     the box starts 14px above the nav bar (which sits outside the header) and ends 14px under the
      last line of the intro. */
-  header { position: relative; padding: 76px 0 44px; }
-  header::after {
-    --m: linear-gradient(var(--ink), var(--ink));
-    content: ""; position: absolute; inset: -62px -14px 46px; pointer-events: none;
-    background: var(--m) 0 0 / 8px 2px, var(--m) 0 0 / 2px 8px, var(--m) 100% 0 / 8px 2px, var(--m) 100% 0 / 2px 8px,
-      var(--m) 0 100% / 8px 2px, var(--m) 0 100% / 2px 8px, var(--m) 100% 100% / 8px 2px, var(--m) 100% 100% / 2px 8px;
-    background-repeat: no-repeat;
-  }
-  @media (max-width: 480px) { header::after { display: none; } }
+  header { padding: 76px 0 44px; --zyx-crop-inset: -62px -14px 46px; }
 
   /* --- the call to action --- */
   .cta { margin-top: 34px; }
-  .cmd {
-    display: flex; align-items: center; gap: 12px;
-    background: var(--surface); border: var(--edge); box-shadow: var(--shadow); padding: 12px 14px 12px 16px; margin: 10px 0 6px;
-  }
-  /* The COMMAND scrolls, not the row: a copy button that scrolls out of sight with a long install
-     line is a copy button nobody finds on a phone. */
-  .cmd .line { flex: 1; min-width: 0; overflow-x: auto; }
-  .cmd .line, .scroll { scrollbar-width: thin; scrollbar-color: var(--ink) transparent; }
-  .cmd code { line-height: 1.5; color: var(--ink); white-space: pre; font-size: 13.5px; }
-  /* A block caret after the command. Drawn by CSS, so it is not part of what "copy" copies. When
-     the command is longer than its box the caret sticks to the right edge, on a white gap, instead
-     of being cut in half or scrolled out of sight. */
-  .cmd code::after {
-    content: ""; display: inline-block; width: 0.55em; height: 1.1em; margin-left: 6px; vertical-align: -0.2em;
-    background: var(--ink); position: sticky; right: 0; box-shadow: -6px 0 0 var(--surface);
-  }
-  /* The main button: ink, on a yellow shadow. On hover and keyboard focus it clicks all the
-     way down onto the shadow, and the button itself turns yellow with ink text; a click presses it deeper at once. After a copy
-     it stays yellow for a moment. The place a click lands stays still: an unseen layer covers the
-     button and, once the button has moved, reaches back over the strip it left, so a pointer on
-     the old top or left edge still holds it. */
-  .cmd button {
-    flex: none; font: inherit; font-family: var(--mono); font-weight: 700;
-    font-size: 12.5px; line-height: 1; min-height: 40px; min-width: calc(6ch + 32px); padding: 0 14px; cursor: pointer;
-    position: relative;
-    color: var(--z-on-brand); background: var(--z-brand); border: var(--rule);
-    box-shadow: var(--shadow-cta);
-    transition: box-shadow var(--z-d-press) ease-out, transform var(--z-d-press) ease-out, background-color var(--z-d-press) ease-out, color var(--z-d-press) ease-out;
-  }
-  .cmd button::after { content: ""; position: absolute; inset: 0; }
-  .cmd button:hover::after, .cmd button:focus-visible::after, .cmd button:active::after { inset: calc(var(--z-cta-travel) * -1) 0 0 calc(var(--z-cta-travel) * -1); }
-  .cmd button:hover, .cmd button:focus-visible, .cmd button:active, .cmd button.ok { background: var(--signal); color: var(--on-signal); }
-  .cmd button:hover, .cmd button:focus-visible, .cmd button:active { box-shadow: var(--shadow-cta-down); transform: translate(var(--z-cta-travel), var(--z-cta-travel)); }
-  .cmd button:active { box-shadow: var(--z-shadow-cta-deep); transition-duration: 0s; }
-  /* Reduced motion: the tokens set the travel and the press time to 0, so the button turns yellow
-     at once and stays where it is, on its shadow. */
-  @media (prefers-reduced-motion: reduce) { .cmd button:hover, .cmd button:focus-visible, .cmd button:active { box-shadow: var(--shadow-cta); } }
+  /* The room around a command box (zyx-cmd, standing on the block shadow with zyx-stand). */
+  .cmd { margin: 10px 0 6px; }
+  /* The copy button is the main button (zyx-main): it stands on its yellow shadow, and on hover,
+     keyboard focus and after a copy it is pressed in and turns yellow. */
+  /* The label over a command box (zyx-label). */
   .os { margin: 24px 0 0; }
-  .after { color: var(--muted); font-size: 15px; margin-top: 22px; }
-  /* A key: ink edged, standing on a 2px bottom shadow. */
-  kbd {
-    font-family: var(--mono); font-size: 0.84em; font-weight: 700; background: var(--surface); color: var(--ink);
-    border: var(--z-bw-hair) solid var(--ink); box-shadow: var(--z-shadow-key); padding: 1px 6px; margin: 0 1px;
-  }
+  .after { font-size: 15px; margin-top: 22px; }
+  /* Local change: a key in running text is sized to the 17px prose, not the library's 12px. */
+  kbd { font-size: 0.84em; }
 
-  /* The secondary button: white, ink edged, no shadow at rest. Hover pushes it in (the hard shadow
-     inside, the label 1px down and right), a click presses it deeper at once. */
-  a.pill {
-    display: inline-block; font-size: 15px; font-weight: 700; color: var(--ink); text-decoration: none; white-space: nowrap;
-    background: var(--surface); border: var(--rule); padding: 10px 17px;
-    transition: box-shadow var(--z-d-press) ease-out;
-  }
-  a.pill:hover { box-shadow: var(--shadow-in); padding: 11px 16px 9px 18px; }
-  a.pill:active { box-shadow: var(--z-shadow-in-deep); transition-duration: 0s; }
-
-  /* --- ruled grids: the cells fill the whole box, a 2px ink line between them, no gap --- */
-  .stats, .facts, .foot-top { display: grid; gap: var(--z-bw-rule); background: var(--ink); border: var(--edge); box-shadow: var(--shadow); }
-  .stat, .fact, .foot-top > div { background: var(--surface); min-width: 0; }
-
-  /* --- the numbers that do the selling --- */
-  .stats { grid-template-columns: repeat(3, 1fr); }
+  /* --- the numbers that do the selling: a ruled grid that stands (zyx-grid + zyx-stand) --- */
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .stat { padding: 22px 20px 20px; }
-  .stat .n { font-variant-numeric: tabular-nums; font-size: clamp(34px, 6vw, 46px); font-weight: var(--head-weight); letter-spacing: var(--head-track); line-height: 1; color: var(--ink); }
-  .stat .n small { font-size: 0.42em; font-weight: 400; letter-spacing: 0; color: var(--muted); margin-left: 4px; }
-  .stat .l { color: var(--muted); font-size: 15px; margin-top: 10px; }
-  .punch { font-size: 19px; color: var(--ink); margin: 34px 0 0; max-width: 50ch; letter-spacing: -0.011em; }
-  /* The highlighter: the one place yellow marks text. Dark ink on yellow. */
-  .punch strong { background: linear-gradient(var(--signal), var(--signal)) no-repeat 0 0 / 100% 100%; color: var(--on-signal); padding: 0 0.2em; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .stat .n { font-variant-numeric: tabular-nums; font-size: clamp(34px, 6vw, 46px); font-weight: var(--head-weight); letter-spacing: var(--head-track); line-height: 1; color: var(--z-ink); }
+  .stat .n small { font-size: 0.42em; font-weight: 400; letter-spacing: 0; color: var(--z-muted); margin-left: 4px; }
+  .stat .l { color: var(--z-muted); font-size: 15px; margin-top: 10px; }
+  .punch { font-size: 19px; color: var(--z-ink); margin: 34px 0 0; max-width: 50ch; letter-spacing: -0.011em; }
 
-  .facts { grid-template-columns: repeat(2, 1fr); }
+  /* The facts fill their grid; a lone last fact takes the whole row (zyx-grid-fill). */
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fact { padding: 18px 20px 20px; }
-  .fact:only-child { grid-column: 1 / -1; }
   .fact strong { display: block; font-size: 16px; margin-bottom: 4px; }
-  .fact span { color: var(--muted); font-size: 15px; }
-  @media (max-width: 600px) { .stats, .facts { grid-template-columns: 1fr; } }
-  .punch + .scroll, p + .facts { margin-top: 28px; }
+  .fact span { color: var(--z-muted); font-size: 15px; }
+  @media (max-width: 600px) { .stats, .facts { grid-template-columns: minmax(0, 1fr); } }
+  /* zyx-ui-allow: room above a table that follows a punch line, as above the facts */
+  .punch + .zyx-table-wrap, p + .facts { margin-top: 28px; }
 
-  .scroll { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 15px; }
-  td:first-child, th:first-child { padding-right: 16px; }
-  th, td { text-align: left; padding: 11px 0; border-bottom: var(--z-bw-hair) solid var(--line); color: var(--muted); }
-  th { color: var(--ink); border-bottom: var(--rule); }
-  td:last-child, th:last-child { text-align: right; }
-  td:last-child { font-family: var(--mono); color: var(--ink); }
-  .note { font-size: 14px; color: var(--faint); margin-top: 18px; }
+  /* Tables (zyx-table). The last column is the measured number, right-aligned ink mono (zyx-table-num). */
+  .note { font-size: 14px; color: var(--z-faint); margin-top: 18px; }
 
-  ul { margin: 0; padding: 0; list-style: none; }
-  li { padding: 13px 0; border-bottom: var(--z-bw-hair) solid var(--line); color: var(--muted); font-size: 16px; }
-  li:last-child { border-bottom: 0; }
+  /* zyx-ui-allow: the lists of what it does and does not do (zyx-rows) are in this page's grey prose */
+  .zyx-rows > li { color: var(--z-muted); font-size: 16px; }
 
-  /* --- footer: one ruled grid, the copyright line is its bottom row --- */
-  footer { background: var(--deep); border-top: var(--rule); }
+  /* --- footer: the library's footer (zyx-foot, standing) on a raised band as wide as the window --- */
+  footer { background: var(--z-raised); }
   footer .shell { padding-top: 56px; padding-bottom: 72px; }
-  /* The copyright row closes the grid, so the line between the two is an inner one. */
-  .foot-top { border-bottom-width: var(--z-bw-rule); grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(0, 1fr)); }
-  @media (max-width: 640px) {
-    .foot-top { grid-template-columns: 1fr 1fr; }
-    .foot-top > div:first-child, .foot-top > div:last-child { grid-column: 1 / -1; }
-  }
-  /* Every cell opens with a head row of the same height, so the rule under the heads runs through. */
-  footer .lockup, .col h4 { display: flex; align-items: center; min-height: 44px; margin: 0; padding: 0 14px; border-bottom: var(--rule); }
-  .tagline { color: var(--muted); font-size: 14.5px; margin: 0; padding: 14px 14px 18px; max-width: 42ch; }
-  /* A link is a row as wide as its cell, with an arrow that hops when the row is hovered. */
-  .col a { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 40px; padding: 8px 14px; color: var(--ink); font-size: 14.5px; line-height: 1.3; }
-  .col a + a { border-top: var(--z-bw-hair) solid var(--ink); }
-  .col a::after { content: "\2192"; content: "\2192" / ""; flex: none; font-family: var(--mono); }
-  .copyright {
-    padding: 13px 14px; background: var(--ground); border: var(--edge); border-top: 0; box-shadow: var(--shadow);
-    font-family: var(--mono); font-size: 12px; color: var(--faint);
-  }
-  .disclaimer { font-size: 12px; color: var(--faint); margin-top: 14px; font-family: var(--sans); }
 </style>
-<script>if ("IntersectionObserver" in window) document.documentElement.className = "js";</script>
 </head>
 <body>
 
 <div class="shell">
 
-  <nav>
-    <div class="lockup">
-      <a class="up" href="https://zyxworks.com/open-source">
-        <svg class="mk" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="mk-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
-        <span>ZyxWorks</span>
-      </a>
-      <span class="crumb">/</span>
-      <svg class="mk pm" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="mk-panels" d="M60 12L73.86 20L73.86 38L87.71 30L101.57 38L101.57 82L87.71 90L73.86 82L73.86 100L60 108L46.14 100L46.14 82L32.29 90L18.43 82L18.43 38L32.29 30L46.14 38L46.14 20Z"/><path fill-rule="evenodd" d="M60 7.09L75.96 16.3L75.96 31.88L87.71 25.09L105.82 35.55L105.82 84.45L87.71 94.91L75.96 88.12L75.96 103.7L60 112.91L44.04 103.7L44.04 88.12L32.29 94.91L14.18 84.45L14.18 35.55L32.29 25.09L44.04 31.88L44.04 16.3ZM60 16.91L67.46 21.21L67.46 98.79L60 103.09L52.54 98.79L52.54 21.21ZM80.26 39.21L87.71 34.91L97.32 40.45L97.32 79.55L87.71 85.09L80.26 80.79ZM39.74 39.21L39.74 80.79L32.29 85.09L22.68 79.55L22.68 40.45L32.29 34.91Z"/></svg>
-      <span class="name">murmurflow</span>
+  <nav class="zyx-bar zyx-stand" aria-label="Site" data-zyx-reveal>
+    <a class="zyx-bar-up zyx-cell" href="https://zyxworks.com/open-source">
+      <svg class="zyx-mark zyx-mark-draw zyx-hop" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="zyx-mark-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path class="zyx-mark-lines" fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
+      <span>ZyxWorks</span>
+    </a>
+    <span class="zyx-bar-here zyx-cell zyx-cell-ink" aria-current="page">
+      <svg class="mk" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="mk-panels" d="M60 12L73.86 20L73.86 38L87.71 30L101.57 38L101.57 82L87.71 90L73.86 82L73.86 100L60 108L46.14 100L46.14 82L32.29 90L18.43 82L18.43 38L32.29 30L46.14 38L46.14 20Z"/><path fill-rule="evenodd" d="M60 7.09L75.96 16.3L75.96 31.88L87.71 25.09L105.82 35.55L105.82 84.45L87.71 94.91L75.96 88.12L75.96 103.7L60 112.91L44.04 103.7L44.04 88.12L32.29 94.91L14.18 84.45L14.18 35.55L32.29 25.09L44.04 31.88L44.04 16.3ZM60 16.91L67.46 21.21L67.46 98.79L60 103.09L52.54 98.79L52.54 21.21ZM80.26 39.21L87.71 34.91L97.32 40.45L97.32 79.55L87.71 85.09L80.26 80.79ZM39.74 39.21L39.74 80.79L32.29 85.09L22.68 79.55L22.68 40.45L32.29 34.91Z"/></svg>
+      <span>murmurflow</span>
+    </span>
+    <div class="zyx-bar-end">
+      <a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow">Source on GitHub</a>
     </div>
-    <a class="right" href="https://github.com/ZyxWorks/murmurflow">Source on GitHub</a>
   </nav>
 
-  <header id="top">
+  <header id="top" class="zyx-crop zyx-crop-wide" data-zyx-reveal>
     <h1>Write at the<br>speed you talk.</h1>
     <p class="lead">Tap a key twice and talk, tap again to stop. The words land at your cursor
     the moment you stop, in any app. On your machine, for nothing.</p>
 
     <div class="cta">
-      <p class="os mono">macOS, paste into Terminal</p>
-      <div class="cmd">
-        <div class="line"><code id="c1">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.sh)"</code></div>
-        <button data-copy="c1">copy</button>
+      <p class="os zyx-label">macOS, paste into Terminal</p>
+      <div class="cmd zyx-cmd zyx-stand">
+        <div class="zyx-cmd-line" tabindex="0"><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.sh)"</code></div>
+        <button type="button" class="zyx-btn zyx-main zyx-cmd-copy" data-zyx-copy data-done-label="copied">copy</button>
+        <span class="zyx-sr" role="status"></span>
       </div>
-      <p class="os mono">Windows, paste into PowerShell</p>
-      <div class="cmd">
-        <div class="line"><code id="c2">irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex</code></div>
-        <button data-copy="c2">copy</button>
+      <p class="os zyx-label">Windows, paste into PowerShell</p>
+      <div class="cmd zyx-cmd zyx-stand" style="--zyx-reveal-delay: var(--z-d1)">
+        <div class="zyx-cmd-line" tabindex="0"><code>irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex</code></div>
+        <button type="button" class="zyx-btn zyx-main zyx-cmd-copy" data-zyx-copy data-done-label="copied">copy</button>
+        <span class="zyx-sr" role="status"></span>
       </div>
       <p class="after">Then double-tap <kbd>Control</kbd>, say something, and tap once more to
       stop. That is the whole product.</p>
       <p class="after">Open source, MIT licensed. That command runs
-      <a href="https://github.com/ZyxWorks/murmurflow/blob/main/install.sh">a script you can
-      read first</a>, and so is <a href="https://github.com/ZyxWorks/murmurflow">everything it
+      <a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow/blob/main/install.sh">a script you can
+      read first</a>, and so is <a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow">everything it
       installs</a>.</p>
     </div>
   </header>
 
-  <section>
-    <h2>Why bother</h2>
-    <div class="stats">
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
+    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Why bother</span></h2>
+    <div class="stats zyx-grid zyx-grid-wide zyx-stand">
       <div class="stat">
         <div class="n">150<small>wpm</small></div>
         <div class="l">how fast you speak, without trying</div>
@@ -401,16 +196,16 @@
         <div class="l">MIT licensed, with no paid tier above it</div>
       </div>
     </div>
-    <p class="punch">A 200-word message is <strong>five minutes</strong> of typing. Say it instead
-    and you are done in <strong>eighty seconds</strong>, hands still on the desk. Ten of those a
+    <p class="punch">A 200-word message is <strong class="zyx-marker">five minutes</strong> of typing. Say it instead
+    and you are done in <strong class="zyx-marker" style="--zyx-reveal-delay: var(--z-d3)">eighty seconds</strong>, hands still on the desk. Ten of those a
     day is most of an hour back, every day.</p>
     <p class="note">Conversational speech runs about 130 to 150 words a
     minute, and an average typist about 40.</p>
   </section>
 
-  <section>
-    <h2>What you are not paying for</h2>
-    <div class="facts">
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
+    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>What you are not paying for</span></h2>
+    <div class="facts zyx-grid zyx-grid-wide zyx-grid-fill zyx-stand">
       <div class="fact"><strong>No subscription</strong><span>Cloud dictation bills you every month for as long as you use it. This has no plan to upgrade into.</span></div>
       <div class="fact"><strong>No account</strong><span>Nothing to sign up for, nothing to log into, nothing to cancel later.</span></div>
       <div class="fact"><strong>No server</strong><span>whisper.cpp transcribes on your own machine. Your voice is never uploaded anywhere.</span></div>
@@ -418,13 +213,13 @@
     </div>
   </section>
 
-  <section>
-    <h2>The text lands the moment you stop</h2>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
+    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>The text lands the moment you stop</span></h2>
     <p class="punch">Tap twice, talk, tap again. The whole transcript pastes at your cursor at
-    once, about <strong>two seconds</strong> after you stop - there is nothing typed while
+    once, about <strong class="zyx-marker">two seconds</strong> after you stop - there is nothing typed while
     you talk to land in the wrong place if you move the cursor mid-sentence.</p>
-    <div class="scroll">
-      <table>
+    <div class="zyx-table-wrap">
+      <table class="zyx-table zyx-table-num">
         <thead><tr><th>step</th><th>seconds</th></tr></thead>
         <tbody>
           <tr><td>warm transcription, model resident</td><td>2.3</td></tr>
@@ -439,9 +234,9 @@
     hundredth.</p>
   </section>
 
-  <section>
-    <h2>What it does not do</h2>
-    <ul>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
+    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>What it does not do</span></h2>
+    <ul class="zyx-rows">
       <li><strong>No compiled helper.</strong> Key state is polled through stdlib <code>ctypes</code>. No Xcode, no signing, no notarization.</li>
       <li><strong>No always-on microphone.</strong> Nothing listens between sentences, and a clip you forget about closes itself after fifteen seconds of quiet - pasting what you said rather than throwing it away.</li>
       <li><strong>No wall of settings.</strong> A small waveform while the microphone is open, and a soft pulse while it transcribes. No sounds, no presets.</li>
@@ -450,78 +245,82 @@
     </ul>
   </section>
 
-  <section>
-    <h2>Privacy, concretely</h2>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
+    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Privacy, concretely</span></h2>
     <p>Your voice is transcribed by your own machine and <strong>the recording is discarded the
     moment that is done</strong>, before anything else happens to it. The microphone closes with
     the key - and by itself after fifteen seconds of quiet, so it cannot be left open.</p>
     <p>The transcript is never inspected, filtered, or written down. It is pasted through your
     clipboard once, and whatever was there before is put back right after. Nothing here makes a
     network request except the one-off model download.</p>
-    <p class="after"><a href="https://github.com/ZyxWorks/murmurflow#readme">The source is
+    <p class="after"><a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow#readme">The source is
     public, and so is every claim on this page.</a></p>
   </section>
 
-  <section>
-    <h2>Plug your own agent in</h2>
-    <ul>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
+    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Plug your own agent in</span></h2>
+    <ul class="zyx-rows">
       <li><strong>Borrow the key.</strong> <code>murmurflow trigger</code> prints the key it is on. <code>murmurflow pause --who "your agent's voice chat"</code> stands it down while your agent owns it, and the pause expires by itself.</li>
       <li><strong>Reuse the warm model.</strong> While dictation is on, whisper.cpp's own <code>whisper-server</code> stays loaded on <code>127.0.0.1:8479</code>.</li>
       <li><strong>Check against the measurements.</strong> <code>voice-contract.json</code> is the measured record, and the speech and gesture files are stdlib-only and yours to vendor.</li>
     </ul>
-    <p class="after"><a href="https://github.com/ZyxWorks/murmurflow#plug-your-own-agent-in">How, in the README.</a></p>
+    <p class="after"><a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow#plug-your-own-agent-in">How, in the README.</a></p>
   </section>
 
   <!-- The studio pitch. This page is the widest-reaching thing ZyxWorks publishes, and a visitor
        who likes MurmurFlow enough to install it is exactly the visitor worth telling about the
-       paid work. No new CSS: it reuses the .facts grid and .after that the sections above use. -->
-  <section>
-    <h2>Who builds this</h2>
-    <p><strong><a href="https://zyxworks.com">ZyxWorks</a></strong> is a product studio and forward
+       paid work. No new CSS: it reuses the facts grid and .after that the sections above use. -->
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
+    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Who builds this</span></h2>
+    <p><strong><a class="zyx-link" href="https://zyxworks.com">ZyxWorks</a></strong> is a product studio and forward
     deployed engineering practice. MurmurFlow is one of the tools we built for our own work and gave
     away. The paid work is putting the same engineering inside a company.</p>
-    <div class="facts">
+    <div class="facts zyx-grid zyx-grid-wide zyx-grid-fill zyx-stand">
       <div class="fact">
-        <strong><a href="https://zyxworks.com/#setup">Forward deployed engineering</a></strong>
+        <strong><a class="zyx-link" href="https://zyxworks.com/#setup">Forward deployed engineering</a></strong>
         <span>We set up one process with you on Zyx and hand it over to your own people after 90 days.</span>
       </div>
     </div>
-    <p class="after"><a class="pill" href="https://zyxworks.com">What we do for companies &rarr;</a></p>
+    <p class="after"><a class="zyx-btn zyx-push" href="https://zyxworks.com">What we do for companies &rarr;</a></p>
   </section>
 
 </div>
 
-<footer>
+<footer class="zyx-rule" data-zyx-reveal>
   <div class="shell">
-    <div class="foot-top">
-      <div>
-        <a class="lockup" href="https://zyxworks.com/">
-          <svg class="mk" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="mk-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
-          <span class="name">ZyxWorks</span>
+    <div class="zyx-foot zyx-foot-stack zyx-stand" style="--zyx-foot-cols: 3">
+      <div class="zyx-foot-brand">
+        <a class="zyx-lockup" href="https://zyxworks.com/">
+          <svg class="zyx-mark zyx-mark-draw" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="zyx-mark-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path class="zyx-mark-lines" fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
+          <span>ZyxWorks</span>
         </a>
-        <p class="tagline">A product studio and forward deployed engineering practice.
+        <p>A product studio and forward deployed engineering practice.
         MurmurFlow is one of the things we built for ourselves and gave away.</p>
       </div>
-      <div class="col">
-        <h4>Product</h4>
-        <a href="https://github.com/ZyxWorks/murmurflow">Source</a>
-        <a href="https://github.com/ZyxWorks/murmurflow#readme">Docs</a>
-        <a href="https://github.com/ZyxWorks/murmurflow/issues">Issues</a>
+      <div class="zyx-foot-col">
+        <h2 class="zyx-label">Product</h2>
+        <ul role="list" class="zyx-cells">
+          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow">Source<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow#readme">Docs<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow/issues">Issues<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+        </ul>
       </div>
-      <div class="col">
-        <h4>Studio</h4>
-        <a href="https://zyxworks.com/open-source">Our other tools</a>
-        <a href="https://zyxworks.com">What we do for companies</a>
+      <div class="zyx-foot-col">
+        <h2 class="zyx-label">Studio</h2>
+        <ul role="list" class="zyx-cells">
+          <li><a class="zyx-cell" href="https://zyxworks.com/open-source">Our other tools<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+          <li><a class="zyx-cell" href="https://zyxworks.com">What we do for companies<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+        </ul>
       </div>
-      <div class="col">
-        <h4>Legal</h4>
-        <a href="https://github.com/ZyxWorks/murmurflow/blob/main/LICENSE">MIT licence</a>
-        <a href="https://zyxworks.com/legal#privacy">Privacy</a>
-        <a href="https://zyxworks.com/legal#imprint">Imprint</a>
+      <div class="zyx-foot-col">
+        <h2 class="zyx-label">Legal</h2>
+        <ul role="list" class="zyx-cells">
+          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow/blob/main/LICENSE">MIT licence<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+          <li><a class="zyx-cell" href="https://zyxworks.com/legal#privacy">Privacy<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+          <li><a class="zyx-cell" href="https://zyxworks.com/legal#imprint">Imprint<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+        </ul>
       </div>
-    </div>
-    <div class="copyright">
-      &copy; <span id="year">2026</span> ZYXWORKS &middot; FORWARD DEPLOYED AI FOR YOUR COMPANY
+      <p class="zyx-foot-legal">&copy; <span id="year">2026</span> ZYXWORKS &middot; FORWARD DEPLOYED AI FOR YOUR COMPANY</p>
     </div>
   </div>
 </footer>
@@ -530,21 +329,10 @@
 (function (d) {
   d.getElementById("year").textContent = new Date().getFullYear();
 
-  // Copy button: an inverted "copied" block for 1.2 s.
-  d.querySelectorAll("[data-copy]").forEach(function (b) {
-    b.addEventListener("click", function () {
-      navigator.clipboard.writeText(d.getElementById(b.dataset.copy).textContent).then(function () {
-        b.textContent = "copied"; b.classList.add("ok");
-        setTimeout(function () { b.textContent = "copy"; b.classList.remove("ok"); }, 1200);
-      });
-    });
-  });
-
-  // Scroll-in: "in" goes on a block once, when it comes into view. The CSS does the rest.
-  if (!d.documentElement.classList.contains("js")) return;
-  var move = matchMedia("(prefers-reduced-motion: no-preference)").matches;
-  // A number counts up to its value in 8 steps, after its block has landed. The start has as many
-  // digits as the end, so nothing next to it shifts.
+  // A number counts up to its value in 8 steps, once, after its grid has landed. The start has as
+  // many digits as the end, so nothing next to it shifts. The rest of the scroll-in is the
+  // library's (ui/reveal.js).
+  if (!("IntersectionObserver" in window) || !matchMedia("(prefers-reduced-motion: no-preference)").matches) return;
   function tick(n) {
     var t = n.firstChild, v = +t.data, lo = Math.pow(10, t.data.length - 1), i = -6;
     if (!v) return;
@@ -557,11 +345,10 @@
   var io = new IntersectionObserver(function (es) {
     es.forEach(function (e) {
       if (!e.isIntersecting) return;
-      io.unobserve(e.target); e.target.classList.add("in");
-      if (move && e.target.matches(".stats")) e.target.querySelectorAll(".n").forEach(tick);
+      io.unobserve(e.target); e.target.querySelectorAll(".n").forEach(tick);
     });
   }, { rootMargin: "0px 0px -8% 0px" });
-  d.querySelectorAll("nav,section,.stats,.facts,.cmd,.foot-top,.punch").forEach(function (el) { io.observe(el); });
+  d.querySelectorAll(".stats").forEach(function (el) { io.observe(el); });
 })(document);
 </script>
 

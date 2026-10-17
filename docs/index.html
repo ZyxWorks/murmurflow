@@ -56,8 +56,6 @@
      brand default. */
   :root { --head-weight: 800; --head-track: -0.03em; --page: 820px; }
 
-  /* The section bands run the full window width; clip keeps them from scrolling sideways. */
-  html { overflow-x: clip; }
   body { margin: 0; font-size: 17px; line-height: 1.6; }
   /* Element defaults of this page's prose. They sit in the library's base layer, so a library
      part on the same element (a label on a <p>, a button on an <a>) still wins. */
@@ -67,19 +65,16 @@
     code { font-family: var(--z-font-mono); font-size: 0.9em; }
   }
   .shell { max-width: var(--page); margin: 0 auto; padding: 0 24px; }
-  /* A section is a band as wide as the window: white and ground take turns, and a window-wide ink
+  /* A section is a band as wide as the window (zyx-band): white and ground take turns, and a window-wide ink
      rule (zyx-rule zyx-rule-bleed) opens it. The band is drawn behind the text column, so the
      column never moves. */
   section { padding: 66px 0 68px; }
-  section::after {
-    content: ""; position: absolute; z-index: -1; top: calc(var(--z-bw-rule) * -1); bottom: 0; left: calc(50% - 50vw); width: 100vw;
-    background: var(--z-ground);
-  }
-  section:nth-of-type(odd)::after { background: var(--z-surface); }
+  section { --zyx-band: var(--z-ground); }
+  section:nth-of-type(odd) { --zyx-band: var(--z-surface); }
 
   h1 { font-size: clamp(40px, 8.4vw, 66px); line-height: 1.02; letter-spacing: var(--head-track); margin: 0; font-weight: var(--head-weight); }
   p.lead { font-size: 21px; margin-top: 22px; max-width: 44ch; }
-  /* Local change: a link in this page's grey prose is ink, so it can be found without the underline. */
+  /* zyx-ui-allow: a link in this page's grey prose is ink, so it can be found without the underline */
   .zyx-link { color: var(--z-ink); }
 
   /* The product's own glyph (the ZyxWorks cube is the library's zyx-mark): a yellow shape under one
@@ -88,12 +83,6 @@
      restarted draw would leave the cell empty. */
   .mk { flex: none; box-sizing: content-box; padding: 3px; background: var(--z-mark-paper); fill: var(--z-mark-line); }
   .mk-panels { fill: var(--z-cube); }
-  /* The cube in a hovered cell hops (zyx-hop). Local change: the draw-in (zyx-mark-draw) stays in
-     the list, so the cube is not drawn in again when the hover ends; the zyx-hop class alone would
-     replace the draw. */
-  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    .zyx-cell:hover > .zyx-mark-draw { animation: zyx-mark-draw var(--z-d3) steps(4, end) 1 both, zyx-hop var(--z-d1) step-end 1; }
-  }
 
   /* --- the bar (zyx-bar): the way up to ZyxWorks, this page as the ink cell, and the source at the
      end. GitHub carries weight because the licence is the pitch: a cell of its own rather than a
@@ -105,20 +94,13 @@
      the box starts 14px above the nav bar (which sits outside the header) and ends 14px under the
      last line of the intro. */
   header { padding: 76px 0 44px; --zyx-crop-inset: -62px -14px 46px; }
-  /* Off on a small phone, where they would touch the edge. The library has no switch for this yet. */
-  @media (max-width: 480px) { header.zyx-crop::before { display: none; } }
 
   /* --- the call to action --- */
   .cta { margin-top: 34px; }
   /* The room around a command box (zyx-cmd, standing on the block shadow with zyx-stand). */
   .cmd { margin: 10px 0 6px; }
-  /* The copy button is the main button (zyx-main): it stands on its yellow shadow, and on hover
-     and keyboard focus it is pressed in and turns yellow. Local change: after a copy (copy.js sets
-     data-done) it stays pressed and yellow for a moment, also on a phone with no hover. The
-     library's done state is for the second button (zyx-push) only. */
-  .zyx-cmd-copy.zyx-main[data-done] {
-    border-color: var(--z-on-signal); background: var(--z-signal); color: var(--z-on-signal); box-shadow: var(--z-shadow-cta-down);
-  }
+  /* The copy button is the main button (zyx-main): it stands on its yellow shadow, and on hover,
+     keyboard focus and after a copy it is pressed in and turns yellow. */
   /* The label over a command box (zyx-label). */
   .os { margin: 24px 0 0; }
   .after { font-size: 15px; margin-top: 22px; }
@@ -139,12 +121,13 @@
   .fact strong { display: block; font-size: 16px; margin-bottom: 4px; }
   .fact span { color: var(--z-muted); font-size: 15px; }
   @media (max-width: 600px) { .stats, .facts { grid-template-columns: minmax(0, 1fr); } }
+  /* zyx-ui-allow: room above a table that follows a punch line, as above the facts */
   .punch + .zyx-table-wrap, p + .facts { margin-top: 28px; }
 
   /* Tables (zyx-table). The last column is the measured number, right-aligned ink mono (zyx-table-num). */
   .note { font-size: 14px; color: var(--z-faint); margin-top: 18px; }
 
-  /* The lists of what it does and does not do (zyx-rows), in this page's grey prose. */
+  /* zyx-ui-allow: the lists of what it does and does not do (zyx-rows) are in this page's grey prose */
   .zyx-rows > li { color: var(--z-muted); font-size: 16px; }
 
   /* --- footer: the library's footer (zyx-foot, standing) on a raised band as wide as the window --- */
@@ -158,7 +141,7 @@
 
   <nav class="zyx-bar zyx-stand" aria-label="Site" data-zyx-reveal>
     <a class="zyx-bar-up zyx-cell" href="https://zyxworks.com/open-source">
-      <svg class="zyx-mark zyx-mark-draw" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="zyx-mark-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path class="zyx-mark-lines" fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
+      <svg class="zyx-mark zyx-mark-draw zyx-hop" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="zyx-mark-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path class="zyx-mark-lines" fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
       <span>ZyxWorks</span>
     </a>
     <span class="zyx-bar-here zyx-cell zyx-cell-ink" aria-current="page">
@@ -170,7 +153,7 @@
     </div>
   </nav>
 
-  <header id="top" class="zyx-crop" data-zyx-reveal>
+  <header id="top" class="zyx-crop zyx-crop-wide" data-zyx-reveal>
     <h1>Write at the<br>speed you talk.</h1>
     <p class="lead">Tap a key twice and talk, tap again to stop. The words land at your cursor
     the moment you stop, in any app. On your machine, for nothing.</p>
@@ -197,7 +180,7 @@
     </div>
   </header>
 
-  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Why bother</span></h2>
     <div class="stats zyx-grid zyx-grid-wide zyx-stand">
       <div class="stat">
@@ -220,7 +203,7 @@
     minute, and an average typist about 40.</p>
   </section>
 
-  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>What you are not paying for</span></h2>
     <div class="facts zyx-grid zyx-grid-wide zyx-grid-fill zyx-stand">
       <div class="fact"><strong>No subscription</strong><span>Cloud dictation bills you every month for as long as you use it. This has no plan to upgrade into.</span></div>
@@ -230,7 +213,7 @@
     </div>
   </section>
 
-  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>The text lands the moment you stop</span></h2>
     <p class="punch">Tap twice, talk, tap again. The whole transcript pastes at your cursor at
     once, about <strong class="zyx-marker">two seconds</strong> after you stop - there is nothing typed while
@@ -251,7 +234,7 @@
     hundredth.</p>
   </section>
 
-  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>What it does not do</span></h2>
     <ul class="zyx-rows">
       <li><strong>No compiled helper.</strong> Key state is polled through stdlib <code>ctypes</code>. No Xcode, no signing, no notarization.</li>
@@ -262,7 +245,7 @@
     </ul>
   </section>
 
-  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Privacy, concretely</span></h2>
     <p>Your voice is transcribed by your own machine and <strong>the recording is discarded the
     moment that is done</strong>, before anything else happens to it. The microphone closes with
@@ -274,7 +257,7 @@
     public, and so is every claim on this page.</a></p>
   </section>
 
-  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Plug your own agent in</span></h2>
     <ul class="zyx-rows">
       <li><strong>Borrow the key.</strong> <code>murmurflow trigger</code> prints the key it is on. <code>murmurflow pause --who "your agent's voice chat"</code> stands it down while your agent owns it, and the pause expires by itself.</li>
@@ -287,7 +270,7 @@
   <!-- The studio pitch. This page is the widest-reaching thing ZyxWorks publishes, and a visitor
        who likes MurmurFlow enough to install it is exactly the visitor worth telling about the
        paid work. No new CSS: it reuses the facts grid and .after that the sections above use. -->
-  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
+  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Who builds this</span></h2>
     <p><strong><a class="zyx-link" href="https://zyxworks.com">ZyxWorks</a></strong> is a product studio and forward
     deployed engineering practice. MurmurFlow is one of the tools we built for our own work and gave
@@ -306,7 +289,7 @@
 
 <footer class="zyx-rule" data-zyx-reveal>
   <div class="shell">
-    <div class="zyx-foot zyx-stand" style="--zyx-foot-cols: 3">
+    <div class="zyx-foot zyx-foot-stack zyx-stand" style="--zyx-foot-cols: 3">
       <div class="zyx-foot-brand">
         <a class="zyx-lockup" href="https://zyxworks.com/">
           <svg class="zyx-mark zyx-mark-draw" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="zyx-mark-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path class="zyx-mark-lines" fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>

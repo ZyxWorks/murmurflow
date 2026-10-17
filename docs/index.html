@@ -25,12 +25,12 @@
   product makes.
 
   The look comes from @zyxworks/ui (repo ZyxWorks/ui): tokens, the self-hosted Atkinson Hyperlegible
-  Next and Mono, and every shared part (cell, grid, stand, main and second button, eyebrow, rule,
-  label, rows, table, marker, crop marks, link, arrow). ui/ is a copy written by
-  `npm run ship -- <this repo> --static docs/ui` in the library repo; never edit it by hand. Below is
-  only what belongs to this page: its layout, the hero, the full-width section bands, the command
-  boxes and the scroll-in. Every colour, edge, shadow and time reads var(--z-*). The page is light
-  only, so it never sets data-theme.
+  Next and Mono, and every shared part (bar, cell, grid, stand, main and second button, eyebrow, rule,
+  label, rows, table, marker, crop marks, command and its copy button, footer, link, arrow, the
+  ZyxWorks mark and the scroll-in). ui/ is a copy written by `npm run ship -- <this repo> --static
+  docs/ui` in the library repo; never edit it by hand. Below is only what belongs to this page: its
+  layout, the hero, the full-width section bands and the product's own mark. Every colour, edge,
+  shadow and time reads var(--z-*). The page is light only, so it never sets data-theme.
 
   Yellow is a highlighter here: the panels of the cube, the shadow the copy buttons stand on and the
   marked figures. It is never a text colour on the light ground and never a page background.
@@ -40,21 +40,22 @@
   cells with no gaps. The main button stands on its yellow shadow and turns yellow under the
   pointer; every other control is pressed in on hover and pressed deeper while clicked.
 
-  Movement is short and runs once: a block lands on its shadow and a section rule draws when it
-  scrolls in, an icon hops, an arrow steps right, the yellow marker wipes in, the numbers tick up
-  and the caret blinks three times. Everything that waits for a scroll is behind the "js" class on
-  <html>, so the page is complete without script, and all of it is inside
-  prefers-reduced-motion: no-preference, so reduced motion shows the end state and nothing moves.
+  Movement is short and runs once: the mark draws in, a block lands on its shadow and a section
+  rule draws when it scrolls in, an icon hops, an arrow steps right, the yellow marker wipes in, the
+  numbers tick up and the caret blinks three times. What waits for a scroll is the library's reveal
+  (data-zyx-reveal and ui/reveal.js), so the page is complete without script, and with reduced
+  motion the library shows the end state and nothing moves.
 -->
 <link rel="stylesheet" href="ui/zyx/fonts.css">
 <link rel="stylesheet" href="ui/zyx/zyx-ui.css">
+<script src="ui/reveal.js" defer></script>
+<script src="ui/copy.js" defer></script>
 <style>
   /* --- own identity ---
      What is this page's own and not the library's: the type is a step bolder and tighter than the
      brand default. */
   :root { --head-weight: 800; --head-track: -0.03em; --page: 820px; }
 
-  *, *::before, *::after { box-sizing: border-box; }
   /* The section bands run the full window width; clip keeps them from scrolling sideways. */
   html { overflow-x: clip; }
   body { margin: 0; font-size: 17px; line-height: 1.6; }
@@ -66,11 +67,10 @@
     code { font-family: var(--z-font-mono); font-size: 0.9em; }
   }
   .shell { max-width: var(--page); margin: 0 auto; padding: 0 24px; }
-  /* A section is a band as wide as the window: white and ground take turns, and a full-width ink
-     rule (zyx-rule) opens it. Local change: the library's rule is as wide as its box; here it runs
-     the full window width. The band is drawn behind the text column, so the column never moves. */
+  /* A section is a band as wide as the window: white and ground take turns, and a window-wide ink
+     rule (zyx-rule zyx-rule-bleed) opens it. The band is drawn behind the text column, so the
+     column never moves. */
   section { padding: 66px 0 68px; }
-  section.zyx-rule::before { left: calc(50% - 50vw); right: auto; width: 100vw; }
   section::after {
     content: ""; position: absolute; z-index: -1; top: calc(var(--z-bw-rule) * -1); bottom: 0; left: calc(50% - 50vw); width: 100vw;
     background: var(--z-ground);
@@ -78,103 +78,45 @@
   section:nth-of-type(odd)::after { background: var(--z-surface); }
 
   h1 { font-size: clamp(40px, 8.4vw, 66px); line-height: 1.02; letter-spacing: var(--head-track); margin: 0; font-weight: var(--head-weight); }
-  /* A section label (zyx-eyebrow-n): its number, a solid ink square, its name. */
-  h2.zyx-eyebrow { margin: 0 0 28px; }
   p.lead { font-size: 21px; margin-top: 22px; max-width: 44ch; }
   /* Local change: a link in this page's grey prose is ink, so it can be found without the underline. */
   .zyx-link { color: var(--z-ink); }
 
-  /* The cube is two paths: a yellow hexagon, and over it one filled shape in the text colour
-     (outline, xyz axis and three open panels), so the yellow shows through the panels. One
-     draw-in at load (the one mark motion the brand allows; the library has no class for it yet).
-     The wipe sits on the svg, so it covers both paths. */
-  .mk { fill: currentColor; flex: none; }
-  .mk-panels { fill: var(--z-icon-fill); }
-  /* Brand rule: the lines are ink on every ground. On the ink cell the mark sits in a white box. */
-  .zyx-cell-ink > .mk { box-sizing: content-box; padding: 3px; background: var(--z-surface); fill: var(--z-ink); }
-  @keyframes draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
-  /* The marker wipes in behind its words (the library's zyx-marker has no motion of its own yet). */
-  @keyframes mark { from { background-size: 0 100%; } }
-  @media (prefers-reduced-motion: no-preference) {
-    .mk { animation: draw var(--z-d3) var(--z-ease) both; }
-    /* The product mark sits on the ink cell and never draws in: a restarted draw would leave the cell empty. */
-    nav .pm { animation: none; }
-    /* The icon of a hovered cell hops (the library's zyx-hop motion). "draw" stays in the list, so
-       the mark is not drawn in again when the hover ends; that is why this is not the zyx-hop class. */
-    .zyx-cell:hover > .mk:not(.pm) { animation: draw var(--z-d3) var(--z-ease) both, zyx-hop var(--z-d1) step-end 1; }
-
-    /* Scroll-in, once. The script puts "in" on a block when it comes into view. Only the library's
-       motions are used: a block lands on its shadow (zyx-land), a section's rule draws from the left
-       (zyx-rule), then its ink square stamps in (zyx-square). Until "in" is set they wait. */
-    .js .zyx-stand.in { animation: zyx-land var(--z-d2) step-end 1 backwards; }
-    .js .cmd.in ~ .cmd.in { animation-delay: var(--z-d1); }
-    .js section.zyx-rule:not(.in)::before { animation: none; scale: 0 1; }
-    .js section:not(.in) .zyx-eyebrow-n::after { scale: 0; }
-    .js section.in .zyx-eyebrow-n::after { animation: zyx-square var(--z-d1) step-end var(--z-d2) 1 backwards; }
-    /* The yellow marker wipes in behind its words, one after the other. */
-    .js .punch:not(.in) .zyx-marker { background-size: 0 100%; }
-    .js .punch.in .zyx-marker { animation: mark var(--z-d2) steps(4) var(--z-d1) backwards; }
-    .js .punch.in .zyx-marker ~ .zyx-marker { animation-delay: calc(var(--z-d1) + var(--z-d3)); }
-    /* The caret blinks three times (zyx-blink) after its box has landed, then it stays solid. */
-    .js .cmd.in code::after { animation: zyx-blink var(--z-d2) step-end var(--z-d3) 3 backwards; }
-    .js .cmd.in ~ .cmd.in code::after { animation-delay: calc(var(--z-d3) + var(--z-d2) * 3); }
+  /* The product's own glyph (the ZyxWorks cube is the library's zyx-mark): a yellow shape under one
+     filled shape of ink lines, so the yellow shows through. Brand rule: the lines are ink on every
+     ground, so on the ink cell of the bar the glyph sits in a white box. It never draws in: a
+     restarted draw would leave the cell empty. */
+  .mk { flex: none; box-sizing: content-box; padding: 3px; background: var(--z-mark-paper); fill: var(--z-mark-line); }
+  .mk-panels { fill: var(--z-cube); }
+  /* The cube in a hovered cell hops (zyx-hop). Local change: the draw-in (zyx-mark-draw) stays in
+     the list, so the cube is not drawn in again when the hover ends; the zyx-hop class alone would
+     replace the draw. */
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .zyx-cell:hover > .zyx-mark-draw { animation: zyx-mark-draw var(--z-d3) steps(4, end) 1 both, zyx-hop var(--z-d1) step-end 1; }
   }
 
-  /* --- nav: one ruled bar (zyx-stand) of three cells (zyx-cell) --- */
-  nav { display: flex; align-items: stretch; min-height: 48px; margin-top: 26px; }
-  .lockup { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; }
-  nav .lockup { display: flex; align-items: stretch; flex: 1; min-width: 0; gap: 0; }
-  .lockup .name { font-weight: var(--z-wm-weight); letter-spacing: var(--z-wm-track); font-size: 17px; }
-  /* The parent half of the breadcrumb: muted, so the page you are ON is the one that reads first. */
-  .lockup .up { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-right: var(--z-bw-rule) solid var(--z-ink); color: var(--z-muted); font-weight: var(--z-wm-weight); letter-spacing: var(--z-wm-track); font-size: 17px; text-decoration: none; }
-  /* The page you are on is the chosen ink cell (zyx-cell-ink, aria-current): white text, its own
-     mark. The ink edge of the cell stands in for the "/" of the breadcrumb, so the crumb is not shown. */
-  .lockup .crumb { display: none; }
-  .lockup .here { display: flex; align-items: center; gap: 10px; padding: 0 14px; }
-  /* GitHub carries weight because the licence is the pitch: a cell of its own rather than a word
-     in a corner. Not the main button, though. That is the install, and a page with two primary
-     buttons has none. */
-  nav .right { display: flex; align-items: center; padding: 0 16px; border-left: var(--z-bw-rule) solid var(--z-ink); font-size: 13.5px; font-weight: 700; white-space: nowrap; text-decoration: none; }
-  /* On a phone the WAY BACK is what survives, not the page you are already on. An arrow, because a
-     lockup on its own reads as a title rather than as a door. The cell is as tall as the bar, so the
-     tap target is 44px. */
-  @media (max-width: 560px) {
-    .lockup .here { display: none; }
-    .lockup .up { flex: 1; min-width: 0; padding: 0 12px; border-right: 0; }
-    .lockup .up::before { content: "\2190"; content: "\2190" / ""; font-weight: 400; }
-    nav .right { padding: 0 12px; }
-  }
-  @media (max-width: 360px) { nav .right { white-space: normal; line-height: 1.2; padding: 6px 10px; } }
+  /* --- the bar (zyx-bar): the way up to ZyxWorks, this page as the ink cell, and the source at the
+     end. GitHub carries weight because the licence is the pitch: a cell of its own rather than a
+     word in a corner. Not the main button, though. That is the install, and a page with two
+     primary buttons has none. --- */
+  nav { margin-top: 26px; }
 
   /* The one print ornament: crop marks at the four corners of the head (zyx-crop). Local change:
      the box starts 14px above the nav bar (which sits outside the header) and ends 14px under the
-     last line of the intro. Off on a small phone, where they would touch the edge. */
-  header { padding: 76px 0 44px; }
-  header.zyx-crop::before { inset: -62px -14px 46px; }
+     last line of the intro. */
+  header { padding: 76px 0 44px; --zyx-crop-inset: -62px -14px 46px; }
+  /* Off on a small phone, where they would touch the edge. The library has no switch for this yet. */
   @media (max-width: 480px) { header.zyx-crop::before { display: none; } }
 
   /* --- the call to action --- */
   .cta { margin-top: 34px; }
-  /* A command box stands on the block shadow (zyx-stand). */
-  .cmd { display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 16px; margin: 10px 0 6px; }
-  /* The COMMAND scrolls, not the row: a copy button that scrolls out of sight with a long install
-     line is a copy button nobody finds on a phone. */
-  .cmd .line { flex: 1; min-width: 0; overflow-x: auto; }
-  .cmd code { line-height: 1.5; color: var(--z-ink); white-space: pre; font-size: 13.5px; }
-  /* A block caret after the command. Drawn by CSS, so it is not part of what "copy" copies. When
-     the command is longer than its box the caret sticks to the right edge, on a white gap, instead
-     of being cut in half or scrolled out of sight. */
-  .cmd code::after {
-    content: ""; display: inline-block; width: 0.55em; height: 1.1em; margin-left: 6px; vertical-align: -0.2em;
-    background: var(--z-ink); position: sticky; right: 0; box-shadow: -6px 0 0 var(--z-surface);
-  }
+  /* The room around a command box (zyx-cmd, standing on the block shadow with zyx-stand). */
+  .cmd { margin: 10px 0 6px; }
   /* The copy button is the main button (zyx-main): it stands on its yellow shadow, and on hover
-     and keyboard focus it is pressed in and turns yellow. Local: mono words, like the command
-     beside it, and a fixed width so "copy" and "copied" do not change its size. */
-  .cmd .zyx-btn { min-width: calc(6ch + 32px); font-family: var(--z-font-mono); font-weight: 700; }
-  /* Local change: after a copy it stays pressed and yellow for a moment, also on a phone with no
-     hover. The library's main button has no "done" state yet. */
-  .cmd .zyx-main.ok {
+     and keyboard focus it is pressed in and turns yellow. Local change: after a copy (copy.js sets
+     data-done) it stays pressed and yellow for a moment, also on a phone with no hover. The
+     library's done state is for the second button (zyx-push) only. */
+  .zyx-cmd-copy.zyx-main[data-done] {
     border-color: var(--z-on-signal); background: var(--z-signal); color: var(--z-on-signal); box-shadow: var(--z-shadow-cta-down);
   }
   /* The label over a command box (zyx-label). */
@@ -183,10 +125,7 @@
   /* Local change: a key in running text is sized to the 17px prose, not the library's 12px. */
   kbd { font-size: 0.84em; }
 
-  /* --- ruled grids that stand (zyx-grid + zyx-stand). --- */
-  .zyx-grid > * { min-width: 0; }
-
-  /* --- the numbers that do the selling --- */
+  /* --- the numbers that do the selling: a ruled grid that stands (zyx-grid + zyx-stand) --- */
   .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .stat { padding: 22px 20px 20px; }
   .stat .n { font-variant-numeric: tabular-nums; font-size: clamp(34px, 6vw, 46px); font-weight: var(--head-weight); letter-spacing: var(--head-track); line-height: 1; color: var(--z-ink); }
@@ -202,71 +141,52 @@
   @media (max-width: 600px) { .stats, .facts { grid-template-columns: minmax(0, 1fr); } }
   .punch + .zyx-table-wrap, p + .facts { margin-top: 28px; }
 
-  /* Tables (zyx-table). Local: the last column is the measured number, right-aligned ink mono. */
-  .zyx-table { width: 100%; }
-  .zyx-table :is(td, th):last-child { text-align: right; }
-  .zyx-table td:last-child { font-family: var(--z-font-mono); color: var(--z-ink); }
+  /* Tables (zyx-table). The last column is the measured number, right-aligned ink mono (zyx-table-num). */
   .note { font-size: 14px; color: var(--z-faint); margin-top: 18px; }
 
   /* The lists of what it does and does not do (zyx-rows), in this page's grey prose. */
   .zyx-rows > li { color: var(--z-muted); font-size: 16px; }
 
-  /* --- footer: one ruled grid that stands; the copyright line is its bottom row --- */
+  /* --- footer: the library's footer (zyx-foot, standing) on a raised band as wide as the window --- */
   footer { background: var(--z-raised); }
   footer .shell { padding-top: 56px; padding-bottom: 72px; }
-  .foot-top { grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(0, 1fr)); }
-  .copyright { grid-column: 1 / -1; }
-  @media (max-width: 640px) {
-    .foot-top { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .foot-top > :first-child, .foot-top > .col:nth-child(4) { grid-column: 1 / -1; }
-  }
-  /* Every cell opens with a head row of the same height, and the rule under the heads is 2px so it
-     runs through: under the lockup it is a border, under a column label it is the 1px line of
-     zyx-cells made one step thicker. */
-  footer .lockup, .col .zyx-label { display: flex; align-items: center; min-height: 44px; margin: 0; padding: 0 14px; }
-  footer .lockup { border-bottom: var(--z-bw-rule) solid var(--z-ink); }
-  .col > .zyx-label + * { border-top-width: var(--z-bw-rule); }
-  .tagline { font-size: 14.5px; margin: 0; padding: 14px 14px 18px; max-width: 42ch; }
-  /* A link is a row as wide as its cell (zyx-cell), with an arrow that steps right when the row is hovered (zyx-arrow). */
-  .col .zyx-cell { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 40px; padding: 8px 14px; font-size: 14.5px; line-height: 1.3; text-decoration: none; }
-  .copyright { padding: 13px 14px; background-color: var(--z-ground); font-family: var(--z-font-mono); font-size: 12px; color: var(--z-faint); }
 </style>
-<script>if ("IntersectionObserver" in window) document.documentElement.className = "js";</script>
 </head>
 <body>
 
 <div class="shell">
 
-  <nav class="zyx-stand">
-    <div class="lockup">
-      <a class="up zyx-cell" href="https://zyxworks.com/open-source">
-        <svg class="mk" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="mk-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
-        <span>ZyxWorks</span>
-      </a>
-      <span class="crumb">/</span>
-      <span class="here zyx-cell zyx-cell-ink" aria-current="page">
-      <svg class="mk pm" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="mk-panels" d="M60 12L73.86 20L73.86 38L87.71 30L101.57 38L101.57 82L87.71 90L73.86 82L73.86 100L60 108L46.14 100L46.14 82L32.29 90L18.43 82L18.43 38L32.29 30L46.14 38L46.14 20Z"/><path fill-rule="evenodd" d="M60 7.09L75.96 16.3L75.96 31.88L87.71 25.09L105.82 35.55L105.82 84.45L87.71 94.91L75.96 88.12L75.96 103.7L60 112.91L44.04 103.7L44.04 88.12L32.29 94.91L14.18 84.45L14.18 35.55L32.29 25.09L44.04 31.88L44.04 16.3ZM60 16.91L67.46 21.21L67.46 98.79L60 103.09L52.54 98.79L52.54 21.21ZM80.26 39.21L87.71 34.91L97.32 40.45L97.32 79.55L87.71 85.09L80.26 80.79ZM39.74 39.21L39.74 80.79L32.29 85.09L22.68 79.55L22.68 40.45L32.29 34.91Z"/></svg>
-      <span class="name">murmurflow</span>
-      </span>
+  <nav class="zyx-bar zyx-stand" aria-label="Site" data-zyx-reveal>
+    <a class="zyx-bar-up zyx-cell" href="https://zyxworks.com/open-source">
+      <svg class="zyx-mark zyx-mark-draw" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="zyx-mark-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path class="zyx-mark-lines" fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
+      <span>ZyxWorks</span>
+    </a>
+    <span class="zyx-bar-here zyx-cell zyx-cell-ink" aria-current="page">
+      <svg class="mk" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="mk-panels" d="M60 12L73.86 20L73.86 38L87.71 30L101.57 38L101.57 82L87.71 90L73.86 82L73.86 100L60 108L46.14 100L46.14 82L32.29 90L18.43 82L18.43 38L32.29 30L46.14 38L46.14 20Z"/><path fill-rule="evenodd" d="M60 7.09L75.96 16.3L75.96 31.88L87.71 25.09L105.82 35.55L105.82 84.45L87.71 94.91L75.96 88.12L75.96 103.7L60 112.91L44.04 103.7L44.04 88.12L32.29 94.91L14.18 84.45L14.18 35.55L32.29 25.09L44.04 31.88L44.04 16.3ZM60 16.91L67.46 21.21L67.46 98.79L60 103.09L52.54 98.79L52.54 21.21ZM80.26 39.21L87.71 34.91L97.32 40.45L97.32 79.55L87.71 85.09L80.26 80.79ZM39.74 39.21L39.74 80.79L32.29 85.09L22.68 79.55L22.68 40.45L32.29 34.91Z"/></svg>
+      <span>murmurflow</span>
+    </span>
+    <div class="zyx-bar-end">
+      <a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow">Source on GitHub</a>
     </div>
-    <a class="right zyx-cell" href="https://github.com/ZyxWorks/murmurflow">Source on GitHub</a>
   </nav>
 
-  <header id="top" class="zyx-crop">
+  <header id="top" class="zyx-crop" data-zyx-reveal>
     <h1>Write at the<br>speed you talk.</h1>
     <p class="lead">Tap a key twice and talk, tap again to stop. The words land at your cursor
     the moment you stop, in any app. On your machine, for nothing.</p>
 
     <div class="cta">
       <p class="os zyx-label">macOS, paste into Terminal</p>
-      <div class="cmd zyx-stand">
-        <div class="line"><code id="c1">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.sh)"</code></div>
-        <button type="button" class="zyx-btn zyx-main" data-copy="c1">copy</button>
+      <div class="cmd zyx-cmd zyx-stand">
+        <div class="zyx-cmd-line" tabindex="0"><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.sh)"</code></div>
+        <button type="button" class="zyx-btn zyx-main zyx-cmd-copy" data-zyx-copy data-done-label="copied">copy</button>
+        <span class="zyx-sr" role="status"></span>
       </div>
       <p class="os zyx-label">Windows, paste into PowerShell</p>
-      <div class="cmd zyx-stand">
-        <div class="line"><code id="c2">irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex</code></div>
-        <button type="button" class="zyx-btn zyx-main" data-copy="c2">copy</button>
+      <div class="cmd zyx-cmd zyx-stand" style="--zyx-reveal-delay: var(--z-d1)">
+        <div class="zyx-cmd-line" tabindex="0"><code>irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex</code></div>
+        <button type="button" class="zyx-btn zyx-main zyx-cmd-copy" data-zyx-copy data-done-label="copied">copy</button>
+        <span class="zyx-sr" role="status"></span>
       </div>
       <p class="after">Then double-tap <kbd>Control</kbd>, say something, and tap once more to
       stop. That is the whole product.</p>
@@ -277,7 +197,7 @@
     </div>
   </header>
 
-  <section class="zyx-rule">
+  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Why bother</span></h2>
     <div class="stats zyx-grid zyx-grid-wide zyx-stand">
       <div class="stat">
@@ -294,13 +214,13 @@
       </div>
     </div>
     <p class="punch">A 200-word message is <strong class="zyx-marker">five minutes</strong> of typing. Say it instead
-    and you are done in <strong class="zyx-marker">eighty seconds</strong>, hands still on the desk. Ten of those a
+    and you are done in <strong class="zyx-marker" style="--zyx-reveal-delay: var(--z-d3)">eighty seconds</strong>, hands still on the desk. Ten of those a
     day is most of an hour back, every day.</p>
     <p class="note">Conversational speech runs about 130 to 150 words a
     minute, and an average typist about 40.</p>
   </section>
 
-  <section class="zyx-rule">
+  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>What you are not paying for</span></h2>
     <div class="facts zyx-grid zyx-grid-wide zyx-grid-fill zyx-stand">
       <div class="fact"><strong>No subscription</strong><span>Cloud dictation bills you every month for as long as you use it. This has no plan to upgrade into.</span></div>
@@ -310,13 +230,13 @@
     </div>
   </section>
 
-  <section class="zyx-rule">
+  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>The text lands the moment you stop</span></h2>
     <p class="punch">Tap twice, talk, tap again. The whole transcript pastes at your cursor at
     once, about <strong class="zyx-marker">two seconds</strong> after you stop - there is nothing typed while
     you talk to land in the wrong place if you move the cursor mid-sentence.</p>
     <div class="zyx-table-wrap">
-      <table class="zyx-table">
+      <table class="zyx-table zyx-table-num">
         <thead><tr><th>step</th><th>seconds</th></tr></thead>
         <tbody>
           <tr><td>warm transcription, model resident</td><td>2.3</td></tr>
@@ -331,7 +251,7 @@
     hundredth.</p>
   </section>
 
-  <section class="zyx-rule">
+  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>What it does not do</span></h2>
     <ul class="zyx-rows">
       <li><strong>No compiled helper.</strong> Key state is polled through stdlib <code>ctypes</code>. No Xcode, no signing, no notarization.</li>
@@ -342,7 +262,7 @@
     </ul>
   </section>
 
-  <section class="zyx-rule">
+  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Privacy, concretely</span></h2>
     <p>Your voice is transcribed by your own machine and <strong>the recording is discarded the
     moment that is done</strong>, before anything else happens to it. The microphone closes with
@@ -354,7 +274,7 @@
     public, and so is every claim on this page.</a></p>
   </section>
 
-  <section class="zyx-rule">
+  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Plug your own agent in</span></h2>
     <ul class="zyx-rows">
       <li><strong>Borrow the key.</strong> <code>murmurflow trigger</code> prints the key it is on. <code>murmurflow pause --who "your agent's voice chat"</code> stands it down while your agent owns it, and the pause expires by itself.</li>
@@ -367,7 +287,7 @@
   <!-- The studio pitch. This page is the widest-reaching thing ZyxWorks publishes, and a visitor
        who likes MurmurFlow enough to install it is exactly the visitor worth telling about the
        paid work. No new CSS: it reuses the facts grid and .after that the sections above use. -->
-  <section class="zyx-rule">
+  <section class="zyx-rule zyx-rule-bleed" data-zyx-reveal>
     <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Who builds this</span></h2>
     <p><strong><a class="zyx-link" href="https://zyxworks.com">ZyxWorks</a></strong> is a product studio and forward
     deployed engineering practice. MurmurFlow is one of the tools we built for our own work and gave
@@ -384,37 +304,41 @@
 
 </div>
 
-<footer class="zyx-rule">
+<footer class="zyx-rule" data-zyx-reveal>
   <div class="shell">
-    <div class="foot-top zyx-grid zyx-grid-wide zyx-stand">
-      <div>
-        <a class="lockup zyx-cell" href="https://zyxworks.com/">
-          <svg class="mk" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="mk-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
-          <span class="name">ZyxWorks</span>
+    <div class="zyx-foot zyx-stand" style="--zyx-foot-cols: 3">
+      <div class="zyx-foot-brand">
+        <a class="zyx-lockup" href="https://zyxworks.com/">
+          <svg class="zyx-mark zyx-mark-draw" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="zyx-mark-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path class="zyx-mark-lines" fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
+          <span>ZyxWorks</span>
         </a>
-        <p class="tagline">A product studio and forward deployed engineering practice.
+        <p>A product studio and forward deployed engineering practice.
         MurmurFlow is one of the things we built for ourselves and gave away.</p>
       </div>
-      <div class="col zyx-cells">
+      <div class="zyx-foot-col">
         <h2 class="zyx-label">Product</h2>
-        <a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow">Source<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a>
-        <a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow#readme">Docs<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a>
-        <a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow/issues">Issues<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a>
+        <ul role="list" class="zyx-cells">
+          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow">Source<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow#readme">Docs<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow/issues">Issues<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+        </ul>
       </div>
-      <div class="col zyx-cells">
+      <div class="zyx-foot-col">
         <h2 class="zyx-label">Studio</h2>
-        <a class="zyx-cell" href="https://zyxworks.com/open-source">Our other tools<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a>
-        <a class="zyx-cell" href="https://zyxworks.com">What we do for companies<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a>
+        <ul role="list" class="zyx-cells">
+          <li><a class="zyx-cell" href="https://zyxworks.com/open-source">Our other tools<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+          <li><a class="zyx-cell" href="https://zyxworks.com">What we do for companies<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+        </ul>
       </div>
-      <div class="col zyx-cells">
+      <div class="zyx-foot-col">
         <h2 class="zyx-label">Legal</h2>
-        <a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow/blob/main/LICENSE">MIT licence<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a>
-        <a class="zyx-cell" href="https://zyxworks.com/legal#privacy">Privacy<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a>
-        <a class="zyx-cell" href="https://zyxworks.com/legal#imprint">Imprint<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a>
+        <ul role="list" class="zyx-cells">
+          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow/blob/main/LICENSE">MIT licence<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+          <li><a class="zyx-cell" href="https://zyxworks.com/legal#privacy">Privacy<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+          <li><a class="zyx-cell" href="https://zyxworks.com/legal#imprint">Imprint<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+        </ul>
       </div>
-      <div class="copyright">
-        &copy; <span id="year">2026</span> ZYXWORKS &middot; FORWARD DEPLOYED AI FOR YOUR COMPANY
-      </div>
+      <p class="zyx-foot-legal">&copy; <span id="year">2026</span> ZYXWORKS &middot; FORWARD DEPLOYED AI FOR YOUR COMPANY</p>
     </div>
   </div>
 </footer>
@@ -423,21 +347,10 @@
 (function (d) {
   d.getElementById("year").textContent = new Date().getFullYear();
 
-  // Copy button: an inverted "copied" block for 1.2 s.
-  d.querySelectorAll("[data-copy]").forEach(function (b) {
-    b.addEventListener("click", function () {
-      navigator.clipboard.writeText(d.getElementById(b.dataset.copy).textContent).then(function () {
-        b.textContent = "copied"; b.classList.add("ok");
-        setTimeout(function () { b.textContent = "copy"; b.classList.remove("ok"); }, 1200);
-      });
-    });
-  });
-
-  // Scroll-in: "in" goes on a block once, when it comes into view. The CSS does the rest.
-  if (!d.documentElement.classList.contains("js")) return;
-  var move = matchMedia("(prefers-reduced-motion: no-preference)").matches;
-  // A number counts up to its value in 8 steps, after its block has landed. The start has as many
-  // digits as the end, so nothing next to it shifts.
+  // A number counts up to its value in 8 steps, once, after its grid has landed. The start has as
+  // many digits as the end, so nothing next to it shifts. The rest of the scroll-in is the
+  // library's (ui/reveal.js).
+  if (!("IntersectionObserver" in window) || !matchMedia("(prefers-reduced-motion: no-preference)").matches) return;
   function tick(n) {
     var t = n.firstChild, v = +t.data, lo = Math.pow(10, t.data.length - 1), i = -6;
     if (!v) return;
@@ -450,11 +363,10 @@
   var io = new IntersectionObserver(function (es) {
     es.forEach(function (e) {
       if (!e.isIntersecting) return;
-      io.unobserve(e.target); e.target.classList.add("in");
-      if (move && e.target.matches(".stats")) e.target.querySelectorAll(".n").forEach(tick);
+      io.unobserve(e.target); e.target.querySelectorAll(".n").forEach(tick);
     });
   }, { rootMargin: "0px 0px -8% 0px" });
-  d.querySelectorAll("nav,section,.stats,.facts,.cmd,.foot-top,.punch").forEach(function (el) { io.observe(el); });
+  d.querySelectorAll(".stats").forEach(function (el) { io.observe(el); });
 })(document);
 </script>
 

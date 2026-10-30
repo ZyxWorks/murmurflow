@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MurmurFlow: write at the speed you talk</title>
 <meta name="description" content="Dictation that runs on your own machine. Double-tap a key, talk, tap again: the words land at your cursor, in any app. Free and open source, no account, no subscription.">
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="ui/brand/murmurflow-favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#FFFFFF">
 <meta name="color-scheme" content="light">
 <meta property="og:title" content="MurmurFlow: write at the speed you talk">
@@ -25,7 +25,7 @@
 <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
 <meta name="ai-content-declaration" content="noai, noimageai">
 <!--
-  One page plus ui/, a copy of @zyxworks/ui 1.0: no build step and no request to another host,
+  One page plus ui/, a copy of @zyxworks/ui 1.1: no build step and no request to another host,
   which is what lets GitHub Pages serve this straight out of /docs and keeps the same promise the
   product makes. ui/ is written by `npm run ship -- <this repo> --static docs/ui` in the library
   repo; never edit it by hand.
@@ -41,22 +41,17 @@
 <script src="ui/icons.js" defer></script>
 <script src="ui/reveal.js" defer></script>
 <script src="ui/copy.js" defer></script>
+<script src="ui/seg.js" defer></script>
 <style>
   body { margin: 0; background: var(--z-bg); color: var(--z-text); }
 
-  /* The install: an OS switch over one command. Without script both commands show, each with its
-     label, and the switch stays hidden. */
+  /* The install: an OS switch (seg.js) over one command. Without script both commands show, each
+     with its label, and the switch stays hidden. */
   .mf-install { margin-top: 32px; }
   .mf-os { margin-bottom: 12px; }
-  .mf-os[hidden] { display: none; }
   .mf-cmds { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
   .mf-cmd { display: grid; grid-template-columns: minmax(0, auto); gap: 8px; min-width: 0; max-width: 100%; }
   .mf-js .mf-cmd > .mf-label { display: none; }
-  .mf-js .mf-install:not([data-os="win"]) .mf-cmd[data-for="win"],
-  .mf-js .mf-install[data-os="win"] .mf-cmd[data-for="mac"] { display: none; }
-  /* PowerShell has no "$" prompt, and the library draws "$ " on every command (gap listed in the notes). */
-  /* zyx-ui-allow: the PowerShell prompt until zyx-cmd can name its prompt */
-  .mf-cmd[data-for="win"] .zyx-cmd > code::before { content: "PS> "; }
 
   /* The demo frame. Until docs/media/demo.mp4 lands it shows a drawing of the one thing the tool
      puts on screen: the dark waveform pill, under a line of text at the cursor. */
@@ -85,18 +80,12 @@
   .mf-prose > p + p { margin-top: 16px; }
   .mf-after { margin: 24px 0 0; }
   .mf-small { margin: 16px 0 0; color: var(--z-text-3); font-size: var(--z-t-meta); }
-  /* Three numbers, one row; one column on a phone (the library grid falls to 2 + 1 there, gap in the notes). */
-  .mf-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .mf-nowrap { white-space: nowrap; }
   .mf-table { max-width: 640px; }
   @media (max-width: 767px) {
     .mf-demo-band { padding-bottom: 56px; }
     .mf-note-line { font-size: var(--z-t-section); }
     .mf-pill { margin-top: 24px; }
-    .mf-stats { grid-template-columns: minmax(0, 1fr); }
-    /* A long command scrolls inside its pill: fade the cut edge so it reads as "goes on" (gap in the notes). */
-    /* zyx-ui-allow: a mask is alpha only, not a colour on screen */
-    .mf-cmd code:not(.mf-end) { mask-image: linear-gradient(to right, black calc(100% - 32px), transparent); }
   }
   .mf-table td:first-child { width: 100%; }
 </style>
@@ -122,28 +111,51 @@
 <main id="main">
   <section class="zyx-hero" data-zyx-reveal>
     <div class="zyx-wrap">
-      <svg class="zyx-mark zyx-mark-xl zyx-hero-mark" viewBox="0 0 48 48" role="img" aria-label="MurmurFlow"><path d="M14 18v12M24 9v30M34 15v18"/></svg>
+      <svg class="zyx-mark zyx-mark-xl zyx-hero-mark" viewBox="13 0 48 48" role="img" aria-label="MurmurFlow"><path d="M14 18v12M24 9v30M34 15v18"/></svg>
       <h1 class="zyx-hero-title">Write at the speed you talk.</h1>
       <p class="zyx-hero-lead">Double-tap a key, talk, tap again. The words land at your cursor, in any app, transcribed on your own machine.</p>
 
-      <div class="mf-install" data-os="mac">
-        <div class="zyx-seg mf-os" role="group" aria-label="Your system" hidden>
-          <button type="button" data-os="mac" aria-pressed="true">macOS</button>
-          <button type="button" data-os="win" aria-pressed="false">Windows</button>
+      <div class="mf-install">
+        <div class="zyx-seg mf-os" role="group" aria-label="Your system" data-zyx-seg hidden>
+          <button type="button" value="mac" aria-pressed="true" aria-controls="os-mac">macOS</button>
+          <button type="button" value="win" aria-pressed="false" aria-controls="os-win">Windows</button>
         </div>
         <div class="mf-cmds">
-          <div class="mf-cmd" data-for="mac">
+          <div class="mf-cmd" id="os-mac">
             <p class="zyx-label mf-label">macOS, paste into Terminal</p>
             <div class="zyx-cmd"><code tabindex="0" aria-label="Install command for macOS">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.sh)"</code><button type="button" class="zyx-btn zyx-btn-ghost zyx-btn-xs" data-zyx-copy data-done-label="Copied">Copy</button><span class="zyx-sr" role="status"></span></div>
           </div>
-          <div class="mf-cmd" data-for="win">
+          <div class="mf-cmd" id="os-win">
             <p class="zyx-label mf-label">Windows, paste into PowerShell</p>
-            <div class="zyx-cmd"><code tabindex="0" aria-label="Install command for Windows">irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex</code><button type="button" class="zyx-btn zyx-btn-ghost zyx-btn-xs" data-zyx-copy data-done-label="Copied">Copy</button><span class="zyx-sr" role="status"></span></div>
+            <div class="zyx-cmd"><code tabindex="0" data-prompt="PS&gt;" aria-label="Install command for Windows">irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex</code><button type="button" class="zyx-btn zyx-btn-ghost zyx-btn-xs" data-zyx-copy data-done-label="Copied">Copy</button><span class="zyx-sr" role="status"></span></div>
           </div>
           <a class="zyx-btn zyx-btn-main zyx-btn-lg" href="https://github.com/ZyxWorks/murmurflow">View the source on GitHub</a>
         </div>
-        <p class="zyx-hero-note"><span class="mf-where">Paste it into Terminal on a Mac, PowerShell on Windows.</span> Free, MIT licence. <a class="zyx-link mf-script" href="https://github.com/ZyxWorks/murmurflow/blob/main/install.sh">Read the script first</a>.</p>
+        <p class="zyx-hero-note"><span class="mf-where">Paste it into Terminal on a Mac, PowerShell on Windows.</span> Free, MIT licence. <a class="zyx-link mf-script mf-nowrap" href="https://github.com/ZyxWorks/murmurflow/blob/main/install.sh">Read the script first</a>.</p>
       </div>
+      <script>
+      // The OS switch: seg.js shows the chosen command and hides the other. This only shows the
+      // switch, opens on Windows on a Windows machine (before the first paint, so nothing jumps)
+      // and keeps the note and the script link on the chosen system.
+      (function (d) {
+        var box = d.querySelector(".mf-install"), seg = box.querySelector(".mf-os");
+        var where = box.querySelector(".mf-where"), script = box.querySelector(".mf-script");
+        var say = { mac: "Paste it into Terminal.", win: "Paste it into PowerShell." };
+        var file = { mac: "install.sh", win: "install.ps1" };
+        function pick(os) {
+          seg.querySelectorAll("button").forEach(function (b) {
+            var on = b.value === os;
+            b.setAttribute("aria-pressed", String(on));
+            d.getElementById(b.getAttribute("aria-controls")).hidden = !on;
+          });
+          where.textContent = say[os];
+          script.href = "https://github.com/ZyxWorks/murmurflow/blob/main/" + file[os];
+        }
+        seg.hidden = false;
+        seg.addEventListener("zyx-seg", function (e) { pick(e.detail.value); });
+        pick(/Windows/.test(navigator.userAgent) ? "win" : "mac");
+      })(document);
+      </script>
     </div>
   </section>
 
@@ -160,7 +172,7 @@
         <div class="zyx-video">
           <div class="mf-stage" role="img" aria-label="A line of text at the cursor, and under it the dark MurmurFlow waveform pill that shows while you talk.">
             <div class="mf-note" aria-hidden="true">
-              <p class="mf-note-line">Can we move the review to Thursday at ten?<span class="mf-caret"></span></p>
+              <p class="mf-note-line">Can we move the review to Thursday at&nbsp;ten?<span class="mf-caret"></span></p>
               <p class="mf-note-line">Said, not typed.</p>
               <div data-theme="dark" class="mf-pill"><span style="height: 9px"></span><span style="height: 18px"></span><span style="height: 27px"></span><span style="height: 15px"></span><span style="height: 24px"></span><span style="height: 12px"></span><span style="height: 21px"></span><span style="height: 9px"></span><span style="height: 16px"></span><span style="height: 6px"></span></div>
             </div>
@@ -190,7 +202,7 @@
       <h2 class="zyx-h2" id="why-t">Why bother</h2>
       <p class="zyx-band-lead">A 200-word message is five minutes of typing. Said, it takes eighty seconds, and your hands stay on the desk.</p>
       <div class="zyx-band-body">
-        <div class="zyx-stats mf-stats">
+        <div class="zyx-stats">
           <div class="zyx-stat"><span class="zyx-stat-label">You speak</span><span class="zyx-stat-n">150 wpm</span><span class="zyx-stat-why">Without trying</span></div>
           <div class="zyx-stat"><span class="zyx-stat-label">You type</span><span class="zyx-stat-n">40 wpm</span><span class="zyx-stat-why">An average typist</span></div>
           <div class="zyx-stat"><span class="zyx-stat-label">It costs</span><span class="zyx-stat-n">0 €</span><span class="zyx-stat-why">MIT licence, no paid tier</span></div>
@@ -282,34 +294,6 @@
   </div>
 </footer>
 
-<script>
-(function (d) {
-  d.getElementById("year").textContent = new Date().getFullYear();
-
-  // The OS switch: one command on screen, Windows first on a Windows machine.
-  var box = d.querySelector(".mf-install"), seg = box.querySelector(".mf-os");
-  var where = box.querySelector(".mf-where");
-  var say = { mac: "Paste it into Terminal.", win: "Paste it into PowerShell." };
-  var script = box.querySelector(".mf-script"), base = "https://github.com/ZyxWorks/murmurflow/blob/main/";
-  var file = { mac: "install.sh", win: "install.ps1" };
-  // The fade on a long command goes once it is scrolled to its end, so the last characters read.
-  var codes = d.querySelectorAll(".mf-cmd code");
-  function edge(c) { c.classList.toggle("mf-end", c.scrollWidth > 0 && c.scrollLeft + c.clientWidth >= c.scrollWidth - 1); }
-  function edges() { codes.forEach(edge); }
-  codes.forEach(function (c) { c.addEventListener("scroll", function () { edge(c); }, { passive: true }); });
-  window.addEventListener("resize", edges);
-  if (d.fonts) d.fonts.ready.then(edges);
-  function pick(os) {
-    box.setAttribute("data-os", os);
-    seg.querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-os") === os)); });
-    where.textContent = say[os];
-    script.href = base + file[os];
-    edges();
-  }
-  seg.hidden = false;
-  seg.addEventListener("click", function (e) { var b = e.target.closest("button[data-os]"); if (b) pick(b.getAttribute("data-os")); });
-  pick(/Windows/.test(navigator.userAgent) ? "win" : "mac");
-})(document);
-</script>
+<script>document.getElementById("year").textContent = new Date().getFullYear();</script>
 </body>
 </html>

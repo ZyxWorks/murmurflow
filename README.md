@@ -17,8 +17,8 @@ A free, local alternative to the paid cloud dictation apps. No account, no subsc
 no telemetry, and no Python dependencies at all. **macOS and Windows.**
 
 [**The product page**](https://zyxworks.github.io/murmurflow/) ·
-[Our other tools](https://zyxworks.com/en/open-source/) ·
-[What we do for companies](https://zyxworks.com/en/)
+[Our other tools](https://zyx.works/en/open-source/) ·
+[What we do for companies](https://zyx.works/en/)
 
 **macOS**, paste into Terminal:
 
@@ -526,20 +526,20 @@ MIT. See [LICENSE](LICENSE).
 
 ## Where this comes from
 
-MurmurFlow is one of the tools that **[ZyxWorks](https://zyxworks.com/en/)**, a product studio and forward deployed engineering practice, built for itself and gives away.
+MurmurFlow is made by **[ZyxWorks](https://github.com/ZyxWorks)**, the engineering practice that builds **[Zyx](https://zyx.works/en/)**, our product: Ask your company. On your own server. MurmurFlow is one of the tools we built for our own work and give away.
 
 The other one is **[Agent Office](https://zyxworks.github.io/agent-office/)**: several coding agents side by side in herdr, each in its own git worktree, and the sidebar shows which one waits for you.
 
 **Product:** [page](https://zyxworks.github.io/murmurflow/) ·
-[all our tools](https://zyxworks.com/en/open-source/) ·
+[all our tools](https://zyx.works/en/open-source/) ·
 [issues](https://github.com/ZyxWorks/murmurflow/issues)
 
-**Studio:** [what we do for companies](https://zyxworks.com/en/) ·
+**ZyxWorks:** [Zyx, our product](https://zyx.works/en/) ·
 [GitHub](https://github.com/ZyxWorks)
 
 **Legal:** [MIT licence](LICENSE) ·
-[privacy](https://zyxworks.com/en/legal/#privacy) ·
-[imprint](https://zyxworks.com/en/legal/#imprint)
+[privacy](https://zyx.works/en/legal/#privacy) ·
+[imprint](https://zyx.works/en/legal/#imprint)
 
 *MurmurFlow is not affiliated with, endorsed by, or connected to Wispr AI, Inc. or any other
 dictation product. Product names mentioned are the trademarks of their respective owners.*

@@ -96,7 +96,7 @@
     .mf-stats { grid-template-columns: minmax(0, 1fr); }
     /* A long command scrolls inside its pill: fade the cut edge so it reads as "goes on" (gap in the notes). */
     /* zyx-ui-allow: a mask is alpha only, not a colour on screen */
-    .mf-cmd code { mask-image: linear-gradient(to right, black calc(100% - 32px), transparent); }
+    .mf-cmd code:not(.mf-end) { mask-image: linear-gradient(to right, black calc(100% - 32px), transparent); }
   }
   .mf-table td:first-child { width: 100%; }
 </style>
@@ -142,7 +142,7 @@
           </div>
           <a class="zyx-btn zyx-btn-main zyx-btn-lg" href="https://github.com/ZyxWorks/murmurflow">View the source on GitHub</a>
         </div>
-        <p class="zyx-hero-note"><span class="mf-where">Paste it into Terminal on a Mac, PowerShell on Windows.</span> Free, MIT licence. <a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow/blob/main/install.sh">Read the script first</a>.</p>
+        <p class="zyx-hero-note"><span class="mf-where">Paste it into Terminal on a Mac, PowerShell on Windows.</span> Free, MIT licence. <a class="zyx-link mf-script" href="https://github.com/ZyxWorks/murmurflow/blob/main/install.sh">Read the script first</a>.</p>
       </div>
     </div>
   </section>
@@ -174,10 +174,10 @@
   <section class="zyx-band" id="how" data-zyx-reveal aria-labelledby="how-t">
     <div class="zyx-wrap">
       <h2 class="zyx-h2" id="how-t">How it works</h2>
-      <p class="zyx-band-lead">One line to install. After that it is one key.</p>
+      <p class="zyx-band-lead">One line to install, two switches on a Mac. After that it is one key.</p>
       <div class="zyx-band-body">
         <ol class="zyx-how">
-          <li><h3 class="zyx-how-title">Paste the line</h3><p class="zyx-how-text">It installs what is missing, downloads the speech model once (about 1.6 GB) and starts with every login. No package manager, no Python, no Administrator needed.</p></li>
+          <li><h3 class="zyx-how-title">Paste the line</h3><p class="zyx-how-text">It installs what is missing, downloads the speech model once (about 1.6 GB) and starts with every login. Nothing needs to be there first. On Windows no Administrator either; on a Mac, Homebrew may ask for your password. A Mac then asks once for Microphone and Accessibility; you flip both switches.</p></li>
           <li><h3 class="zyx-how-title">Double-tap Control and talk</h3><p class="zyx-how-text">The microphone opens on the first tap, so your first word is not lost. Nothing is typed while you talk.</p></li>
           <li><h3 class="zyx-how-title">Tap again</h3><p class="zyx-how-text">The whole sentence lands at your cursor about two seconds later, in one paste. What was on your clipboard is put back.</p></li>
         </ol>
@@ -207,8 +207,7 @@
         <ul class="zyx-trust">
           <li><i data-zyx-icon="user"></i>No account</li>
           <li><i data-zyx-icon="receipt"></i>No subscription</li>
-          <li><i data-zyx-icon="server"></i>No server: whisper.cpp runs on your machine</li>
-          <li><i data-zyx-icon="lock"></i>No Python dependencies</li>
+          <li><i data-zyx-icon="server"></i>No cloud server: whisper.cpp runs on your machine</li>
         </ul>
       </div>
     </div>
@@ -241,7 +240,8 @@
       <h2 class="zyx-h2" id="privacy-t">Privacy</h2>
       <div class="zyx-band-body mf-prose">
         <p>Your machine transcribes your voice, and the recording is deleted the moment that is done, before the text is pasted. The microphone closes with the key, and by itself after 15 seconds of quiet.</p>
-        <p>The text is never stored or sent anywhere. It goes through your clipboard once, and what was there before is put back. The only network request is the one-time model download.</p>
+        <p>The text is not stored or sent anywhere. It goes through your clipboard once, and what was there before is put back. The only network request is the one-time model download.</p>
+        <p>Two opt-in settings change that, and both are off by default: polish runs a command you choose, which can be a hosted service, and keepAudio keeps the last clip and writes the transcript into the log, for debugging.</p>
       </div>
       <p class="mf-after"><a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow#privacy-concretely">Every privacy detail, in the README</a></p>
     </div>
@@ -254,7 +254,7 @@
         <details><summary>Does it work on Linux?</summary><div class="zyx-faq-a">No. Wayland has no global hotkey API, so a key that works in every app is not possible there. <code>murmurflow doctor</code> runs on Linux and says so.</div></details>
         <details><summary>Is the microphone always on?</summary><div class="zyx-faq-a">No. It opens on the first tap and closes on the last. A clip you forget closes itself after 15 seconds of quiet and pastes what you said.</div></details>
         <details><summary>Does it use an AI service?</summary><div class="zyx-faq-a">No. whisper.cpp transcribes on your machine. You can add a polish step that runs a command of your choice, local or hosted. It is off by default, and it is the only way your words can leave the machine.</div></details>
-        <details><summary>Does it change what I said?</summary><div class="zyx-faq-a">No. Nothing is removed, reworded or reordered. One exception: a "Thank you." that whisper invents after your last sentence is dropped.</div></details>
+        <details><summary>Does it change what I said?</summary><div class="zyx-faq-a">No, with one exception: a closing "Thank you.", "Thanks." or "Danke." after a finished sentence is dropped, because whisper invents them in silence. If you really said it, it goes too. Nothing else is removed, reworded or reordered.</div></details>
         <details><summary>What is different on Windows?</summary><div class="zyx-faq-a">There is no permission to grant, the <code>fn</code> key cannot be a trigger, and the clipboard is restored as text only. Typing into a window that runs as Administrator needs MurmurFlow to run as Administrator too.</div></details>
         <details><summary>Can my own voice agent share the key?</summary><div class="zyx-faq-a">Yes. <code>murmurflow pause --who "my agent"</code> lends the key for a while, and the pause ends by itself. While dictation is on, the warm whisper.cpp server answers on <code>127.0.0.1:8479</code>.</div></details>
         <details><summary>How do I stop or remove it?</summary><div class="zyx-faq-a"><code>murmurflow off</code> turns dictation off until you turn it on again. <code>murmurflow uninstall</code> removes it.</div></details>
@@ -290,10 +290,21 @@
   var box = d.querySelector(".mf-install"), seg = box.querySelector(".mf-os");
   var where = box.querySelector(".mf-where");
   var say = { mac: "Paste it into Terminal.", win: "Paste it into PowerShell." };
+  var script = box.querySelector(".mf-script"), base = "https://github.com/ZyxWorks/murmurflow/blob/main/";
+  var file = { mac: "install.sh", win: "install.ps1" };
+  // The fade on a long command goes once it is scrolled to its end, so the last characters read.
+  var codes = d.querySelectorAll(".mf-cmd code");
+  function edge(c) { c.classList.toggle("mf-end", c.scrollWidth > 0 && c.scrollLeft + c.clientWidth >= c.scrollWidth - 1); }
+  function edges() { codes.forEach(edge); }
+  codes.forEach(function (c) { c.addEventListener("scroll", function () { edge(c); }, { passive: true }); });
+  window.addEventListener("resize", edges);
+  if (d.fonts) d.fonts.ready.then(edges);
   function pick(os) {
     box.setAttribute("data-os", os);
     seg.querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-os") === os)); });
     where.textContent = say[os];
+    script.href = base + file[os];
+    edges();
   }
   seg.hidden = false;
   seg.addEventListener("click", function (e) { var b = e.target.closest("button[data-os]"); if (b) pick(b.getAttribute("data-os")); });

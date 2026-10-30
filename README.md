@@ -1,4 +1,4 @@
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/logo/mark-on-dark.svg"><img src="docs/logo/mark-on-light.svg" width="72" height="72" alt="MurmurFlow logo"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/logo/murmurflow-on-dark.svg"><img src="docs/logo/murmurflow.svg" width="48" height="48" alt="MurmurFlow"></picture>
 
 # MurmurFlow
 
@@ -9,9 +9,9 @@ talking**, in whatever app you are already in: Slack, your terminal, a browser, 
 transcribes on your own machine, so nothing you say ever leaves it.
 
 [![CI](https://github.com/ZyxWorks/murmurflow/actions/workflows/ci.yml/badge.svg)](https://github.com/ZyxWorks/murmurflow/actions/workflows/ci.yml)
-[![Licence: MIT](https://img.shields.io/badge/licence-MIT-FFD23C)](LICENSE)
-![Platform: macOS and Windows](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-6a6c77)
-![Dependencies: none](https://img.shields.io/badge/python%20dependencies-none-6a6c77)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-111111)](LICENSE)
+![Platform: macOS and Windows](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-555555)
+![Dependencies: none](https://img.shields.io/badge/python%20dependencies-none-555555)
 
 A free, local alternative to the paid cloud dictation apps. No account, no subscription, no server,
 no telemetry, and no Python dependencies at all. **macOS and Windows.**
@@ -20,13 +20,13 @@ no telemetry, and no Python dependencies at all. **macOS and Windows.**
 [Our other tools](https://zyxworks.com/) ·
 [What we do for companies](https://zyxworks.com)
 
-**macOS** — paste into Terminal:
+**macOS**, paste into Terminal:
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.sh)"
 ```
 
-**Windows** — paste into PowerShell:
+**Windows**, paste into PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex
@@ -39,7 +39,7 @@ permission switch the OS will not let a script flip for you; Windows has no such
 
 Then double-tap **Control**, say something, and tap it once more to stop. That's the whole product,
 and it is what macOS puts its own dictation on. (Rather hold a key while you talk?
-`murmurflow config set doubleTap false` — then it is **Control+Option** held together, Windows
+`murmurflow config set doubleTap false`, and then it is **Control+Option** held together, Windows
 **Control+Alt**.)
 
 ### Why bother
@@ -81,7 +81,7 @@ murmurflow install
 murmurflow on
 ```
 
-If `murmurflow` is not found afterwards, `~/.local/bin` is not on your `PATH` — `uv tool
+If `murmurflow` is not found afterwards, `~/.local/bin` is not on your `PATH`: `uv tool
 update-shell` fixes that for the next terminal you open.
 
 </details>
@@ -90,12 +90,12 @@ update-shell` fixes that for the next terminal you open.
 <summary>What is different on Windows</summary>
 
 Four things, and none of them is a setting you have to find. The trigger names, the config file,
-every command and every message are identical — `alt`, `win`, `super` and `meta` are accepted
+every command and every message are identical. `alt`, `win`, `super` and `meta` are accepted
 spellings of the same keys, so a config file moves between machines unchanged.
 
 | | macOS | Windows |
 |---|---|---|
-| permission to type | Accessibility, granted per executable | **none** — there is nothing to grant |
+| permission to type | Accessibility, granted per executable | **none**: there is nothing to grant |
 | the trigger `fn` | works | not available: the key is handled in keyboard firmware and never reaches the OS |
 | the trigger `right_command` | not available: these Macs report the right-side keys as the left ones | works |
 | the clipboard, while a dictation lands | every flavour is restored, images included | text only |
@@ -109,31 +109,31 @@ all. `murmurflow doctor` runs on Linux and says exactly that.
 
 </details>
 
-### Two things worth knowing
+### Worth knowing
 
-**The whole transcript lands at once, the moment you stop.** Tap twice, talk, tap again — nothing
+**The whole transcript lands at once, the moment you stop.** Tap twice, talk, tap again: nothing
 is typed until then. Move the cursor mid-sentence (to click a file, switch windows) and nothing
 lands in the wrong place. One paste, at the end, cannot lose words.
 
 **On a Mac the listener makes no sound: a small waveform shows up instead.** A dark pill at the bottom of
-the screen opens with the microphone. Its bars move with your voice, so you can see it hearing you
-— and see when it is not. When the microphone closes, a soft wave of light runs across it while
+the screen opens with the microphone. Its bars move with your voice, so you can see it hearing you,
+and see when it is not. When the microphone closes, a soft wave of light runs across it while
 the words are transcribed, and it disappears when they land. It never takes focus, so your cursor
 stays where it was. No setting, no compiled helper: it is drawn with `osascript`. On Windows it is
-two short sounds instead, one when the microphone opens and one when it closes — and so is
+two short sounds instead, one when the microphone opens and one when it closes, and so is
 `murmurflow toggle` on a Mac, which runs in its own short process. Nothing marks a
-failure — that is a line in the log, not a noise in a meeting.
+failure: that is a line in the log, not a noise in a meeting.
 
 **The first word is not lost.** CoreAudio takes about 0.6s to hand over its first
 buffer, so a recorder opened on the second tap starts half a sentence late and no decoder can get
 that audio back. The recorder is now opened on the **first** tap instead and the second tap claims
-it, already live — which is also why the waveform usually moves the instant you finish tapping.
+it, already live. That is also why the waveform usually moves the instant you finish tapping.
 Measured over a five-second sentence: 0.04s of speech lost. A tap that never
 becomes a pair stops the recorder within 1.5s and deletes what it caught.
 
 **What you said is what you get.** Nothing is removed, reworded or reordered. If you say
 "hey, ship it on Friday", "hey" appears. There is an opt-in filler strip, and it removes **sounds
-only** — never a word. "hey", "so", "well" and "you know" were on that list once, and each of them
+only**, never a word. "hey", "so", "well" and "you know" were on that list once, and each of them
 is also an ordinary word: "Do you know what time it is?" came back as "Do what time it is?". A word
 deleted is invisible; an "um" left in costs one keystroke.
 
@@ -142,7 +142,7 @@ murmurflow config set stripFillers true   # deletes um / uh / erm / hmm, and not
 ```
 
 **And what you did NOT say never appears.** Handed a recording of a room, whisper does not answer
-"nothing" — it answers fluently, in a language picked at random, and that sentence gets typed
+"nothing". It answers fluently, in a language picked at random, and that sentence gets typed
 into whatever window is in front. Level and confidence catch most of it. Naming the languages you
 speak catches the rest, and costs nothing (it does not pin the decoder):
 
@@ -151,8 +151,8 @@ murmurflow config set languages '["de", "en"]'
 ```
 
 The other half of it is the pause between your last word and your hand reaching for the key.
-Whisper fills silence with a goodbye — reported as *"random thank-yous, I don't know where this
-comes from"* — so a trailing `Thank you.`, `Thanks.`, `Danke.`, `Bye bye` or a subtitle credit line
+Whisper fills silence with a goodbye (reported as *"random thank-yous, I don't know where this
+comes from"*), so a trailing `Thank you.`, `Thanks.`, `Danke.`, `Bye bye` or a subtitle credit line
 is dropped when it is appended to a sentence that had already ended. **Never the last sentence
 standing**, so a dictation that really is "Thank you." still types. The cost of that trade is real
 and one-directional: say "Mach das bitte. Danke." and the *Danke* goes.
@@ -166,11 +166,11 @@ for one short sentence at a time:
 murmurflow config set doubleTap false   # hold the key while you talk instead
 ```
 
-Both take effect immediately — `config set` restarts the listener for you.
+Both take effect immediately: `config set` restarts the listener for you.
 
 ### Lending the key to another program
 
-Something else wants the same double-tap for a moment — a voice assistant taking a turn, a screen
+Something else wants the same double-tap for a moment: a voice assistant taking a turn, a screen
 recorder that must not have the microphone pulled out from under it. That is a **pause**, not a
 stop: the listener stays up and the whisper server stays warm, and only the trigger stands down.
 
@@ -184,7 +184,7 @@ holding the key would otherwise leave dictation silently dead with nothing on sc
 which is the worst failure this tool can have. The default is five minutes, the ceiling is an hour,
 and `murmurflow doctor` names the holder and the time left for as long as it lasts.
 
-An explicit `murmurflow toggle` still records while the key is lent — a pause stands the *trigger*
+An explicit `murmurflow toggle` still records while the key is lent. A pause stands the *trigger*
 down, it does not disable dictation.
 
 ### The trigger: the gesture picks the key
@@ -196,15 +196,15 @@ down, it does not disable dictation.
 
 That is one rule, and it is worth understanding before you rebind.
 
-The listener **polls** key state rather than intercepting it — that is what keeps this
-dependency-free and out of Input Monitoring — so it can never take a keypress away from anything
+The listener **polls** key state rather than intercepting it (that is what keeps this
+dependency-free and out of Input Monitoring), so it can never take a keypress away from anything
 else. A **hold** on a bare modifier therefore fires on every `⌃C` and every `⌃←`: the microphone
 opens before the chord guard can tell it was a shortcut. It discards the audio correctly, but the
 microphone did open.
 
 A **double-tap** has no such problem. Two taps of one key inside half a second is not a shape any
 shortcut has, and the one that could imitate it (`⌃C` then `⌃C`) is thrown out by the chord guard.
-So double-tap gets one ordinary key — easier to perform than two at once, and the same key on every
+So double-tap gets one ordinary key: easier to perform than two at once, and the same key on every
 keyboard there is.
 
 ```sh
@@ -226,7 +226,7 @@ one keyboard reads on another.
 > it borrow the key with `murmurflow pause` (see [Plug your own agent in](#plug-your-own-agent-in)).
 
 `murmurflow keytest` shows what this Mac actually reports for every bindable key. Use it before
-believing any of the above about your hardware — some MacBooks report the right-side Command and
+believing any of the above about your hardware. Some MacBooks report the right-side Command and
 Option keys as the left ones, so a `right_*` trigger can never fire there.
 
 ## Plug your own agent in
@@ -240,7 +240,7 @@ Three connection points, all already here:
 - **Reuse the warm model.** While dictation is on, a whisper.cpp `whisper-server` stays loaded on
   `127.0.0.1:8479` (`murmurflow config set port` moves it; `murmurflow off` stops it). It is
   whisper.cpp's own server: `curl 127.0.0.1:8479/inference -F file=@clip.wav`. It returns whisper's
-  raw text, so silence can still come back as "Thank you." — the cleanup is MurmurFlow's, not the
+  raw text, so silence can still come back as "Thank you." The cleanup is MurmurFlow's, not the
   server's.
 - **Check against the measurements.** [`voice-contract.json`](voice-contract.json) is the measured
   record (thresholds, request fields, server flags, capture flags). `murmurflow/speech.py` and
@@ -253,7 +253,7 @@ Three connection points, all already here:
 
 Dictation is the fastest input method most people never use, and the good implementations are all
 cloud products: your microphone streams to someone else's servers, behind a subscription, under a
-privacy policy that can change. The local pieces to do it properly are all right there —
+privacy policy that can change. The local pieces to do it properly are all right there:
 [whisper.cpp](https://github.com/ggerganov/whisper.cpp) transcribes better than most cloud APIs, and
 macOS will tell you which keys are held and let you paste into the frontmost app.
 
@@ -278,7 +278,7 @@ Two things in that table are worth more than the headline number:
 
 **The warm server is not what makes this fast in steady state.** Once the model file is in the OS
 page cache, cold and warm are within noise of each other. What a resident `whisper-server` actually
-buys is the *first* transcription of the day — 13.3s down to 1.2s — which is exactly the one you
+buys is the *first* transcription of the day (13.3s down to 1.2s), which is exactly the one you
 form your opinion on, and exactly the one a freshly booted laptop serves. So the daemon starts it at
 launch and pays that cost while nobody is waiting.
 
@@ -307,7 +307,7 @@ Mac roughly doubled every row.
   first tap and ends on the second, and the clip is transcribed once, then discarded. The one
   exception is the half second the recorder opens early, on the first of your two taps, so the
   first word is not lost; a tap that never becomes a pair stops it and deletes what it caught.
-- **No LLM on the hot path**, unless you ask for one — see [polish](#polish-optional).
+- **No LLM on the hot path**, unless you ask for one: see [polish](#polish-optional).
 - **No Linux.** Recording and typing are both small there; the hotkey is not, because Wayland
   exposes no global hotkey API at all. `murmurflow doctor` runs on Linux and says exactly that.
 
@@ -315,29 +315,29 @@ Mac roughly doubled every row.
 
 macOS will ask for two the first time, and neither can be granted from a script:
 
-1. **Microphone** — to hear you.
-2. **Accessibility** — to type into the app you're using.
+1. **Microphone**, to hear you.
+2. **Accessibility**, to type into the app you're using.
    *System Settings → Privacy & Security → Accessibility*
 
 **Both rows are called `MurmurFlow`.** `murmurflow on` builds a small app bundle at
 `~/Applications/MurmurFlow.app` purely so that is true. Without it macOS names the row after the
-*interpreter* — `python3.13` — which nobody scrolling for "murmurflow" finds, and switching that on
+*interpreter* (`python3.13`), which nobody scrolling for "murmurflow" finds, and switching that on
 would hand the microphone and your keyboard to every other Python tool sharing it.
 
-If the key is never detected at all, **Input Monitoring** is the third — but test with
+If the key is never detected at all, **Input Monitoring** is the third, but test with
 `murmurflow keytest` before granting it, because most Macs don't need it.
 
 > **The apps you dictate into need nothing.** Every permission goes to this one program; Slack, your
 > browser and your editor just receive a paste. You are not opening up your machine app by app.
 
-`murmurflow doctor` answers both questions for real — it asks the bundle, not itself. If dictation
+`murmurflow doctor` answers both questions for real: it asks the bundle, not itself. If dictation
 transcribes but nothing appears, Accessibility is the reason nine times out of ten.
 
 ## The model is the accuracy
 
 Model size is the single biggest lever on proper nouns and jargon. `murmurflow setup` gets
 `large-v3-turbo` because it's near-`large-v3` quality at roughly 8x the speed. Anything smaller is a
-real cliff — names come back as plausible nonsense.
+real cliff: names come back as plausible nonsense.
 
 Dropping a different ggml file into `~/.murmurflow/models/` upgrades or downgrades it with no config
 change: the best model **present** wins.
@@ -348,7 +348,7 @@ murmurflow setup base            # smaller and faster, noticeably worse
 
 ONE model transcribes everything.
 
-Teach it your own words — the cheapest accuracy win there is:
+Teach it your own words, the cheapest accuracy win there is:
 
 ```sh
 murmurflow config set vocabulary '["Kubernetes", "Postgres", "Anthropic", "Reinsch"]'
@@ -375,7 +375,7 @@ murmurflow config set replacements '{"Ziggs": "Zyx", "Murmur Flow": "MurmurFlow"
 | `vocabulary` | proper nouns to bias the transcriber toward |
 | `replacements` | words it keeps getting wrong and what to type instead, e.g. `{"Ziggs": "Zyx"}`. Whole words, any case |
 | `polishCommand` | see below |
-| `stripFillers` | `true` = delete the sounds `um` / `uh` / `erm` / `hmm`, and nothing else. **Off** — you get verbatim |
+| `stripFillers` | `true` = delete the sounds `um` / `uh` / `erm` / `hmm`, and nothing else. **Off**: you get verbatim |
 | `quietFloor` | peak dBFS below which a clip is a room and not a sentence. Default `-30` |
 | `model` | path to a ggml model file, overriding the best one found in `~/.murmurflow/models/` |
 | `port` | loopback port for the warm whisper-server. Default `8479`. The port one above it is kept free, to sweep away a second server an older MurmurFlow left running |
@@ -383,14 +383,14 @@ murmurflow config set replacements '{"Ziggs": "Zyx", "Murmur Flow": "MurmurFlow"
 | `silenceStop` | seconds of silence before a forgotten microphone closes itself. Default `15`. `0` switches it off |
 | `maxHold` | seconds before a forgotten microphone closes itself either way. Default `120`. `0` switches it off |
 
-**Right Option is deliberately not offered as a default.** On a German layout it's AltGr — the dead
-key for `@ € \ | ~ [ ] { }` — so binding dictation there fires the microphone on every email
+**Right Option is deliberately not offered as a default.** On a German layout it's AltGr, the dead
+key for `@ € \ | ~ [ ] { }`, so binding dictation there fires the microphone on every email
 address and code bracket.
 
 ### What lands at your cursor
 
-The whole transcript pastes once, the moment you stop talking — not before (see
-[above](#two-things-worth-knowing) for why).
+The whole transcript pastes once, the moment you stop talking, not before (see
+[above](#worth-knowing) for why).
 
 **Silence is cut before anything transcribes it.** Whisper invents words when it is handed audio
 with nothing in it. The same 12 seconds of speech, three ways:
@@ -401,8 +401,8 @@ with nothing in it. The same 12 seconds of speech, three ways:
 | + 20s of digital silence | `...but just in this text box, Thank you.` |
 | + 20s of faint room noise | `...but just in this text box..` |
 
-So the invention is the silence, not the speech. A word list cannot catch it — whisper answers
-silence in a different invented language each time — and neither can whisper's own per-segment
+So the invention is the silence, not the speech. A word list cannot catch it (whisper answers
+silence in a different invented language each time), and neither can whisper's own per-segment
 `no_speech_prob`: the invented "Thank you." came back at **0.000**, sitting among real speech.
 The cure is not to hand the silence over: every clip is trimmed of trailing quiet before it ever
 reaches the transcriber.
@@ -423,8 +423,8 @@ murmurflow config set polishCommand "claude -p --model haiku"   # sends text to 
 ```
 
 > **This is the only way your words can leave your machine, and only because you sent them there.**
-> A local runner keeps everything local. A command pointing at a hosted API does not. Unset — the
-> default — means the answer to "does this phone home" stays no.
+> A local runner keeps everything local. A command pointing at a hosted API does not. Unset (the
+> default) means the answer to "does this phone home" stays no.
 
 A broken polish command degrades to the plain transcript. It never costs you the sentence.
 
@@ -452,19 +452,19 @@ murmurflow uninstall    `off`, and remove the MurmurFlow.app too
 `install`, `on`, `off`, `update` and `doctor` mean the same here as in agent-office's `office`: install sets up and starts nothing, on and off both last across a restart, update never
 switches on something that is off.
 
-Every clip the daemon handles is logged — how long you held the key, how much audio actually
+Every clip the daemon handles is logged: how long you held the key, how much audio actually
 landed, the peak level, the transcribe time, how many characters came back and the app the paste
 went to. **Not what you said.** That file is `~/.murmurflow/listen.log`, `murmurflow doctor` prints
-the path, and nothing rotates it — which is exactly why your sentences are not in it. Debugging one
+the path, and nothing rotates it, which is exactly why your sentences are not in it. Debugging one
 bad dictation and want them? `keepAudio` keeps the clip and the transcript together for as long as
 you leave it on, and deletes the clip when you turn it off.
 
-`config set` refuses a setting it does not recognise and a value that cannot work — a trigger name
+`config set` refuses a setting it does not recognise and a value that cannot work: a trigger name
 this machine cannot poll, a model path that is not there, a language you did not say you speak. Nothing fails
 silently.
 
-**`update` is the update.** The listener does not run your checkout — `uv tool install` made
-a copy of the package and launchd runs that — so a `git pull` alone changes a directory the running
+**`update` is the update.** The listener does not run your checkout (`uv tool install` made
+a copy of the package and launchd runs that), so a `git pull` alone changes a directory the running
 program never reads, silently. `murmurflow update` therefore re-installs the package from wherever
 it came from first (a local checkout, a git URL, PyPI), then re-executes itself out of the new copy
 and restarts the listener if it is on. `install` and `on` do the same re-install first, so the old
@@ -476,32 +476,32 @@ murmurflow update
 ```
 
 An update that cannot run never blocks the install: no `uv`, a source that has moved, a network
-that is down — each prints a line and carries on with the copy already on the machine.
+that is down: each prints a line and carries on with the copy already on the machine.
 
-`doctor` and `keytest` exist because dictation fails in exactly four ways — the key isn't seen, the
-microphone isn't heard, the model isn't found, the text isn't typed — and from the outside those are
+`doctor` and `keytest` exist because dictation fails in exactly four ways (the key isn't seen, the
+microphone isn't heard, the model isn't found, the text isn't typed), and from the outside those are
 indistinguishable. One run of each separates them.
 
 ## Privacy, concretely
 
-- Audio is written to `~/.murmurflow/audio/` and deleted **the instant it's transcribed** — before
+- Audio is written to `~/.murmurflow/audio/` and deleted **the instant it's transcribed**, before
   the optional polish call and before the paste, so a crash downstream can't leave your voice on
   disk.
 - Each pass copies the clip so far to a second file next to it and deletes that
   copy the moment the pass ends, pass or fail. The copy exists because the recorder has not finished
-  writing the original's header yet and reading it means patching one — never the file ffmpeg is
+  writing the original's header yet and reading it means patching one, never the file ffmpeg is
   still appending to. It lives for the length of one decode and it is inside the same directory the
   clip is, so it is covered by the same deletion and the same 10-minute ceiling.
 - The recorder bounds its own life at 10 minutes, so a daemon killed mid-clip can't leave the
   microphone hot.
 - The transcript is never inspected, filtered, or written down. It goes to your clipboard, then
-  your cursor, and your previous clipboard contents are put back — all of them, not just text. Copy
+  your cursor, and your previous clipboard contents are put back: all of them, not just text. Copy
   a screenshot while a dictation is in flight and the screenshot is still on your clipboard
   afterwards. The one exception is `keepAudio`, which you turn on yourself to debug a bad
-  dictation. It keeps that clip until you turn it off — switching it off deletes it. The transcript
+  dictation. It keeps that clip until you turn it off; switching it off deletes it. The transcript
   it also writes into the daemon log is a line in a log, and turning the setting off does not go
   back and remove it; delete the log yourself if you want it gone.
-- If a paste **cannot** land — Secure Input is on, or Accessibility was never granted — your words
+- If a paste **cannot** land (Secure Input is on, or Accessibility was never granted), your words
   go to the clipboard so you can paste them by hand, and that replaces what was on it. The daemon
   says so rather than leaving you to find out: there is no way to put the old contents back once
   the recovery paste is the only copy of what you just said.

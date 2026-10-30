@@ -1,4 +1,4 @@
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/logo/murmurflow-on-dark.svg"><img src="docs/logo/murmurflow.svg" width="48" height="48" alt="MurmurFlow"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/docs/ui/brand/murmurflow-on-dark.svg"><img src="https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/docs/ui/brand/murmurflow.svg" width="48" height="48" alt="MurmurFlow"></picture>
 
 # MurmurFlow
 

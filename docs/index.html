@@ -12,12 +12,9 @@
 <meta property="og:description" content="Double-tap a key, talk, tap again. The words land at your cursor, in any app. Runs on your machine. Free.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://zyxworks.github.io/murmurflow/">
-<!-- ASSET SLOT og.png: 1200x630, light. See "Assets needed" in the RB-9 notes. Turn these two on
-     (and twitter:card to summary_large_image) when docs/media/og.png lands.
 <meta property="og:image" content="https://zyxworks.github.io/murmurflow/media/og.png">
 <meta property="og:image:alt" content="The MurmurFlow mark and the line: Write at the speed you talk.">
--->
-<meta name="twitter:card" content="summary">
+<meta name="twitter:card" content="summary_large_image">
 <!-- Not listed anywhere: a visitor gets here by typing the URL or from the index. "noindex" is
      what actually removes the page from a search index; robots.txt only stops the crawl, and the
      one that governs this host lives in the ZyxWorks site. Lift this once there
@@ -53,27 +50,8 @@
   .mf-cmd { display: grid; grid-template-columns: minmax(0, auto); gap: 8px; min-width: 0; max-width: 100%; }
   .mf-js .mf-cmd > .mf-label { display: none; }
 
-  /* The demo frame. Until docs/media/demo.mp4 lands it shows a drawing of the one thing the tool
-     puts on screen: the dark waveform pill, under a line of text at the cursor. */
   .mf-demo-band { padding-bottom: 80px; }
   .mf-demo { margin: 0; }
-  .mf-stage { display: grid; place-items: center; height: 100%; padding: 24px; }
-  .mf-note { width: min(100%, 560px); }
-  .mf-note-line { margin: 0; color: var(--z-text); font-size: var(--z-t-title); letter-spacing: var(--z-track-title); line-height: 1.3; }
-  .mf-note-line + .mf-note-line { margin-top: 8px; color: var(--z-text-3); font-size: var(--z-t-read); letter-spacing: 0; }
-  .mf-caret { display: inline-block; width: 1px; height: 1.1em; margin-left: 2px; vertical-align: -0.15em; background: var(--z-text); }
-  .mf-pill {
-    display: inline-flex; align-items: center; gap: 4px; height: 44px; margin-top: 40px; padding: 0 18px;
-    border: var(--z-bw) solid var(--z-line);
-    /* zyx-ui-allow: a pill is fully round, as the library's own zyx-cmd */
-    border-radius: 999px;
-    background: var(--z-bg);
-  }
-  .mf-pill > span {
-    width: 4px; background: var(--z-text);
-    /* zyx-ui-allow: a bar of the waveform is fully round, as in the product */
-    border-radius: 999px;
-  }
 
   /* Prose and the closing link of a band. */
   .mf-prose > p { max-width: 64ch; margin: 0; color: var(--z-text-2); font-size: var(--z-t-read); line-height: var(--z-lead-read); }
@@ -84,8 +62,6 @@
   .mf-table { max-width: 640px; }
   @media (max-width: 767px) {
     .mf-demo-band { padding-bottom: 56px; }
-    .mf-note-line { font-size: var(--z-t-section); }
-    .mf-pill { margin-top: 24px; }
   }
   .mf-table td:first-child { width: 100%; }
 </style>
@@ -161,22 +137,11 @@
 
   <section class="mf-demo-band" aria-label="Demo" data-zyx-reveal>
     <div class="zyx-wrap">
-      <!-- ASSET SLOT demo: docs/media/demo.mp4 + docs/media/demo-poster.png, 16:10, 10 to 15 s, light
-           macOS desktop, see "Assets needed" in the RB-9 notes. When they land, replace the
-           .mf-stage drawing with:
-           <video controls muted playsinline preload="none" poster="media/demo-poster.png"
-                  aria-label="Double-tap Control, say a sentence, tap again: the text lands at the cursor.">
-             <source src="media/demo.mp4" type="video/mp4"></video>
-           No autoplay, so less motion is respected. -->
       <figure class="mf-demo">
         <div class="zyx-video">
-          <div class="mf-stage" role="img" aria-label="A line of text at the cursor, and under it the dark MurmurFlow waveform pill that shows while you talk.">
-            <div class="mf-note" aria-hidden="true">
-              <p class="mf-note-line">Can we move the review to Thursday at&nbsp;ten?<span class="mf-caret"></span></p>
-              <p class="mf-note-line">Said, not typed.</p>
-              <div data-theme="dark" class="mf-pill"><span style="height: 9px"></span><span style="height: 18px"></span><span style="height: 27px"></span><span style="height: 15px"></span><span style="height: 24px"></span><span style="height: 12px"></span><span style="height: 21px"></span><span style="height: 9px"></span><span style="height: 16px"></span><span style="height: 6px"></span></div>
-            </div>
-          </div>
+          <video controls muted playsinline preload="none" poster="media/demo-poster.png"
+                 aria-label="Double-tap Control, say a sentence, tap again: the text lands at the cursor.">
+            <source src="media/demo.mp4" type="video/mp4"></video>
         </div>
         <figcaption class="zyx-example-cap">On a Mac, a small waveform sits at the bottom of the screen while the microphone is open. It never takes the focus.</figcaption>
       </figure>

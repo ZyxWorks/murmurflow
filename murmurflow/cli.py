@@ -920,7 +920,7 @@ def main(argv: list[str] | None = None) -> int:
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     parser = argparse.ArgumentParser(
         prog="murmurflow",
-        description="Hold a key, talk, let go. The text appears at your cursor. Nothing leaves your Mac.",
+        description="Double-tap a key, talk, tap again. The text appears at your cursor. Nothing leaves your machine.",
     )
     sub = parser.add_subparsers(dest="command")
 

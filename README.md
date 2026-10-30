@@ -526,7 +526,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## Where this comes from
 
-MurmurFlow is one of the tools that **[Zyx](https://zyx.works/en/)** built for its own work and gives away. Zyx itself answers questions from a company's own mail, files and apps, names the source of every answer, and runs on the company's own server.
+MurmurFlow is made by **[ZyxWorks](https://github.com/ZyxWorks)**, the engineering practice that builds **[Zyx](https://zyx.works/en/)**, our product: Ask your company. On your own server. MurmurFlow is one of the tools we built for our own work and give away.
 
 The other one is **[Agent Office](https://zyxworks.github.io/agent-office/)**: several coding agents side by side in herdr, each in its own git worktree, and the sidebar shows which one waits for you.
 
@@ -534,7 +534,7 @@ The other one is **[Agent Office](https://zyxworks.github.io/agent-office/)**: s
 [all our tools](https://zyx.works/en/open-source/) ·
 [issues](https://github.com/ZyxWorks/murmurflow/issues)
 
-**Zyx:** [what Zyx is](https://zyx.works/en/) ·
+**ZyxWorks:** [Zyx, our product](https://zyx.works/en/) ·
 [GitHub](https://github.com/ZyxWorks)
 
 **Legal:** [MIT licence](LICENSE) ·

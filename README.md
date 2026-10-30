@@ -17,7 +17,7 @@ A free, local alternative to the paid cloud dictation apps. No account, no subsc
 no telemetry, and no Python dependencies at all. **macOS and Windows.**
 
 [**The product page**](https://zyxworks.github.io/murmurflow/) ·
-[Our other tools](https://zyxworks.com/) ·
+[Our other tools](https://zyxworks.com/open-source) ·
 [What we do for companies](https://zyxworks.com)
 
 **macOS**, paste into Terminal:

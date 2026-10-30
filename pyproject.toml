@@ -1,7 +1,7 @@
 [project]
 name = "murmurflow"
 version = "0.1.0"
-description = "Press-to-talk dictation for macOS and Windows that never leaves your machine. A free, local alternative to cloud dictation apps."
+description = "Double-tap dictation for macOS and Windows that never leaves your machine. A free, local alternative to cloud dictation apps."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Hannes Reinsch" }]

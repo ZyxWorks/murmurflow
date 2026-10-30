@@ -513,7 +513,7 @@ def _launcher(args: list[str], env: dict[str, str]) -> Path:
 _TASK_XML = """<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>MurmurFlow press-to-talk dictation listener.</Description>
+    <Description>MurmurFlow dictation listener.</Description>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger><Enabled>true</Enabled><UserId>{user}</UserId></LogonTrigger>

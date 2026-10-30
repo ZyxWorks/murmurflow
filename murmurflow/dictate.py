@@ -1,7 +1,7 @@
 """The engine: capture, transcribe warm, clean up, inject at the cursor.
 
-Hold a key, speak, release: the text lands wherever your cursor is — Slack, a terminal, a browser,
-your notes app. Nothing you say leaves the machine.
+Double-tap a key, speak, tap again: the text lands wherever your cursor is (Slack, a terminal, a
+browser, your notes app). Nothing you say leaves the machine.
 
 **Latency is the whole product**, so it is worth being precise about where it goes. Measured on an
 M4 Pro, macOS 26, large-v3-turbo, an 11s clip, ``-t 8``:
@@ -1628,7 +1628,7 @@ def listen_loop(
     on_event: object | None = None,
     should_stop: object | None = None,
 ) -> None:
-    """Run the press-to-talk daemon: hold the trigger, speak, release, text appears. Blocks.
+    """Run the dictation daemon: double-tap the trigger, speak, tap again, text appears. Blocks.
 
     Spawns the warm whisper-server first so the FIRST dictation is as fast as the hundredth — the
     ~1s model load is paid once here, at daemon start, instead of on the first real sentence.

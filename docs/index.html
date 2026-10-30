@@ -4,13 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MurmurFlow: write at the speed you talk</title>
-<meta name="description" content="Double-tap dictation that runs on your own machine. Tap a key twice and talk, tap again to stop: the words land at your cursor the moment you stop, in any app. Free, no account, no subscription, and nothing you say leaves your machine.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 120 120'><rect width='120' height='120' rx='20' fill='%23FFFFFF'/><g transform='translate(60 60) scale(.86) translate(-60 -60)'><path fill='%23FFD23C' d='M60 12L73.86 20L73.86 38L87.71 30L101.57 38L101.57 82L87.71 90L73.86 82L73.86 100L60 108L46.14 100L46.14 82L32.29 90L18.43 82L18.43 38L32.29 30L46.14 38L46.14 20Z'/><path fill='%23111111' fill-rule='evenodd' d='M60 7.09L75.96 16.3L75.96 31.88L87.71 25.09L105.82 35.55L105.82 84.45L87.71 94.91L75.96 88.12L75.96 103.7L60 112.91L44.04 103.7L44.04 88.12L32.29 94.91L14.18 84.45L14.18 35.55L32.29 25.09L44.04 31.88L44.04 16.3ZM60 16.91L67.46 21.21L67.46 98.79L60 103.09L52.54 98.79L52.54 21.21ZM80.26 39.21L87.71 34.91L97.32 40.45L97.32 79.55L87.71 85.09L80.26 80.79ZM39.74 39.21L39.74 80.79L32.29 85.09L22.68 79.55L22.68 40.45L32.29 34.91Z'/></g></svg>">
-<meta name="theme-color" content="#F4F4F4">
+<meta name="description" content="Dictation that runs on your own machine. Double-tap a key, talk, tap again: the words land at your cursor, in any app. Free and open source, no account, no subscription.">
+<link rel="icon" href="ui/brand/murmurflow-favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#FFFFFF">
 <meta name="color-scheme" content="light">
 <meta property="og:title" content="MurmurFlow: write at the speed you talk">
-<meta property="og:description" content="Tap a key twice and talk, tap again to stop. The words land at your cursor, in any app. Runs on your machine. Free.">
+<meta property="og:description" content="Double-tap a key, talk, tap again. The words land at your cursor, in any app. Runs on your machine. Free.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://zyxworks.github.io/murmurflow/">
+<!-- ASSET SLOT og.png: 1200x630, light. See "Assets needed" in the RB-9 notes. Turn these two on
+     (and twitter:card to summary_large_image) when docs/media/og.png lands.
+<meta property="og:image" content="https://zyxworks.github.io/murmurflow/media/og.png">
+<meta property="og:image:alt" content="The MurmurFlow mark and the line: Write at the speed you talk.">
+-->
 <meta name="twitter:card" content="summary">
 <!-- Not listed anywhere: a visitor gets here by typing the URL or from the index. "noindex" is
      what actually removes the page from a search index; robots.txt only stops the crawl, and the
@@ -18,339 +24,276 @@
      is a proper Impressum. -->
 <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
 <meta name="ai-content-declaration" content="noai, noimageai">
-<link rel="preload" href="ui/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <!--
-  One page plus ui/, a copy of the ZyxWorks UI library: no build step and no request to another host,
+  One page plus ui/, a copy of @zyxworks/ui 1.1: no build step and no request to another host,
   which is what lets GitHub Pages serve this straight out of /docs and keeps the same promise the
-  product makes.
+  product makes. ui/ is written by `npm run ship -- <this repo> --static docs/ui` in the library
+  repo; never edit it by hand.
 
-  The look comes from @zyxworks/ui (repo ZyxWorks/ui): tokens, the self-hosted Atkinson Hyperlegible
-  Next and Mono, and every shared part (bar, cell, grid, stand, main and second button, eyebrow, rule,
-  label, rows, table, marker, crop marks, command and its copy button, footer, link, arrow, the
-  ZyxWorks mark and the scroll-in). ui/ is a copy written by `npm run ship -- <this repo> --static
-  docs/ui` in the library repo; never edit it by hand. Below is only what belongs to this page: its
-  layout, the hero, the full-width section bands and the product's own mark. Every colour, edge,
-  shadow and time reads var(--z-*). The page is light only, so it never sets data-theme.
-
-  Yellow is a highlighter here: the panels of the cube, the shadow the copy buttons stand on and the
-  marked figures. It is never a text colour on the light ground and never a page background.
-
-  The look is "hard print": the parts are hard, the page is calm. A 2px ink rule opens every
-  section, and a group of siblings (nav, number and fact grids, the footer) is a ruled grid of
-  cells with no gaps. The main button stands on its yellow shadow and turns yellow under the
-  pointer; every other control is pressed in on hover and pressed deeper while clicked.
-
-  Movement is short and runs once: the mark draws in, a block lands on its shadow and a section
-  rule draws when it scrolls in, an icon hops, an arrow steps right, the yellow marker wipes in, the
-  numbers tick up and the caret blinks three times. What waits for a scroll is the library's reveal
-  (data-zyx-reveal and ui/reveal.js), so the page is complete without script, and with reduced
-  motion the library shows the end state and nothing moves.
+  Every part on this page is a library part. The <style> below holds only this page's layout, and
+  `zyx-ui lint docs/index.html` finds nothing. Light only, so the page never sets data-theme
+  (except on the drawing of the dark waveform pill, which is dark in the product too).
 -->
+<link rel="preload" href="ui/fonts/geist-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="ui/zyx/fonts.css">
 <link rel="stylesheet" href="ui/zyx/zyx-ui.css">
+<script>document.documentElement.classList.add("mf-js");</script>
+<script src="ui/icons.js" defer></script>
 <script src="ui/reveal.js" defer></script>
 <script src="ui/copy.js" defer></script>
+<script src="ui/seg.js" defer></script>
 <style>
-  /* --- own identity ---
-     What is this page's own and not the library's: the type is a step bolder and tighter than the
-     brand default. */
-  :root { --head-weight: 800; --head-track: -0.03em; --page: 820px; }
+  body { margin: 0; background: var(--z-bg); color: var(--z-text); }
 
-  body { margin: 0; font-size: 17px; line-height: 1.6; }
-  /* Element defaults of this page's prose. They sit in the library's base layer, so a library
-     part on the same element (a label on a <p>, a button on an <a>) still wins. */
-  @layer zyx-base {
-    p { margin: 0 0 16px; color: var(--z-muted); }
-    strong { color: var(--z-ink); font-weight: 700; }
-    code { font-family: var(--z-font-mono); font-size: 0.9em; }
+  /* The install: an OS switch (seg.js) over one command. Without script both commands show, each
+     with its label, and the switch stays hidden. */
+  .mf-install { margin-top: 32px; }
+  .mf-os { margin-bottom: 12px; }
+  .mf-cmds { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+  .mf-cmd { display: grid; grid-template-columns: minmax(0, auto); gap: 8px; min-width: 0; max-width: 100%; }
+  .mf-js .mf-cmd > .mf-label { display: none; }
+
+  /* The demo frame. Until docs/media/demo.mp4 lands it shows a drawing of the one thing the tool
+     puts on screen: the dark waveform pill, under a line of text at the cursor. */
+  .mf-demo-band { padding-bottom: 80px; }
+  .mf-demo { margin: 0; }
+  .mf-stage { display: grid; place-items: center; height: 100%; padding: 24px; }
+  .mf-note { width: min(100%, 560px); }
+  .mf-note-line { margin: 0; color: var(--z-text); font-size: var(--z-t-title); letter-spacing: var(--z-track-title); line-height: 1.3; }
+  .mf-note-line + .mf-note-line { margin-top: 8px; color: var(--z-text-3); font-size: var(--z-t-read); letter-spacing: 0; }
+  .mf-caret { display: inline-block; width: 1px; height: 1.1em; margin-left: 2px; vertical-align: -0.15em; background: var(--z-text); }
+  .mf-pill {
+    display: inline-flex; align-items: center; gap: 4px; height: 44px; margin-top: 40px; padding: 0 18px;
+    border: var(--z-bw) solid var(--z-line);
+    /* zyx-ui-allow: a pill is fully round, as the library's own zyx-cmd */
+    border-radius: 999px;
+    background: var(--z-bg);
   }
-  .shell { max-width: var(--page); margin: 0 auto; padding: 0 24px; }
-  /* A section is a band as wide as the window (zyx-band): white and ground take turns, and a window-wide ink
-     rule (zyx-rule zyx-rule-bleed) opens it. The band is drawn behind the text column, so the
-     column never moves. */
-  section { padding: 66px 0 68px; }
-  section { --zyx-band: var(--z-ground); }
-  section:nth-of-type(odd) { --zyx-band: var(--z-surface); }
+  .mf-pill > span {
+    width: 4px; background: var(--z-text);
+    /* zyx-ui-allow: a bar of the waveform is fully round, as in the product */
+    border-radius: 999px;
+  }
 
-  h1 { font-size: clamp(40px, 8.4vw, 66px); line-height: 1.02; letter-spacing: var(--head-track); margin: 0; font-weight: var(--head-weight); }
-  p.lead { font-size: 21px; margin-top: 22px; max-width: 44ch; }
-  /* zyx-ui-allow: a link in this page's grey prose is ink, so it can be found without the underline */
-  .zyx-link { color: var(--z-ink); }
-
-  /* The product's own glyph (the ZyxWorks cube is the library's zyx-mark): a yellow shape under one
-     filled shape of ink lines, so the yellow shows through. Brand rule: the lines are ink on every
-     ground, so on the ink cell of the bar the glyph sits in a white box. It never draws in: a
-     restarted draw would leave the cell empty. */
-  .mk { flex: none; box-sizing: content-box; padding: 3px; background: var(--z-mark-paper); fill: var(--z-mark-line); }
-  .mk-panels { fill: var(--z-cube); }
-
-  /* --- the bar (zyx-bar): the way up to ZyxWorks, this page as the ink cell, and the source at the
-     end. GitHub carries weight because the licence is the pitch: a cell of its own rather than a
-     word in a corner. Not the main button, though. That is the install, and a page with two
-     primary buttons has none. --- */
-  nav { margin-top: 26px; }
-
-  /* The one print ornament: crop marks at the four corners of the head (zyx-crop). Local change:
-     the box starts 14px above the nav bar (which sits outside the header) and ends 14px under the
-     last line of the intro. */
-  header { padding: 76px 0 44px; --zyx-crop-inset: -62px -14px 46px; }
-
-  /* --- the call to action --- */
-  .cta { margin-top: 34px; }
-  /* The room around a command box (zyx-cmd, standing on the block shadow with zyx-stand). */
-  .cmd { margin: 10px 0 6px; }
-  /* The copy button is the main button (zyx-main): it stands on its yellow shadow, and on hover,
-     keyboard focus and after a copy it is pressed in and turns yellow. */
-  /* The label over a command box (zyx-label). */
-  .os { margin: 24px 0 0; }
-  .after { font-size: 15px; margin-top: 22px; }
-  /* Local change: a key in running text is sized to the 17px prose, not the library's 12px. */
-  kbd { font-size: 0.84em; }
-
-  /* --- the numbers that do the selling: a ruled grid that stands (zyx-grid + zyx-stand) --- */
-  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .stat { padding: 22px 20px 20px; }
-  .stat .n { font-variant-numeric: tabular-nums; font-size: clamp(34px, 6vw, 46px); font-weight: var(--head-weight); letter-spacing: var(--head-track); line-height: 1; color: var(--z-ink); }
-  .stat .n small { font-size: 0.42em; font-weight: 400; letter-spacing: 0; color: var(--z-muted); margin-left: 4px; }
-  .stat .l { color: var(--z-muted); font-size: 15px; margin-top: 10px; }
-  .punch { font-size: 19px; color: var(--z-ink); margin: 34px 0 0; max-width: 50ch; letter-spacing: -0.011em; }
-
-  /* The facts fill their grid; a lone last fact takes the whole row (zyx-grid-fill). */
-  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .fact { padding: 18px 20px 20px; }
-  .fact strong { display: block; font-size: 16px; margin-bottom: 4px; }
-  .fact span { color: var(--z-muted); font-size: 15px; }
-  @media (max-width: 600px) { .stats, .facts { grid-template-columns: minmax(0, 1fr); } }
-  /* zyx-ui-allow: room above a table that follows a punch line, as above the facts */
-  .punch + .zyx-table-wrap, p + .facts { margin-top: 28px; }
-
-  /* Tables (zyx-table). The last column is the measured number, right-aligned ink mono (zyx-table-num). */
-  .note { font-size: 14px; color: var(--z-faint); margin-top: 18px; }
-
-  /* zyx-ui-allow: the lists of what it does and does not do (zyx-rows) are in this page's grey prose */
-  .zyx-rows > li { color: var(--z-muted); font-size: 16px; }
-
-  /* --- footer: the library's footer (zyx-foot, standing) on a raised band as wide as the window --- */
-  footer { background: var(--z-raised); }
-  footer .shell { padding-top: 56px; padding-bottom: 72px; }
+  /* Prose and the closing link of a band. */
+  .mf-prose > p { max-width: 64ch; margin: 0; color: var(--z-text-2); font-size: var(--z-t-read); line-height: var(--z-lead-read); }
+  .mf-prose > p + p { margin-top: 16px; }
+  .mf-after { margin: 24px 0 0; }
+  .mf-small { margin: 16px 0 0; color: var(--z-text-3); font-size: var(--z-t-meta); }
+  .mf-nowrap { white-space: nowrap; }
+  .mf-table { max-width: 640px; }
+  @media (max-width: 767px) {
+    .mf-demo-band { padding-bottom: 56px; }
+    .mf-note-line { font-size: var(--z-t-section); }
+    .mf-pill { margin-top: 24px; }
+  }
+  .mf-table td:first-child { width: 100%; }
 </style>
 </head>
 <body>
-
-<div class="shell">
-
-  <nav class="zyx-bar zyx-stand" aria-label="Site" data-zyx-reveal>
-    <a class="zyx-bar-up zyx-cell" href="https://zyxworks.com/open-source">
-      <svg class="zyx-mark zyx-mark-draw zyx-hop" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="zyx-mark-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path class="zyx-mark-lines" fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
-      <span>ZyxWorks</span>
-    </a>
-    <span class="zyx-bar-here zyx-cell zyx-cell-ink" aria-current="page">
-      <svg class="mk" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="mk-panels" d="M60 12L73.86 20L73.86 38L87.71 30L101.57 38L101.57 82L87.71 90L73.86 82L73.86 100L60 108L46.14 100L46.14 82L32.29 90L18.43 82L18.43 38L32.29 30L46.14 38L46.14 20Z"/><path fill-rule="evenodd" d="M60 7.09L75.96 16.3L75.96 31.88L87.71 25.09L105.82 35.55L105.82 84.45L87.71 94.91L75.96 88.12L75.96 103.7L60 112.91L44.04 103.7L44.04 88.12L32.29 94.91L14.18 84.45L14.18 35.55L32.29 25.09L44.04 31.88L44.04 16.3ZM60 16.91L67.46 21.21L67.46 98.79L60 103.09L52.54 98.79L52.54 21.21ZM80.26 39.21L87.71 34.91L97.32 40.45L97.32 79.55L87.71 85.09L80.26 80.79ZM39.74 39.21L39.74 80.79L32.29 85.09L22.68 79.55L22.68 40.45L32.29 34.91Z"/></svg>
-      <span>murmurflow</span>
-    </span>
-    <div class="zyx-bar-end">
-      <a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow">Source on GitHub</a>
+<a class="zyx-skip" href="#main">Skip to the content</a>
+<header class="zyx-site-head">
+  <div class="zyx-wrap">
+    <a class="zyx-lockup" href="https://zyxworks.com/en/open-source/"><svg class="zyx-mark" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 26V6M24 26L6.7 36M24 26L41.3 36"/></svg><span class="zyx-lockup-word">ZyxWorks</span></a>
+    <nav aria-label="Main">
+      <ul class="zyx-site-nav">
+        <li><a href="#how">How it works</a></li>
+        <li><a href="#privacy">Privacy</a></li>
+        <li><a href="#faq">Questions</a></li>
+      </ul>
+    </nav>
+    <div class="zyx-site-acts">
+      <a class="zyx-btn zyx-btn-ghost" href="https://github.com/ZyxWorks/murmurflow">GitHub</a>
     </div>
-  </nav>
+  </div>
+</header>
 
-  <header id="top" class="zyx-crop zyx-crop-wide" data-zyx-reveal>
-    <h1>Write at the<br>speed you talk.</h1>
-    <p class="lead">Tap a key twice and talk, tap again to stop. The words land at your cursor
-    the moment you stop, in any app. On your machine, for nothing.</p>
+<main id="main">
+  <section class="zyx-hero" data-zyx-reveal>
+    <div class="zyx-wrap">
+      <svg class="zyx-mark zyx-mark-xl zyx-hero-mark" viewBox="13 0 48 48" role="img" aria-label="MurmurFlow"><path d="M14 18v12M24 9v30M34 15v18"/></svg>
+      <h1 class="zyx-hero-title">Write at the speed you talk.</h1>
+      <p class="zyx-hero-lead">Double-tap a key, talk, tap again. The words land at your cursor, in any app, transcribed on your own machine.</p>
 
-    <div class="cta">
-      <p class="os zyx-label">macOS, paste into Terminal</p>
-      <div class="cmd zyx-cmd zyx-stand">
-        <div class="zyx-cmd-line" tabindex="0"><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.sh)"</code></div>
-        <button type="button" class="zyx-btn zyx-main zyx-cmd-copy" data-zyx-copy data-done-label="copied">copy</button>
-        <span class="zyx-sr" role="status"></span>
+      <div class="mf-install">
+        <div class="zyx-seg mf-os" role="group" aria-label="Your system" data-zyx-seg hidden>
+          <button type="button" value="mac" aria-pressed="true" aria-controls="os-mac">macOS</button>
+          <button type="button" value="win" aria-pressed="false" aria-controls="os-win">Windows</button>
+        </div>
+        <div class="mf-cmds">
+          <div class="mf-cmd" id="os-mac">
+            <p class="zyx-label mf-label">macOS, paste into Terminal</p>
+            <div class="zyx-cmd"><code tabindex="0" aria-label="Install command for macOS">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.sh)"</code><button type="button" class="zyx-btn zyx-btn-ghost zyx-btn-xs" data-zyx-copy data-done-label="Copied">Copy</button><span class="zyx-sr" role="status"></span></div>
+          </div>
+          <div class="mf-cmd" id="os-win">
+            <p class="zyx-label mf-label">Windows, paste into PowerShell</p>
+            <div class="zyx-cmd"><code tabindex="0" data-prompt="PS&gt;" aria-label="Install command for Windows">irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex</code><button type="button" class="zyx-btn zyx-btn-ghost zyx-btn-xs" data-zyx-copy data-done-label="Copied">Copy</button><span class="zyx-sr" role="status"></span></div>
+          </div>
+          <a class="zyx-btn zyx-btn-main zyx-btn-lg" href="https://github.com/ZyxWorks/murmurflow">View the source on GitHub</a>
+        </div>
+        <p class="zyx-hero-note"><span class="mf-where">Paste it into Terminal on a Mac, PowerShell on Windows.</span> Free, MIT licence. <a class="zyx-link mf-script mf-nowrap" href="https://github.com/ZyxWorks/murmurflow/blob/main/install.sh">Read the script first</a>.</p>
       </div>
-      <p class="os zyx-label">Windows, paste into PowerShell</p>
-      <div class="cmd zyx-cmd zyx-stand" style="--zyx-reveal-delay: var(--z-d1)">
-        <div class="zyx-cmd-line" tabindex="0"><code>irm https://raw.githubusercontent.com/ZyxWorks/murmurflow/main/install.ps1 | iex</code></div>
-        <button type="button" class="zyx-btn zyx-main zyx-cmd-copy" data-zyx-copy data-done-label="copied">copy</button>
-        <span class="zyx-sr" role="status"></span>
-      </div>
-      <p class="after">Then double-tap <kbd>Control</kbd>, say something, and tap once more to
-      stop. That is the whole product.</p>
-      <p class="after">Open source, MIT licensed. That command runs
-      <a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow/blob/main/install.sh">a script you can
-      read first</a>, and so is <a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow">everything it
-      installs</a>.</p>
-    </div>
-  </header>
-
-  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
-    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Why bother</span></h2>
-    <div class="stats zyx-grid zyx-grid-wide zyx-stand">
-      <div class="stat">
-        <div class="n">150<small>wpm</small></div>
-        <div class="l">how fast you speak, without trying</div>
-      </div>
-      <div class="stat">
-        <div class="n">40<small>wpm</small></div>
-        <div class="l">how fast an average person types</div>
-      </div>
-      <div class="stat">
-        <div class="n">0<small>&euro; / mo</small></div>
-        <div class="l">MIT licensed, with no paid tier above it</div>
-      </div>
-    </div>
-    <p class="punch">A 200-word message is <strong class="zyx-marker">five minutes</strong> of typing. Say it instead
-    and you are done in <strong class="zyx-marker" style="--zyx-reveal-delay: var(--z-d3)">eighty seconds</strong>, hands still on the desk. Ten of those a
-    day is most of an hour back, every day.</p>
-    <p class="note">Conversational speech runs about 130 to 150 words a
-    minute, and an average typist about 40.</p>
-  </section>
-
-  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
-    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>What you are not paying for</span></h2>
-    <div class="facts zyx-grid zyx-grid-wide zyx-grid-fill zyx-stand">
-      <div class="fact"><strong>No subscription</strong><span>Cloud dictation bills you every month for as long as you use it. This has no plan to upgrade into.</span></div>
-      <div class="fact"><strong>No account</strong><span>Nothing to sign up for, nothing to log into, nothing to cancel later.</span></div>
-      <div class="fact"><strong>No server</strong><span>whisper.cpp transcribes on your own machine. Your voice is never uploaded anywhere.</span></div>
-      <div class="fact"><strong>No dependencies</strong><span>The Python standard library, ffmpeg, and the OS. That is the whole supply chain.</span></div>
+      <script>
+      // The OS switch: seg.js shows the chosen command and hides the other. This only shows the
+      // switch, opens on Windows on a Windows machine (before the first paint, so nothing jumps)
+      // and keeps the note and the script link on the chosen system.
+      (function (d) {
+        var box = d.querySelector(".mf-install"), seg = box.querySelector(".mf-os");
+        var where = box.querySelector(".mf-where"), script = box.querySelector(".mf-script");
+        var say = { mac: "Paste it into Terminal.", win: "Paste it into PowerShell." };
+        var file = { mac: "install.sh", win: "install.ps1" };
+        function pick(os) {
+          seg.querySelectorAll("button").forEach(function (b) {
+            var on = b.value === os;
+            b.setAttribute("aria-pressed", String(on));
+            d.getElementById(b.getAttribute("aria-controls")).hidden = !on;
+          });
+          where.textContent = say[os];
+          script.href = "https://github.com/ZyxWorks/murmurflow/blob/main/" + file[os];
+        }
+        seg.hidden = false;
+        seg.addEventListener("zyx-seg", function (e) { pick(e.detail.value); });
+        pick(/Windows/.test(navigator.userAgent) ? "win" : "mac");
+      })(document);
+      </script>
     </div>
   </section>
 
-  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
-    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>The text lands the moment you stop</span></h2>
-    <p class="punch">Tap twice, talk, tap again. The whole transcript pastes at your cursor at
-    once, about <strong class="zyx-marker">two seconds</strong> after you stop - there is nothing typed while
-    you talk to land in the wrong place if you move the cursor mid-sentence.</p>
-    <div class="zyx-table-wrap">
-      <table class="zyx-table zyx-table-num">
-        <thead><tr><th>step</th><th>seconds</th></tr></thead>
-        <tbody>
-          <tr><td>warm transcription, model resident</td><td>2.3</td></tr>
-          <tr><td>first transcription after boot, cold</td><td>13.3</td></tr>
-          <tr><td>microphone open, first ever</td><td>9.9</td></tr>
-          <tr><td>speech lost at the start of a clip</td><td>0.04</td></tr>
-        </tbody>
-      </table>
+  <section class="mf-demo-band" aria-label="Demo" data-zyx-reveal>
+    <div class="zyx-wrap">
+      <!-- ASSET SLOT demo: docs/media/demo.mp4 + docs/media/demo-poster.png, 16:10, 10 to 15 s, light
+           macOS desktop, see "Assets needed" in the RB-9 notes. When they land, replace the
+           .mf-stage drawing with:
+           <video controls muted playsinline preload="none" poster="media/demo-poster.png"
+                  aria-label="Double-tap Control, say a sentence, tap again: the text lands at the cursor.">
+             <source src="media/demo.mp4" type="video/mp4"></video>
+           No autoplay, so less motion is respected. -->
+      <figure class="mf-demo">
+        <div class="zyx-video">
+          <div class="mf-stage" role="img" aria-label="A line of text at the cursor, and under it the dark MurmurFlow waveform pill that shows while you talk.">
+            <div class="mf-note" aria-hidden="true">
+              <p class="mf-note-line">Can we move the review to Thursday at&nbsp;ten?<span class="mf-caret"></span></p>
+              <p class="mf-note-line">Said, not typed.</p>
+              <div data-theme="dark" class="mf-pill"><span style="height: 9px"></span><span style="height: 18px"></span><span style="height: 27px"></span><span style="height: 15px"></span><span style="height: 24px"></span><span style="height: 12px"></span><span style="height: 21px"></span><span style="height: 9px"></span><span style="height: 16px"></span><span style="height: 6px"></span></div>
+            </div>
+          </div>
+        </div>
+        <figcaption class="zyx-example-cap">On a Mac, a small waveform sits at the bottom of the screen while the microphone is open. It never takes the focus.</figcaption>
+      </figure>
     </div>
-    <p class="note">M4 Pro, macOS 26. <strong>One model</strong>, <code>large-v3-turbo</code>,
-    answers every clip - on one warm server, so the first dictation is as fast as the
-    hundredth.</p>
   </section>
 
-  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
-    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>What it does not do</span></h2>
-    <ul class="zyx-rows">
-      <li><strong>No compiled helper.</strong> Key state is polled through stdlib <code>ctypes</code>. No Xcode, no signing, no notarization.</li>
-      <li><strong>No always-on microphone.</strong> Nothing listens between sentences, and a clip you forget about closes itself after fifteen seconds of quiet - pasting what you said rather than throwing it away.</li>
-      <li><strong>No wall of settings.</strong> A small waveform while the microphone is open, and a soft pulse while it transcribes. No sounds, no presets.</li>
-      <li><strong>No LLM on the hot path</strong>, unless you ask for one.</li>
-      <li><strong>No Linux.</strong> Wayland exposes no global hotkey API at all, so the answer is honest rather than half working.</li>
-    </ul>
-  </section>
-
-  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
-    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Privacy, concretely</span></h2>
-    <p>Your voice is transcribed by your own machine and <strong>the recording is discarded the
-    moment that is done</strong>, before anything else happens to it. The microphone closes with
-    the key - and by itself after fifteen seconds of quiet, so it cannot be left open.</p>
-    <p>The transcript is never inspected, filtered, or written down. It is pasted through your
-    clipboard once, and whatever was there before is put back right after. Nothing here makes a
-    network request except the one-off model download.</p>
-    <p class="after"><a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow#readme">The source is
-    public, and so is every claim on this page.</a></p>
-  </section>
-
-  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
-    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Plug your own agent in</span></h2>
-    <ul class="zyx-rows">
-      <li><strong>Borrow the key.</strong> <code>murmurflow trigger</code> prints the key it is on. <code>murmurflow pause --who "your agent's voice chat"</code> stands it down while your agent owns it, and the pause expires by itself.</li>
-      <li><strong>Reuse the warm model.</strong> While dictation is on, whisper.cpp's own <code>whisper-server</code> stays loaded on <code>127.0.0.1:8479</code>.</li>
-      <li><strong>Check against the measurements.</strong> <code>voice-contract.json</code> is the measured record, and the speech and gesture files are stdlib-only and yours to vendor.</li>
-    </ul>
-    <p class="after"><a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow#plug-your-own-agent-in">How, in the README.</a></p>
-  </section>
-
-  <!-- The studio pitch. This page is the widest-reaching thing ZyxWorks publishes, and a visitor
-       who likes MurmurFlow enough to install it is exactly the visitor worth telling about the
-       paid work. No new CSS: it reuses the facts grid and .after that the sections above use. -->
-  <section class="zyx-rule zyx-rule-bleed zyx-band" data-zyx-reveal>
-    <h2 class="zyx-eyebrow zyx-eyebrow-n"><span>Who builds this</span></h2>
-    <p><strong><a class="zyx-link" href="https://zyxworks.com">ZyxWorks</a></strong> is a product studio and forward
-    deployed engineering practice. MurmurFlow is one of the tools we built for our own work and gave
-    away. The paid work is putting the same engineering inside a company.</p>
-    <div class="facts zyx-grid zyx-grid-wide zyx-grid-fill zyx-stand">
-      <div class="fact">
-        <strong><a class="zyx-link" href="https://zyxworks.com/#setup">Forward deployed engineering</a></strong>
-        <span>We set up one process with you on Zyx and hand it over to your own people after 90 days.</span>
+  <section class="zyx-band" id="how" data-zyx-reveal aria-labelledby="how-t">
+    <div class="zyx-wrap">
+      <h2 class="zyx-h2" id="how-t">How it works</h2>
+      <p class="zyx-band-lead">One line to install, two switches on a Mac. After that it is one key.</p>
+      <div class="zyx-band-body">
+        <ol class="zyx-how">
+          <li><h3 class="zyx-how-title">Paste the line</h3><p class="zyx-how-text">It installs what is missing, downloads the speech model once (about 1.6 GB) and starts with every login. Nothing needs to be there first. On Windows no Administrator either; on a Mac, Homebrew may ask for your password. A Mac then asks once for Microphone and Accessibility; you flip both switches.</p></li>
+          <li><h3 class="zyx-how-title">Double-tap Control and talk</h3><p class="zyx-how-text">The microphone opens on the first tap, so your first word is not lost. Nothing is typed while you talk.</p></li>
+          <li><h3 class="zyx-how-title">Tap again</h3><p class="zyx-how-text">The whole sentence lands at your cursor about two seconds later, in one paste. What was on your clipboard is put back.</p></li>
+        </ol>
       </div>
     </div>
-    <p class="after"><a class="zyx-btn zyx-push" href="https://zyxworks.com">What we do for companies &rarr;</a></p>
   </section>
 
-</div>
-
-<footer class="zyx-rule" data-zyx-reveal>
-  <div class="shell">
-    <div class="zyx-foot zyx-foot-stack zyx-stand" style="--zyx-foot-cols: 3">
-      <div class="zyx-foot-brand">
-        <a class="zyx-lockup" href="https://zyxworks.com/">
-          <svg class="zyx-mark zyx-mark-draw" viewBox="0 0 120 120" width="22" height="22" aria-hidden="true"><path class="zyx-mark-panels" d="M60 12L101.6 36V84L60 108L18.4 84V36Z"/><path class="zyx-mark-lines" fill-rule="evenodd" d="M60 7.09L105.82 33.55V86.45L60 112.91L14.18 86.45V33.55ZM53.6 20.6L22.68 38.45V74.16L53.6 56.3ZM66.4 20.6V56.3L97.32 74.16V38.45ZM60 67.39L29.08 85.24L60 103.09L90.92 85.24Z"/></svg>
-          <span>ZyxWorks</span>
-        </a>
-        <p>A product studio and forward deployed engineering practice.
-        MurmurFlow is one of the things we built for ourselves and gave away.</p>
+  <section class="zyx-band" data-zyx-reveal aria-labelledby="why-t">
+    <div class="zyx-wrap">
+      <h2 class="zyx-h2" id="why-t">Why bother</h2>
+      <p class="zyx-band-lead">A 200-word message is five minutes of typing. Said, it takes eighty seconds, and your hands stay on the desk.</p>
+      <div class="zyx-band-body">
+        <div class="zyx-stats">
+          <div class="zyx-stat"><span class="zyx-stat-label">You speak</span><span class="zyx-stat-n">150 wpm</span><span class="zyx-stat-why">Without trying</span></div>
+          <div class="zyx-stat"><span class="zyx-stat-label">You type</span><span class="zyx-stat-n">40 wpm</span><span class="zyx-stat-why">An average typist</span></div>
+          <div class="zyx-stat"><span class="zyx-stat-label">It costs</span><span class="zyx-stat-n">0 €</span><span class="zyx-stat-why">MIT licence, no paid tier</span></div>
+        </div>
+        <p class="mf-small">Conversational speech runs about 130 to 150 words a minute.</p>
       </div>
-      <div class="zyx-foot-col">
-        <h2 class="zyx-label">Product</h2>
-        <ul role="list" class="zyx-cells">
-          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow">Source<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
-          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow#readme">Docs<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
-          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow/issues">Issues<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
+    </div>
+  </section>
+
+  <section class="zyx-band" data-zyx-reveal aria-labelledby="not-t">
+    <div class="zyx-wrap">
+      <h2 class="zyx-h2" id="not-t">What you are not paying for</h2>
+      <div class="zyx-band-body">
+        <ul class="zyx-trust">
+          <li><i data-zyx-icon="user"></i>No account</li>
+          <li><i data-zyx-icon="receipt"></i>No subscription</li>
+          <li><i data-zyx-icon="server"></i>No cloud server: whisper.cpp runs on your machine</li>
         </ul>
       </div>
-      <div class="zyx-foot-col">
-        <h2 class="zyx-label">Studio</h2>
-        <ul role="list" class="zyx-cells">
-          <li><a class="zyx-cell" href="https://zyxworks.com/open-source">Our other tools<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
-          <li><a class="zyx-cell" href="https://zyxworks.com">What we do for companies<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
-        </ul>
-      </div>
-      <div class="zyx-foot-col">
-        <h2 class="zyx-label">Legal</h2>
-        <ul role="list" class="zyx-cells">
-          <li><a class="zyx-cell" href="https://github.com/ZyxWorks/murmurflow/blob/main/LICENSE">MIT licence<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
-          <li><a class="zyx-cell" href="https://zyxworks.com/legal#privacy">Privacy<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
-          <li><a class="zyx-cell" href="https://zyxworks.com/legal#imprint">Imprint<span class="zyx-arrow" aria-hidden="true">&rarr;</span></a></li>
-        </ul>
-      </div>
-      <p class="zyx-foot-legal">&copy; <span id="year">2026</span> ZYXWORKS &middot; FORWARD DEPLOYED AI FOR YOUR COMPANY</p>
     </div>
+  </section>
+
+  <section class="zyx-band" data-zyx-reveal aria-labelledby="speed-t">
+    <div class="zyx-wrap">
+      <h2 class="zyx-h2" id="speed-t">Measured, not promised</h2>
+      <p class="zyx-band-lead">One Mac: M4 Pro, macOS 26, the model <span class="mf-nowrap">large-v3-turbo</span>, an 11 second sentence. Your numbers move with your machine.</p>
+      <div class="zyx-band-body">
+        <div class="zyx-table-wrap">
+          <table class="zyx-table mf-table">
+            <thead><tr><th scope="col">Step</th><th scope="col" class="zyx-num">Seconds</th></tr></thead>
+            <tbody>
+              <tr><td>Transcribe, warm, language on auto</td><td class="zyx-num">1.9</td></tr>
+              <tr><td>Transcribe, warm, language set</td><td class="zyx-num">1.2</td></tr>
+              <tr><td>First transcription after boot</td><td class="zyx-num">13.3</td></tr>
+              <tr><td>Microphone open, the very first time</td><td class="zyx-num">9.9</td></tr>
+              <tr><td>Speech lost at the start of a clip</td><td class="zyx-num">0.04</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="mf-small">The speech server starts at login and stays warm, so the slow first transcription happens while nobody waits.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="zyx-band" id="privacy" data-zyx-reveal aria-labelledby="privacy-t">
+    <div class="zyx-wrap">
+      <h2 class="zyx-h2" id="privacy-t">Privacy</h2>
+      <div class="zyx-band-body mf-prose">
+        <p>Your machine transcribes your voice, and the recording is deleted the moment that is done, before the text is pasted. The microphone closes with the key, and by itself after 15 seconds of quiet.</p>
+        <p>The text is not stored or sent anywhere. It goes through your clipboard once, and what was there before is put back. The only network request is the one-time model download.</p>
+        <p>Two opt-in settings change that, and both are off by default: polish runs a command you choose, which can be a hosted service, and keepAudio keeps the last clip and writes the transcript into the log, for debugging.</p>
+      </div>
+      <p class="mf-after"><a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow#privacy-concretely">Every privacy detail, in the README</a></p>
+    </div>
+  </section>
+
+  <section class="zyx-band" id="faq" data-zyx-reveal aria-labelledby="faq-t">
+    <div class="zyx-wrap-narrow">
+      <h2 class="zyx-h2" id="faq-t">Questions</h2>
+      <div class="zyx-band-body zyx-faq">
+        <details><summary>Does it work on Linux?</summary><div class="zyx-faq-a">No. Wayland has no global hotkey API, so a key that works in every app is not possible there. <code>murmurflow doctor</code> runs on Linux and says so.</div></details>
+        <details><summary>Is the microphone always on?</summary><div class="zyx-faq-a">No. It opens on the first tap and closes on the last. A clip you forget closes itself after 15 seconds of quiet and pastes what you said.</div></details>
+        <details><summary>Does it use an AI service?</summary><div class="zyx-faq-a">No. whisper.cpp transcribes on your machine. You can add a polish step that runs a command of your choice, local or hosted. It is off by default, and it is the only way your words can leave the machine.</div></details>
+        <details><summary>Does it change what I said?</summary><div class="zyx-faq-a">No, with one exception: a closing "Thank you.", "Thanks." or "Danke." after a finished sentence is dropped, because whisper invents them in silence. If you really said it, it goes too. Nothing else is removed, reworded or reordered.</div></details>
+        <details><summary>What is different on Windows?</summary><div class="zyx-faq-a">There is no permission to grant, the <code>fn</code> key cannot be a trigger, and the clipboard is restored as text only. Typing into a window that runs as Administrator needs MurmurFlow to run as Administrator too.</div></details>
+        <details><summary>Can my own voice agent share the key?</summary><div class="zyx-faq-a">Yes. <code>murmurflow pause --who "my agent"</code> lends the key for a while, and the pause ends by itself. While dictation is on, the warm whisper.cpp server answers on <code>127.0.0.1:8479</code>.</div></details>
+        <details><summary>How do I stop or remove it?</summary><div class="zyx-faq-a"><code>murmurflow off</code> turns dictation off until you turn it on again. <code>murmurflow uninstall</code> removes it.</div></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="zyx-band" data-zyx-reveal aria-labelledby="who-t">
+    <div class="zyx-wrap">
+      <h2 class="zyx-h2" id="who-t">Who builds this</h2>
+      <p class="zyx-band-lead">ZyxWorks is a product studio. We built MurmurFlow for our own work and gave it away. The paid work is putting the same engineering inside a company.</p>
+      <p class="mf-after"><a class="zyx-btn" href="https://zyxworks.com/en/">What we do for companies</a></p>
+    </div>
+  </section>
+</main>
+
+<footer class="zyx-site-foot">
+  <div class="zyx-wrap">
+    <div class="zyx-site-foot-cols">
+      <div class="zyx-site-foot-brand"><a class="zyx-lockup" href="https://zyxworks.com/en/"><svg class="zyx-mark" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 26V6M24 26L6.7 36M24 26L41.3 36"/></svg><span class="zyx-lockup-word">ZyxWorks</span></a><p>A product studio. MurmurFlow is one of the tools we built for ourselves.</p></div>
+      <div><h2>Product</h2><ul><li><a href="https://github.com/ZyxWorks/murmurflow">Source</a></li><li><a href="https://github.com/ZyxWorks/murmurflow#readme">Docs</a></li><li><a href="https://github.com/ZyxWorks/murmurflow/issues">Issues</a></li></ul></div>
+      <div><h2>Studio</h2><ul><li><a href="https://zyxworks.com/en/open-source/">Other tools</a></li><li><a href="https://zyxworks.com/en/">For companies</a></li></ul></div>
+    </div>
+    <div class="zyx-site-foot-legal"><span>© <span id="year">2026</span> ZyxWorks</span><a href="https://github.com/ZyxWorks/murmurflow/blob/main/LICENSE">MIT licence</a><a href="https://zyxworks.com/en/legal/#privacy">Privacy</a><a href="https://zyxworks.com/en/legal/#imprint">Imprint</a></div>
   </div>
 </footer>
 
-<script>
-(function (d) {
-  d.getElementById("year").textContent = new Date().getFullYear();
-
-  // A number counts up to its value in 8 steps, once, after its grid has landed. The start has as
-  // many digits as the end, so nothing next to it shifts. The rest of the scroll-in is the
-  // library's (ui/reveal.js).
-  if (!("IntersectionObserver" in window) || !matchMedia("(prefers-reduced-motion: no-preference)").matches) return;
-  function tick(n) {
-    var t = n.firstChild, v = +t.data, lo = Math.pow(10, t.data.length - 1), i = -6;
-    if (!v) return;
-    t.data = lo;
-    var id = setInterval(function () {
-      t.data = Math.round(lo + (v - lo) * Math.max(0, ++i) / 8);
-      if (i > 7) clearInterval(id);
-    }, 50);
-  }
-  var io = new IntersectionObserver(function (es) {
-    es.forEach(function (e) {
-      if (!e.isIntersecting) return;
-      io.unobserve(e.target); e.target.querySelectorAll(".n").forEach(tick);
-    });
-  }, { rootMargin: "0px 0px -8% 0px" });
-  d.querySelectorAll(".stats").forEach(function (el) { io.observe(el); });
-})(document);
-</script>
-
+<script>document.getElementById("year").textContent = new Date().getFullYear();</script>
 </body>
 </html>

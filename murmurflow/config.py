@@ -29,7 +29,7 @@ KEYS: dict[str, str] = {
     "accept every language. Unlike `language` this does NOT pin the decoder, so it costs nothing",
     "inputName": "substring of the microphone name to record from. Default: system default",
     "vocabulary": "list of proper nouns to bias the transcriber toward (names, jargon, acronyms)",
-    "replacements": 'words whisper keeps getting wrong and what to type instead, e.g. '
+    "replacements": "words whisper keeps getting wrong and what to type instead, e.g. "
     '{"Ziggs": "Zyx"}. Whole words, any case, after transcription. For a name `vocabulary` '
     "alone cannot fix",
     "polishCommand": "shell command receiving the transcript on stdin and printing the cleaned text",

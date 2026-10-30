@@ -62,15 +62,16 @@ function run(argv) {
   panel.ignoresMouseEvents = true;
   panel.collectionBehavior = (1 << 0) | (1 << 8); // all Spaces, over full-screen apps
 
-  // The brand's panel ink and hairline edge (docs/index.html: --panel, --edge, --ink).
-  const pill = box($.NSMakeRect(0, 0, width, H), rgba(0x16, 0x18, 0x1f, 1), H / 2);
+  // The dark tokens of @zyxworks/ui 1.0 (docs/ui/zyx/zyx-ui.css): bg #111111, line #2A2A2A,
+  // text #EDEDED for the bars. The same pill is drawn on the product page (docs/index.html).
+  const pill = box($.NSMakeRect(0, 0, width, H), rgba(0x11, 0x11, 0x11, 1), H / 2);
   pill.borderWidth = 1;
-  pill.borderColor = rgba(255, 255, 255, 0.09);
+  pill.borderColor = rgba(0x2a, 0x2a, 0x2a, 1);
   panel.contentView.addSubview(pill);
 
   const bars = [];
   for (let i = 0; i < BARS; i++) {
-    const bar = box($.NSMakeRect(0, 0, BAR_W, MIN_BAR), rgba(0xf6, 0xf5, 0xf1, 1), BAR_W / 2);
+    const bar = box($.NSMakeRect(0, 0, BAR_W, MIN_BAR), rgba(0xed, 0xed, 0xed, 1), BAR_W / 2);
     panel.contentView.addSubview(bar);
     bars.push(bar);
   }

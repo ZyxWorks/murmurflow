@@ -659,7 +659,10 @@ def test_each_word_is_replaced_once_and_a_hyphen_is_a_word_edge():
     assert dictate.replace_words("ask Ziggs now", {"Ziggs": "Zyx", "Zyx": "Z-X"}) == "ask Zyx now"
     assert dictate.replace_words("A then B", {"A": "B", "B": "A"}) == "B then A"
     # whisper writes German compounds with a hyphen: the name inside one is still the name
-    assert dictate.replace_words("der Ziggs-Server und pre-Ziggs", {"Ziggs": "Zyx"}) == "der Zyx-Server und pre-Zyx"
+    assert (
+        dictate.replace_words("der Ziggs-Server und pre-Ziggs", {"Ziggs": "Zyx"})
+        == "der Zyx-Server und pre-Zyx"
+    )
 
 
 def test_a_replacements_value_that_cannot_work_is_refused():

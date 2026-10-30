@@ -920,11 +920,11 @@ def main(argv: list[str] | None = None) -> int:
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     parser = argparse.ArgumentParser(
         prog="murmurflow",
-        description="Hold a key, talk, let go. The text appears at your cursor. Nothing leaves your Mac.",
+        description="Double-tap a key, talk, tap again. The text appears at your cursor. Nothing leaves your machine.",
     )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("listen", help="run the press-to-talk daemon in this terminal (blocks)")
+    sub.add_parser("listen", help="run the dictation daemon in this terminal (blocks)")
     sub.add_parser("install", help="set it up on this Mac (starts nothing; a running one updates)")
     sub.add_parser("on", help="dictation on, now and after every login")
     sub.add_parser("off", help="dictation off, now and after every restart")

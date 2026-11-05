@@ -463,20 +463,15 @@ you leave it on, and deletes the clip when you turn it off.
 this machine cannot poll, a model path that is not there, a language you did not say you speak. Nothing fails
 silently.
 
-**`update` is the update.** The listener does not run your checkout (`uv tool install` made
-a copy of the package and launchd runs that), so a `git pull` alone changes a directory the running
-program never reads, silently. `murmurflow update` therefore re-installs the package from wherever
-it came from first (a local checkout, a git URL, PyPI), then re-executes itself out of the new copy
-and restarts the listener if it is on. `install` and `on` do the same re-install first, so the old
-habit still works. From a git checkout it pulls first (fast-forward only, so local work is never
-touched), so it is one command:
+**`update` is the update.** Run it from anywhere:
 
 ```sh
 murmurflow update
 ```
 
-An update that cannot run never blocks the install: no `uv`, a source that has moved, a network
-that is down: each prints a line and carries on with the copy already on the machine.
+The installed copy follows its release source. An ordinary install from a local git checkout updates from that repository's remote default branch, so an agent leaving your development checkout on a feature branch does not affect updates. Your checkout, branches and unfinished work stay untouched. Git URL and PyPI installs keep their package-manager source; an explicitly editable install keeps following its development directory.
+
+After updating, MurmurFlow restarts the listener if it was on. Dictation that was off stays off. `install` and `on` update the installed copy first too. If the source cannot be reached or the update fails, `update` reports failure and keeps the installed version running.
 
 `doctor` and `keytest` exist because dictation fails in exactly four ways (the key isn't seen, the
 microphone isn't heard, the model isn't found, the text isn't typed), and from the outside those are

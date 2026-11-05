@@ -52,9 +52,8 @@ brew install --quiet whisper-cpp ffmpeg uv
 say "Installing MurmurFlow"
 uv tool install --force --python 3.13 "$SOURCE"
 uv tool update-shell || true  # puts ~/.local/bin on PATH for the NEXT terminal
-# `murmurflow install` re-installs the package from its source before it does anything else, so
-# that `git pull && murmurflow install` is the whole update. We have just done exactly that, so
-# tell it not to do it twice.
+# `murmurflow install` refreshes the installed package first. It was just installed here,
+# so do not download and install it a second time.
 export MURMURFLOW_RESYNCED=1
 
 MF="$HOME/.local/bin/murmurflow"

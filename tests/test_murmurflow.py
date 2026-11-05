@@ -2185,25 +2185,119 @@ def test_a_restart_that_fails_stops_the_install_rather_than_half_doing_it(tmp_pa
     assert exit_code.value.code == 1
 
 
-def test_an_update_pulls_the_checkout_before_it_reinstalls_it(tmp_path, monkeypatch):
-    """Two PRs merged, `update` said OK, and the listener ran last week's code: nothing had pulled."""
-    checkout = tmp_path / "murmurflow"
-    (checkout / ".git").mkdir(parents=True)
-    ran: list[list[str]] = []
+def test_a_git_install_follows_the_remote_default_without_touching_development(
+    tmp_path, monkeypatch
+):
+    import subprocess
 
-    def _run(cmd, **_k):
-        ran.append(cmd)
-        return types.SimpleNamespace(returncode=1 if "pull" in cmd else 0, stderr="diverged")
+    checkout = tmp_path / "developer"
+    checkout.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "unfinished-feature", str(checkout)], check=True)
+    origin = (tmp_path / "releases.git").as_uri()
+    subprocess.run(["git", "-C", str(checkout), "remote", "add", "origin", origin], check=True)
+    work = checkout / "work.txt"
+    work.write_text("unfinished work")
+    before = (checkout / ".git" / "HEAD").read_bytes()
+    resolve = cli.speech.resolve_bin
+    monkeypatch.setattr(
+        cli.speech, "resolve_bin", lambda name: "/fake/uv" if name == "uv" else resolve(name)
+    )
+    receipt = _receipt_at(
+        tmp_path, f'[tool]\nrequirements = [{{ name = "murmurflow", directory = "{checkout}" }}]\n'
+    )
+    expected = [
+        "/fake/uv",
+        "tool",
+        "install",
+        "--force",
+        "--python",
+        "3.13",
+        "--refresh-package",
+        "murmurflow",
+        "git+" + origin,
+    ]
+    original = subprocess.run
+    commands = []
 
-    monkeypatch.setattr(cli.subprocess, "run", _run)
-    monkeypatch.setattr(cli.speech, "resolve_bin", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(cli, "_receipt", lambda: tmp_path / "uv-receipt.toml")
-    monkeypatch.setattr(cli, "_update_command", lambda _r: ["uv", "tool", "install", str(checkout)])
-    monkeypatch.setattr(cli.os, "execv", lambda *_a: None)
+    def run(command, **kwargs):
+        commands.append(command)
+        if command[0] == "/fake/uv":
+            return types.SimpleNamespace(returncode=0)
+        return original(command, **kwargs)
+
+    def restart(*_args):
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli.subprocess, "run", run)
+    monkeypatch.setattr(cli, "_receipt", lambda: receipt)
+    monkeypatch.setattr(cli.os, "execv", restart)
     monkeypatch.delenv(cli._RESYNCED, raising=False)
-    cli._update()
-    assert ran[0] == ["/bin/git", "-C", str(checkout), "pull", "--ff-only", "--quiet"]
-    assert ran[1] == ["uv", "tool", "install", str(checkout)], "a pull that fails never blocks"
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "wrong-repository"))
+    with pytest.raises(SystemExit) as exited:
+        cli._update()
+    assert exited.value.code == 0
+    assert commands[-1] == expected
+    assert len(commands) == 2, "updates must not pull or switch the developer checkout"
+    assert (checkout / ".git" / "HEAD").read_bytes() == before
+    assert work.read_text() == "unfinished work"
+
+
+@pytest.mark.parametrize(
+    "origin, expected",
+    [
+        ("https://example.invalid/murmurflow.git", "git+https://example.invalid/murmurflow.git"),
+        ("git@example.invalid:murmurflow.git", "git+ssh://git@example.invalid/murmurflow.git"),
+        ("git@[::1]:murmurflow.git", "git+ssh://git@[::1]/murmurflow.git"),
+        ("../releases.git", None),
+        ("../team:a/releases.git", None),
+    ],
+)
+def test_git_origin_spellings_stay_valid_package_sources(tmp_path, monkeypatch, origin, expected):
+    checkout = tmp_path / "developer"
+    (checkout / ".git").mkdir(parents=True)
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *_a, **_k: types.SimpleNamespace(returncode=0, stdout=origin)
+    )
+    receipt = _receipt_at(
+        tmp_path, f'[tool]\nrequirements = [{{ name = "murmurflow", directory = "{checkout}" }}]\n'
+    )
+    assert cli._update_command(receipt)[-1] == (
+        expected or "git+" + (checkout / origin).resolve().as_uri()
+    )
+
+
+def test_an_editable_install_keeps_its_explicit_development_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda name: f"/bin/{name}")
+    receipt = _receipt_at(
+        tmp_path, f'[tool]\nrequirements = [{{ name = "murmurflow", editable = "{tmp_path}" }}]\n'
+    )
+    assert cli._update_command(receipt) == [
+        "/bin/uv",
+        "tool",
+        "install",
+        "--force",
+        "--python",
+        "3.13",
+        "--editable",
+        str(tmp_path),
+    ]
+
+
+def test_an_unknown_update_source_cannot_report_success(tmp_path, monkeypatch, capsys):
+    checkout = tmp_path / "developer"
+    (checkout / ".git").mkdir(parents=True)
+    receipt = _receipt_at(
+        tmp_path, f'[tool]\nrequirements = [{{ name = "murmurflow", directory = "{checkout}" }}]\n'
+    )
+    monkeypatch.setattr(cli, "_receipt", lambda: receipt)
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *_a, **_k: types.SimpleNamespace(returncode=1, stdout="")
+    )
+    monkeypatch.delenv(cli._RESYNCED, raising=False)
+    assert cli._update() is False
+    assert "installed version is unchanged" in capsys.readouterr().out
 
 
 def test_the_re_executed_child_never_updates_again(tmp_path, monkeypatch):

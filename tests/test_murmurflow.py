@@ -312,7 +312,7 @@ def test_stop_server_survives_a_process_that_is_already_gone(monkeypatch):
 # --- one listener, never two --------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not hasattr(os, "WNOWAIT"), reason="requires POSIX zombie processes")
+@pytest.mark.skipif(not hasattr(os, "waitid"), reason="requires POSIX zombie processes")
 @pytest.mark.parametrize("tracked", [False, True])
 @pytest.mark.parametrize("exited", [False, True])
 def test_only_a_live_recorder_blocks_the_next_recording(monkeypatch, tracked, exited):
@@ -336,6 +336,74 @@ def test_only_a_live_recorder_blocks_the_next_recording(monkeypatch, tracked, ex
         if proc.poll() is None:
             proc.kill()
         proc.wait()
+
+
+@pytest.mark.skipif(not hasattr(os, "waitid"), reason="requires POSIX zombie processes")
+def test_stopping_a_reaped_recorder_preserves_audio_without_signalling_its_old_pid(monkeypatch):
+    import subprocess
+
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT)
+        monkeypatch.setattr(speech, "_PROC", proc)
+        state = dictate.state_path()
+        wav = state.with_suffix(".wav")
+        wav.write_bytes(b"recorded audio")
+        rec = speech.Recording(proc.pid, wav, time.time())
+        state.write_text(
+            json.dumps({"pid": rec.pid, "wav": str(wav), "started_at": rec.started_at})
+        )
+        assert speech.current(state) is None
+
+        def refuse_signal(*_args):
+            pytest.fail("a reaped recorder's PID may belong to another process now")
+
+        monkeypatch.setattr(speech.os, "kill", refuse_signal)
+        assert speech.stop(rec, state=state) == wav
+    finally:
+        proc.wait()
+
+
+@pytest.mark.parametrize("alive", [False, True])
+def test_recording_liveness_without_posix_wait_flags(monkeypatch, alive):
+    monkeypatch.delattr(speech.os, "WNOHANG", raising=False)
+    monkeypatch.setattr(speech, "_PROC", None)
+
+    def probe(pid, sig):
+        assert (pid, sig) == (4242, 0)
+        if not alive:
+            raise ProcessLookupError
+
+    monkeypatch.setattr(speech.os, "kill", probe)
+    state = dictate.state_path()
+    state.write_text(json.dumps({"pid": 4242, "wav": "clip.wav", "started_at": 0}))
+    assert (speech.current(state) is not None) is alive
+
+
+@pytest.mark.parametrize("pid", [-1, 0])
+def test_invalid_recording_pids_never_probe_other_processes(monkeypatch, pid):
+    def refuse_probe(_pid):
+        pytest.fail("invalid PIDs must not reach waitpid or kill")
+
+    monkeypatch.setattr(speech, "_exited", refuse_probe)
+    state = dictate.state_path()
+    state.write_text(json.dumps({"pid": pid, "wav": "clip.wav", "started_at": 0}))
+    assert speech.current(state) is None
+    assert not state.exists()
+
+
+def test_clearing_a_stale_recording_preserves_a_newer_marker(monkeypatch):
+    state = dictate.state_path()
+    state.write_text(json.dumps({"pid": 4242, "wav": "old.wav", "started_at": 0}))
+    newer = {"pid": 4243, "wav": "new.wav", "started_at": 1}
+
+    def exited(_pid):
+        state.write_text(json.dumps(newer))
+        return True
+
+    monkeypatch.setattr(speech, "_exited", exited)
+    assert speech.current(state) is None
+    assert json.loads(state.read_text()) == newer
 
 
 def test_a_second_listener_is_refused_and_told_who_has_the_key():

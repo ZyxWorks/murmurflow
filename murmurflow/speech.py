@@ -990,8 +990,8 @@ def current(state: Path) -> Recording | None:
         rec = Recording(int(raw["pid"]), Path(raw["wav"]), float(raw["started_at"]))
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    if _exited(rec.pid):
-        path.unlink(missing_ok=True)
+    if rec.pid <= 0 or _exited(rec.pid):
+        _clear_state_for(rec.pid, path)
         return None
     return rec
 
@@ -1112,12 +1112,13 @@ def _exited(pid: int) -> bool:
     proc = _PROC
     if proc is not None and proc.pid == pid:
         return proc.poll() is not None
-    try:
-        os.waitpid(pid, os.WNOHANG)
-    except ChildProcessError:
-        pass  # not our child: signal-0 below is authoritative
-    except OSError:
-        return True
+    if hasattr(os, "WNOHANG"):
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            pass  # not our child: signal-0 below is authoritative
+        except OSError:
+            return True
     try:
         os.kill(pid, 0)
     except (OSError, ProcessLookupError):
@@ -1137,8 +1138,9 @@ def stop(rec: Recording | None, *, state: Path) -> Path | None:
     rec = rec or current(state)
     if rec is None:
         return None
-    with contextlib.suppress(OSError, ProcessLookupError):
-        os.kill(rec.pid, signal.SIGINT)
+    if not _exited(rec.pid):
+        with contextlib.suppress(OSError, ProcessLookupError):
+            os.kill(rec.pid, signal.SIGINT)
     deadline = time.time() + 2.0
     while time.time() < deadline:
         if _exited(rec.pid):

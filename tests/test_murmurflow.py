@@ -312,6 +312,100 @@ def test_stop_server_survives_a_process_that_is_already_gone(monkeypatch):
 # --- one listener, never two --------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not hasattr(os, "waitid"), reason="requires POSIX zombie processes")
+@pytest.mark.parametrize("tracked", [False, True])
+@pytest.mark.parametrize("exited", [False, True])
+def test_only_a_live_recorder_blocks_the_next_recording(monkeypatch, tracked, exited):
+    import subprocess
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "pass" if exited else "import time; time.sleep(60)"]
+    )
+    try:
+        if exited:
+            os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT)
+        monkeypatch.setattr(speech, "_PROC", proc if tracked else None)
+        rec = speech.Recording(proc.pid, Path("clip.wav"), time.time())
+        state = dictate.state_path()
+        state.write_text(
+            json.dumps({"pid": rec.pid, "wav": str(rec.wav), "started_at": rec.started_at})
+        )
+        assert speech.current(state) == (None if exited else rec)
+        assert state.exists() is not exited
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+
+@pytest.mark.skipif(not hasattr(os, "waitid"), reason="requires POSIX zombie processes")
+def test_stopping_a_reaped_recorder_preserves_audio_without_signalling_its_old_pid(monkeypatch):
+    import subprocess
+
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT)
+        monkeypatch.setattr(speech, "_PROC", proc)
+        state = dictate.state_path()
+        wav = state.with_suffix(".wav")
+        wav.write_bytes(b"recorded audio")
+        rec = speech.Recording(proc.pid, wav, time.time())
+        state.write_text(
+            json.dumps({"pid": rec.pid, "wav": str(wav), "started_at": rec.started_at})
+        )
+        assert speech.current(state) is None
+
+        def refuse_signal(*_args):
+            pytest.fail("a reaped recorder's PID may belong to another process now")
+
+        monkeypatch.setattr(speech.os, "kill", refuse_signal)
+        assert speech.stop(rec, state=state) == wav
+    finally:
+        proc.wait()
+
+
+@pytest.mark.parametrize("alive", [False, True])
+def test_recording_liveness_without_posix_wait_flags(monkeypatch, alive):
+    monkeypatch.delattr(speech.os, "WNOHANG", raising=False)
+    monkeypatch.setattr(speech, "_PROC", None)
+
+    def probe(pid, sig):
+        assert (pid, sig) == (4242, 0)
+        if not alive:
+            raise ProcessLookupError
+
+    monkeypatch.setattr(speech.os, "kill", probe)
+    state = dictate.state_path()
+    state.write_text(json.dumps({"pid": 4242, "wav": "clip.wav", "started_at": 0}))
+    assert (speech.current(state) is not None) is alive
+
+
+@pytest.mark.parametrize("pid", [-1, 0])
+def test_invalid_recording_pids_never_probe_other_processes(monkeypatch, pid):
+    def refuse_probe(_pid):
+        pytest.fail("invalid PIDs must not reach waitpid or kill")
+
+    monkeypatch.setattr(speech, "_exited", refuse_probe)
+    state = dictate.state_path()
+    state.write_text(json.dumps({"pid": pid, "wav": "clip.wav", "started_at": 0}))
+    assert speech.current(state) is None
+    assert not state.exists()
+
+
+def test_clearing_a_stale_recording_preserves_a_newer_marker(monkeypatch):
+    state = dictate.state_path()
+    state.write_text(json.dumps({"pid": 4242, "wav": "old.wav", "started_at": 0}))
+    newer = {"pid": 4243, "wav": "new.wav", "started_at": 1}
+
+    def exited(_pid):
+        state.write_text(json.dumps(newer))
+        return True
+
+    monkeypatch.setattr(speech, "_exited", exited)
+    assert speech.current(state) is None
+    assert json.loads(state.read_text()) == newer
+
+
 def test_a_second_listener_is_refused_and_told_who_has_the_key():
     # The doubled-sound bug: the login agent is live and you run `murmurflow listen` to watch it.
     # A real second process holds the lock, the way the login agent would.
@@ -2091,25 +2185,119 @@ def test_a_restart_that_fails_stops_the_install_rather_than_half_doing_it(tmp_pa
     assert exit_code.value.code == 1
 
 
-def test_an_update_pulls_the_checkout_before_it_reinstalls_it(tmp_path, monkeypatch):
-    """Two PRs merged, `update` said OK, and the listener ran last week's code: nothing had pulled."""
-    checkout = tmp_path / "murmurflow"
-    (checkout / ".git").mkdir(parents=True)
-    ran: list[list[str]] = []
+def test_a_git_install_follows_the_remote_default_without_touching_development(
+    tmp_path, monkeypatch
+):
+    import subprocess
 
-    def _run(cmd, **_k):
-        ran.append(cmd)
-        return types.SimpleNamespace(returncode=1 if "pull" in cmd else 0, stderr="diverged")
+    checkout = tmp_path / "developer"
+    checkout.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "unfinished-feature", str(checkout)], check=True)
+    origin = (tmp_path / "releases.git").as_uri()
+    subprocess.run(["git", "-C", str(checkout), "remote", "add", "origin", origin], check=True)
+    work = checkout / "work.txt"
+    work.write_text("unfinished work")
+    before = (checkout / ".git" / "HEAD").read_bytes()
+    resolve = cli.speech.resolve_bin
+    monkeypatch.setattr(
+        cli.speech, "resolve_bin", lambda name: "/fake/uv" if name == "uv" else resolve(name)
+    )
+    receipt = _receipt_at(
+        tmp_path, f'[tool]\nrequirements = [{{ name = "murmurflow", directory = "{checkout}" }}]\n'
+    )
+    expected = [
+        "/fake/uv",
+        "tool",
+        "install",
+        "--force",
+        "--python",
+        "3.13",
+        "--refresh-package",
+        "murmurflow",
+        "git+" + origin,
+    ]
+    original = subprocess.run
+    commands = []
 
-    monkeypatch.setattr(cli.subprocess, "run", _run)
-    monkeypatch.setattr(cli.speech, "resolve_bin", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(cli, "_receipt", lambda: tmp_path / "uv-receipt.toml")
-    monkeypatch.setattr(cli, "_update_command", lambda _r: ["uv", "tool", "install", str(checkout)])
-    monkeypatch.setattr(cli.os, "execv", lambda *_a: None)
+    def run(command, **kwargs):
+        commands.append(command)
+        if command[0] == "/fake/uv":
+            return types.SimpleNamespace(returncode=0)
+        return original(command, **kwargs)
+
+    def restart(*_args):
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli.subprocess, "run", run)
+    monkeypatch.setattr(cli, "_receipt", lambda: receipt)
+    monkeypatch.setattr(cli.os, "execv", restart)
     monkeypatch.delenv(cli._RESYNCED, raising=False)
-    cli._update()
-    assert ran[0] == ["/bin/git", "-C", str(checkout), "pull", "--ff-only", "--quiet"]
-    assert ran[1] == ["uv", "tool", "install", str(checkout)], "a pull that fails never blocks"
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "wrong-repository"))
+    with pytest.raises(SystemExit) as exited:
+        cli._update()
+    assert exited.value.code == 0
+    assert commands[-1] == expected
+    assert len(commands) == 2, "updates must not pull or switch the developer checkout"
+    assert (checkout / ".git" / "HEAD").read_bytes() == before
+    assert work.read_text() == "unfinished work"
+
+
+@pytest.mark.parametrize(
+    "origin, expected",
+    [
+        ("https://example.invalid/murmurflow.git", "git+https://example.invalid/murmurflow.git"),
+        ("git@example.invalid:murmurflow.git", "git+ssh://git@example.invalid/murmurflow.git"),
+        ("git@[::1]:murmurflow.git", "git+ssh://git@[::1]/murmurflow.git"),
+        ("../releases.git", None),
+        ("../team:a/releases.git", None),
+    ],
+)
+def test_git_origin_spellings_stay_valid_package_sources(tmp_path, monkeypatch, origin, expected):
+    checkout = tmp_path / "developer"
+    (checkout / ".git").mkdir(parents=True)
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *_a, **_k: types.SimpleNamespace(returncode=0, stdout=origin)
+    )
+    receipt = _receipt_at(
+        tmp_path, f'[tool]\nrequirements = [{{ name = "murmurflow", directory = "{checkout}" }}]\n'
+    )
+    assert cli._update_command(receipt)[-1] == (
+        expected or "git+" + (checkout / origin).resolve().as_uri()
+    )
+
+
+def test_an_editable_install_keeps_its_explicit_development_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda name: f"/bin/{name}")
+    receipt = _receipt_at(
+        tmp_path, f'[tool]\nrequirements = [{{ name = "murmurflow", editable = "{tmp_path}" }}]\n'
+    )
+    assert cli._update_command(receipt) == [
+        "/bin/uv",
+        "tool",
+        "install",
+        "--force",
+        "--python",
+        "3.13",
+        "--editable",
+        str(tmp_path),
+    ]
+
+
+def test_an_unknown_update_source_cannot_report_success(tmp_path, monkeypatch, capsys):
+    checkout = tmp_path / "developer"
+    (checkout / ".git").mkdir(parents=True)
+    receipt = _receipt_at(
+        tmp_path, f'[tool]\nrequirements = [{{ name = "murmurflow", directory = "{checkout}" }}]\n'
+    )
+    monkeypatch.setattr(cli, "_receipt", lambda: receipt)
+    monkeypatch.setattr(cli.speech, "resolve_bin", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *_a, **_k: types.SimpleNamespace(returncode=1, stdout="")
+    )
+    monkeypatch.delenv(cli._RESYNCED, raising=False)
+    assert cli._update() is False
+    assert "installed version is unchanged" in capsys.readouterr().out
 
 
 def test_the_re_executed_child_never_updates_again(tmp_path, monkeypatch):

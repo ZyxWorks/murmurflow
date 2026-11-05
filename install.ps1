@@ -81,9 +81,8 @@ Say "Installing murmurflow"
 uv tool install --force --python 3.13 $Source
 Check "uv tool install"
 uv tool update-shell 2>&1 | Out-Null
-# `murmurflow install` re-installs the package from its source before it does anything else, so
-# that a pull plus `murmurflow install` is the whole update. We have just done that, so tell it
-# not to do it twice.
+# `murmurflow install` refreshes the installed package first. It was just installed here,
+# so do not download and install it a second time.
 $env:MURMURFLOW_RESYNCED = "1"
 
 $mf = (Get-Command murmurflow -ErrorAction SilentlyContinue)

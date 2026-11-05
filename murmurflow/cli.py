@@ -12,6 +12,7 @@ import argparse
 import contextlib
 import difflib
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -95,21 +96,28 @@ def _download(name: str) -> int:
 
 # --- installing IS updating ---------------------------------------------------------------------
 #
-# `git pull && murmurflow install` has to be the whole update, and it was not.
-#
-# The listener does not run the checkout. `uv tool install` made a COPY of the package, launchd
-# runs that copy, and a `git pull` therefore changed a directory the running program never reads.
-# Every fix landed in a repo, nothing changed on the machine, and there was no error anywhere to
-# say so — the tool simply kept behaving like last week. The old cure was a four-command chain
-# nobody should have to remember, and the second command in it is the one everybody forgot.
-#
-# So `install` re-installs the package from wherever it came from first, and then re-executes
-# itself out of the new copy to do the actual install. Re-exec rather than carrying on in-process
-# because `uv tool install --force` replaces the directory this process is importing FROM: modules
-# already loaded are fine, but the next lazy import would open a path that no longer exists.
+# uv owns the installed copy. Ordinary git installs follow the remote default branch without
+# changing a developer checkout; editable installs deliberately keep their local source.
+# Re-exec after reinstalling: uv replaces the package directory, so old modules must not keep running.
 
 #: Set on the re-executed child, so the update can never loop.
 _RESYNCED = "MURMURFLOW_RESYNCED"
+
+
+def _update_env() -> dict[str, str]:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        not in {
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        }
+    }
 
 
 def _receipt() -> Path | None:
@@ -129,8 +137,8 @@ def _receipt() -> Path | None:
 def _update_command(receipt: Path) -> list[str] | None:
     """The ``uv`` argv that brings this install up to date with its source, or ``None``.
 
-    A LOCAL directory is re-installed from that directory, because that is what a `git pull` just
-    changed. Anything else (a git URL, PyPI) is an `upgrade`, which re-resolves it for itself.
+    A local git install follows its origin default branch without changing the checkout.
+    Editable installs keep following their explicit development directory.
     """
     uv = speech.resolve_bin("uv")
     if not uv:
@@ -145,39 +153,38 @@ def _update_command(receipt: Path) -> list[str] | None:
             continue
         source = str(requirement.get("directory") or requirement.get("editable") or "")
         if source and Path(source).is_dir():
-            return [uv, "tool", "install", "--force", "--python", "3.13", source]
+            command = [uv, "tool", "install", "--force", "--python", "3.13"]
+            if requirement.get("editable"):
+                return [*command, "--editable", source]
+            checkout = Path(source)
+            if (checkout / ".git").exists():
+                git = speech.resolve_bin("git")
+                if not git:
+                    return None
+                try:
+                    remote = subprocess.run(
+                        [git, "-C", source, "remote", "get-url", "origin"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        check=False,
+                        env=_update_env(),
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    return None
+                origin = remote.stdout.strip()
+                if remote.returncode != 0 or not origin:
+                    return None
+                if "://" not in origin:
+                    scp = re.fullmatch(r"((?:[^/@:]+@)?(?:\[[^\]]+\]|[^/:]+)):(.+)", origin)
+                    if scp and not Path(origin).is_absolute():
+                        origin = f"ssh://{scp[1]}/{scp[2]}"
+                    else:
+                        origin = (checkout / origin).resolve().as_uri()
+                return [*command, "--refresh-package", "murmurflow", "git+" + origin]
+            return [*command, source]
         return [uv, "tool", "upgrade", "murmurflow"]
     return None
-
-
-def _pull(checkout: Path) -> None:
-    """Fast-forward a git checkout to its upstream before it is re-installed. Never blocks.
-
-    `update` promised "the newest code" and re-installed the checkout exactly as it sat on disk:
-    two PRs merged on GitHub, `murmurflow update` said "[OK] code updated", and the listener kept
-    running last week's code, because nothing had pulled. ``--ff-only`` so local work is never
-    merged or overwritten; a checkout that cannot fast-forward says so and installs what it has.
-    """
-    git = speech.resolve_bin("git")
-    if not git or not (checkout / ".git").exists():
-        return
-    try:
-        done = subprocess.run(
-            [git, "-C", str(checkout), "pull", "--ff-only", "--quiet"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        _out(f"[!] could not pull the newest code ({error}) — installing the checkout as it is")
-        return
-    if done.returncode != 0:
-        detail = (done.stderr or "").strip().splitlines()
-        _out(
-            f"[!] could not pull the newest code ({detail[-1] if detail else 'unknown error'})"
-            " — installing the checkout as it is"
-        )
 
 
 def _update() -> bool:
@@ -186,19 +193,20 @@ def _update() -> bool:
     Never blocks the install: a machine with no ``uv``, a source that has gone away, a network that
     is down — all of them print a line and carry on with the copy that is already here. An update
     that could not run is an inconvenience; an ``install`` that refuses to run is a dead tool.
-    False only when an update was tried and failed, so the ``update`` verb can say so.
+    False when the update cannot be prepared or applied, so the ``update`` verb can say so.
     """
     receipt = None if os.environ.get(_RESYNCED) else _receipt()
     if receipt is None:
         return True
     command = _update_command(receipt)
     if command is None:
-        return True
+        _out("[!] could not determine the update source; the installed version is unchanged")
+        return False
     _out("updating the installed copy from its source...")
-    if Path(command[-1]).is_dir():
-        _pull(Path(command[-1]))
     try:
-        done = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        done = subprocess.run(
+            command, capture_output=True, text=True, timeout=300, check=False, env=_update_env()
+        )
     except (OSError, subprocess.SubprocessError) as error:
         _out(f"[!] could not update it ({error}) — installing the copy already here")
         return False
@@ -244,7 +252,7 @@ def _install() -> int:
 
     `install` means the same as in agent-office: put it on the machine, start
     nothing — `on` starts it. A listener that is ALREADY on comes back on the new code, so
-    `git pull && murmurflow install` is still a whole update; a first install ends by naming `on`.
+    the release source is independent of the development checkout; a first install names `on`.
     """
     _update()  # may re-exec; anything after this line runs in the NEW copy
     if not _ready():

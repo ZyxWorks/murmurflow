@@ -312,6 +312,32 @@ def test_stop_server_survives_a_process_that_is_already_gone(monkeypatch):
 # --- one listener, never two --------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not hasattr(os, "WNOWAIT"), reason="requires POSIX zombie processes")
+@pytest.mark.parametrize("tracked", [False, True])
+@pytest.mark.parametrize("exited", [False, True])
+def test_only_a_live_recorder_blocks_the_next_recording(monkeypatch, tracked, exited):
+    import subprocess
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "pass" if exited else "import time; time.sleep(60)"]
+    )
+    try:
+        if exited:
+            os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT)
+        monkeypatch.setattr(speech, "_PROC", proc if tracked else None)
+        rec = speech.Recording(proc.pid, Path("clip.wav"), time.time())
+        state = dictate.state_path()
+        state.write_text(
+            json.dumps({"pid": rec.pid, "wav": str(rec.wav), "started_at": rec.started_at})
+        )
+        assert speech.current(state) == (None if exited else rec)
+        assert state.exists() is not exited
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+
 def test_a_second_listener_is_refused_and_told_who_has_the_key():
     # The doubled-sound bug: the login agent is live and you run `murmurflow listen` to watch it.
     # A real second process holds the lock, the way the login agent would.

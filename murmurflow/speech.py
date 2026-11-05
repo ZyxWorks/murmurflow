@@ -990,9 +990,7 @@ def current(state: Path) -> Recording | None:
         rec = Recording(int(raw["pid"]), Path(raw["wav"]), float(raw["started_at"]))
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    try:
-        os.kill(rec.pid, 0)  # signal 0 = liveness probe, kills nothing
-    except (OSError, ProcessLookupError):
+    if _exited(rec.pid):
         path.unlink(missing_ok=True)
         return None
     return rec

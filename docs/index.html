@@ -5,19 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MurmurFlow: write at the speed you talk</title>
 <meta name="description" content="Dictation that runs on your own machine. Double-tap a key, talk, tap again: the words land at your cursor, in any app. Free and open source, no account, no subscription.">
-<link rel="icon" href="ui/brand/murmurflow-favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/murmurflow/ui/brand/murmurflow-favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#FFFFFF">
 <meta name="color-scheme" content="light">
 <meta property="og:title" content="MurmurFlow: write at the speed you talk">
 <meta property="og:description" content="Double-tap a key, talk, tap again. The words land at your cursor, in any app. Runs on your machine. Free.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://zyxworks.github.io/murmurflow/">
-<meta property="og:image" content="https://zyxworks.github.io/murmurflow/media/og.png">
+<meta property="og:url" content="https://zyx.works/murmurflow/">
+<meta property="og:image" content="https://zyx.works/murmurflow/media/og.png">
 <meta property="og:image:alt" content="The MurmurFlow mark and the line: Write at the speed you talk.">
 <meta name="twitter:card" content="summary_large_image">
 <!-- Indexed since the Impressum went live at zyx.works/legal/. The robots.txt that governs this
      host lives in the ZyxWorks site (zyxworks.github.io) and keeps the named AI crawlers out. -->
-<link rel="canonical" href="https://zyxworks.github.io/murmurflow/">
+<link rel="canonical" href="/murmurflow/">
 <meta name="ai-content-declaration" content="noai, noimageai">
 <!--
   One page plus ui/, a copy of @zyxworks/ui 1.1: no build step and no request to another host,
@@ -29,14 +29,14 @@
   `zyx-ui lint docs/index.html` finds nothing. Light only, so the page never sets data-theme
   (except on the drawing of the dark waveform pill, which is dark in the product too).
 -->
-<link rel="preload" href="ui/fonts/geist-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="ui/zyx/fonts.css">
-<link rel="stylesheet" href="ui/zyx/zyx-ui.css">
+<link rel="preload" href="/murmurflow/ui/fonts/geist-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/murmurflow/ui/zyx/fonts.css">
+<link rel="stylesheet" href="/murmurflow/ui/zyx/zyx-ui.css">
 <script>document.documentElement.classList.add("mf-js");</script>
-<script src="ui/icons.js" defer></script>
-<script src="ui/reveal.js" defer></script>
-<script src="ui/copy.js" defer></script>
-<script src="ui/seg.js" defer></script>
+<script src="/murmurflow/ui/icons.js" defer></script>
+<script src="/murmurflow/ui/reveal.js" defer></script>
+<script src="/murmurflow/ui/copy.js" defer></script>
+<script src="/murmurflow/ui/seg.js" defer></script>
 <style>
   body { margin: 0; background: var(--z-bg); color: var(--z-text); }
 
@@ -144,9 +144,9 @@
     <div class="zyx-wrap">
       <figure class="mf-demo">
         <div class="zyx-video">
-          <video controls muted playsinline preload="none" poster="media/demo-poster.png"
+          <video controls muted playsinline preload="none" poster="/murmurflow/media/demo-poster.png"
                  aria-label="Double-tap Control, say a sentence, tap again: the text lands at the cursor.">
-            <source src="media/demo.mp4" type="video/mp4"></video>
+            <source src="/murmurflow/media/demo.mp4" type="video/mp4"></video>
         </div>
         <figcaption class="zyx-example-cap">On a Mac, a small waveform sits at the bottom of the screen while the microphone is open. It never takes the focus.</figcaption>
       </figure>

@@ -15,11 +15,9 @@
 <meta property="og:image" content="https://zyxworks.github.io/murmurflow/media/og.png">
 <meta property="og:image:alt" content="The MurmurFlow mark and the line: Write at the speed you talk.">
 <meta name="twitter:card" content="summary_large_image">
-<!-- Not listed anywhere: a visitor gets here by typing the URL or from the index. "noindex" is
-     what actually removes the page from a search index; robots.txt only stops the crawl, and the
-     one that governs this host lives in the ZyxWorks site. Lift this once there
-     is a proper Impressum. -->
-<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+<!-- Indexed since the Impressum went live at zyx.works/legal/. The robots.txt that governs this
+     host lives in the ZyxWorks site (zyxworks.github.io) and keeps AI crawlers out. -->
+<link rel="canonical" href="https://zyxworks.github.io/murmurflow/">
 <meta name="ai-content-declaration" content="noai, noimageai">
 <!--
   One page plus ui/, a copy of @zyxworks/ui 1.1: no build step and no request to another host,
@@ -64,17 +62,23 @@
     .mf-demo-band { padding-bottom: 56px; }
   }
   .mf-table td:first-child { width: 100%; }
+  .mf-meta { margin-top: 4px; }
+  .mf-two { max-width: 760px; }
+  .mf-two td:first-child { width: 12rem; white-space: nowrap; }
+  .mf-fixes { display: grid; gap: 12px; max-width: 68ch; margin: 24px 0 0; padding: 0; list-style: none; color: var(--z-text-2); line-height: var(--z-lead-read); }
+  .mf-fixes strong { color: var(--z-text); font-weight: var(--z-w-medium); }
 </style>
 </head>
 <body>
 <a class="zyx-skip" href="#main">Skip to the content</a>
 <header class="zyx-site-head">
   <div class="zyx-wrap">
-    <a class="zyx-lockup" href="https://zyx.works/en/open-source/"><svg class="zyx-mark" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 26V6M24 26L6.7 36M24 26L41.3 36"/></svg><span class="zyx-lockup-word">ZyxWorks</span></a>
+    <a class="zyx-lockup" href="https://zyxworks.github.io/" aria-label="ZyxWorks, all tools"><svg class="zyx-mark" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 26V6M24 26L6.7 36M24 26L41.3 36"/></svg><span class="zyx-lockup-word">ZyxWorks</span></a>
     <nav aria-label="Main">
       <ul class="zyx-site-nav">
         <li><a href="#how">How it works</a></li>
-        <li><a href="#privacy">Privacy</a></li>
+        <li><a href="#needs">Requirements</a></li>
+        <li><a href="#fix">Fix it</a></li>
         <li><a href="#faq">Questions</a></li>
       </ul>
     </nav>
@@ -108,6 +112,7 @@
           <a class="zyx-btn zyx-btn-main zyx-btn-lg" href="https://github.com/ZyxWorks/murmurflow">View the source on GitHub</a>
         </div>
         <p class="zyx-hero-note"><span class="mf-where">Paste it into Terminal on a Mac, PowerShell on Windows.</span> Free, MIT licence. <a class="zyx-link mf-script mf-nowrap" href="https://github.com/ZyxWorks/murmurflow/blob/main/install.sh">Read the script first</a>.</p>
+        <p class="zyx-hero-note mf-meta">Tested on macOS 26 on Apple silicon. Works on Windows. Linux is not supported. <span class="mf-nowrap">Version 0.1.0</span> · <a class="zyx-link mf-nowrap" href="https://github.com/ZyxWorks/murmurflow/releases">Release notes</a></p>
       </div>
       <script>
       // The OS switch: seg.js shows the chosen command and hides the other. This only shows the
@@ -224,6 +229,53 @@
     </div>
   </section>
 
+  <section class="zyx-band" id="needs" data-zyx-reveal aria-labelledby="needs-t">
+    <div class="zyx-wrap">
+      <h2 class="zyx-h2" id="needs-t">Requirements</h2>
+      <p class="zyx-band-lead">The install line brings everything else: Homebrew on a Mac, whisper.cpp, ffmpeg, uv and its own Python.</p>
+      <div class="zyx-band-body">
+        <div class="zyx-table-wrap zyx-table-phone-list">
+          <table class="zyx-table mf-two">
+            <thead><tr><th scope="col">What</th><th scope="col">State</th></tr></thead>
+            <tbody>
+              <tr><td data-main>macOS</td><td data-wide>Tested on macOS 26 on Apple silicon. Asks once for Microphone and Accessibility.</td></tr>
+              <tr><td data-main>Windows</td><td data-wide>Works, with no permission to grant. The <code>fn</code> key cannot be the trigger, and the clipboard is restored as text only.</td></tr>
+              <tr><td data-main>Linux</td><td data-wide>Not supported. Wayland has no global hotkey API.</td></tr>
+              <tr><td data-main>Disk</td><td data-wide>About 1.6 GB for the speech model, downloaded once.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="zyx-band" id="fix" data-zyx-reveal aria-labelledby="fix-t">
+    <div class="zyx-wrap">
+      <h2 class="zyx-h2" id="fix-t">Fix it</h2>
+      <p class="zyx-band-lead">Dictation fails in four ways: the key is not seen, the microphone is not heard, the model is not found, or the text is not typed. Two commands tell them apart.</p>
+      <div class="zyx-band-body">
+        <div class="zyx-table-wrap zyx-table-phone-list">
+          <table class="zyx-table mf-two">
+            <thead><tr><th scope="col">Run</th><th scope="col">What it does</th></tr></thead>
+            <tbody>
+              <tr><td data-main><code>murmurflow doctor</code></td><td data-wide>Says what is missing, and the one command that fixes each thing.</td></tr>
+              <tr><td data-main><code>murmurflow keytest</code></td><td data-wide>Shows whether this Mac sees your trigger key at all.</td></tr>
+              <tr><td data-main><code>murmurflow update</code></td><td data-wide>Gets the newest code. Restarts dictation only if it is on.</td></tr>
+              <tr><td data-main><code>murmurflow uninstall</code></td><td data-wide>Turns dictation off and removes MurmurFlow.app.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="mf-fixes">
+          <li><strong>Text is transcribed but nothing appears.</strong> Accessibility is the reason nine times out of ten. <code>murmurflow doctor</code> checks it.</li>
+          <li><strong>Every sentence is typed twice.</strong> Two listeners are on the same key. Switch the other one off, or let it borrow the key with <code>murmurflow pause</code>.</li>
+          <li><strong>Apple's microphone panel opens too.</strong> Turn off macOS's own shortcut: System Settings &gt; Keyboard &gt; Dictation &gt; Shortcut &gt; Off.</li>
+          <li><strong><code>murmurflow</code> is not found.</strong> <code>uv tool update-shell</code> puts it on your <code>PATH</code> for the next terminal.</li>
+        </ul>
+      </div>
+      <p class="mf-after"><a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow#commands">Every command, in the README</a></p>
+    </div>
+  </section>
+
   <section class="zyx-band" id="faq" data-zyx-reveal aria-labelledby="faq-t">
     <div class="zyx-wrap-narrow">
       <h2 class="zyx-h2" id="faq-t">Questions</h2>
@@ -234,7 +286,8 @@
         <details><summary>Does it change what I said?</summary><div class="zyx-faq-a">No, with one exception: a closing "Thank you.", "Thanks." or "Danke." after a finished sentence is dropped, because whisper invents them in silence. If you really said it, it goes too. Nothing else is removed, reworded or reordered.</div></details>
         <details><summary>What is different on Windows?</summary><div class="zyx-faq-a">There is no permission to grant, the <code>fn</code> key cannot be a trigger, and the clipboard is restored as text only. Typing into a window that runs as Administrator needs MurmurFlow to run as Administrator too.</div></details>
         <details><summary>Can my own voice agent share the key?</summary><div class="zyx-faq-a">Yes. <code>murmurflow pause --who "my agent"</code> lends the key for a while, and the pause ends by itself. While dictation is on, the warm whisper.cpp server answers on <code>127.0.0.1:8479</code>.</div></details>
-        <details><summary>How do I stop or remove it?</summary><div class="zyx-faq-a"><code>murmurflow off</code> turns dictation off until you turn it on again. <code>murmurflow uninstall</code> removes it.</div></details>
+        <details><summary>How do I stop or remove it?</summary><div class="zyx-faq-a"><code>murmurflow off</code> turns dictation off until you turn it on again. <code>murmurflow uninstall</code> turns it off and removes MurmurFlow.app. <code>uv tool uninstall murmurflow</code> then removes the program.</div></details>
+        <details><summary>Which version do I get?</summary><div class="zyx-faq-a">The install line and <code>murmurflow update</code> take the newest code on <code>main</code>. The last tagged release is 0.1.0, and <code>main</code> has moved on since. <a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow/releases">Release notes</a> and <a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow/commits/main/">every change since</a> are on GitHub.</div></details>
       </div>
     </div>
   </section>
@@ -252,8 +305,8 @@
   <div class="zyx-wrap">
     <div class="zyx-site-foot-cols">
       <div class="zyx-site-foot-brand"><a class="zyx-lockup" href="https://zyx.works/en/"><svg class="zyx-mark" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 26V6M24 26L6.7 36M24 26L41.3 36"/></svg><span class="zyx-lockup-word">ZyxWorks</span></a><p>MurmurFlow is one of the tools we built for ourselves and give away.</p></div>
-      <div><h2>Product</h2><ul><li><a href="https://github.com/ZyxWorks/murmurflow">Source</a></li><li><a href="https://github.com/ZyxWorks/murmurflow#readme">Docs</a></li><li><a href="https://github.com/ZyxWorks/murmurflow/issues">Issues</a></li></ul></div>
-      <div><h2>ZyxWorks</h2><ul><li><a href="https://zyx.works/en/open-source/">Other tools</a></li><li><a href="https://zyx.works/en/">For companies</a></li></ul></div>
+      <div><h2>Product</h2><ul><li><a href="https://github.com/ZyxWorks/murmurflow">Source</a></li><li><a href="https://github.com/ZyxWorks/murmurflow#readme">Docs</a></li><li><a href="https://github.com/ZyxWorks/murmurflow/releases">Release notes</a></li><li><a href="https://github.com/ZyxWorks/murmurflow/issues">Issues</a></li></ul></div>
+      <div><h2>ZyxWorks</h2><ul><li><a href="https://zyxworks.github.io/">All our tools</a></li><li><a href="https://zyx.works/en/">Zyx, for companies</a></li></ul></div>
     </div>
     <div class="zyx-site-foot-legal"><span>© <span id="year">2026</span> ZyxWorks</span><a href="https://github.com/ZyxWorks/murmurflow/blob/main/LICENSE">MIT licence</a><a href="https://zyx.works/en/legal/#privacy">Privacy</a><a href="https://zyx.works/en/legal/#imprint">Imprint</a></div>
   </div>

@@ -17,7 +17,7 @@ A free, local alternative to the paid cloud dictation apps. No account, no subsc
 no telemetry, and no Python dependencies at all. **macOS and Windows.**
 
 [**The product page**](https://zyxworks.github.io/murmurflow/) ·
-[Our other tools](https://zyx.works/en/open-source/) ·
+[Our other tools](https://zyxworks.github.io/) ·
 [What we do for companies](https://zyx.works/en/)
 
 **macOS**, paste into Terminal:
@@ -526,7 +526,7 @@ MurmurFlow is made by **[ZyxWorks](https://github.com/ZyxWorks)**, the engineeri
 The other one is **[Agent Office](https://zyxworks.github.io/agent-office/)**: several coding agents side by side in herdr, each in its own git worktree, and the sidebar shows which one waits for you.
 
 **Product:** [page](https://zyxworks.github.io/murmurflow/) ·
-[all our tools](https://zyx.works/en/open-source/) ·
+[all our tools](https://zyxworks.github.io/) ·
 [issues](https://github.com/ZyxWorks/murmurflow/issues)
 
 **ZyxWorks:** [Zyx, our product](https://zyx.works/en/) ·

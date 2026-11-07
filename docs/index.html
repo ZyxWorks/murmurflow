@@ -16,7 +16,7 @@
 <meta property="og:image:alt" content="The MurmurFlow mark and the line: Write at the speed you talk.">
 <meta name="twitter:card" content="summary_large_image">
 <!-- Indexed since the Impressum went live at zyx.works/legal/. The robots.txt that governs this
-     host lives in the ZyxWorks site (zyxworks.github.io) and keeps AI crawlers out. -->
+     host lives in the ZyxWorks site (zyxworks.github.io) and keeps the named AI crawlers out. -->
 <link rel="canonical" href="https://zyxworks.github.io/murmurflow/">
 <meta name="ai-content-declaration" content="noai, noimageai">
 <!--
@@ -112,7 +112,7 @@
           <a class="zyx-btn zyx-btn-main zyx-btn-lg" href="https://github.com/ZyxWorks/murmurflow">View the source on GitHub</a>
         </div>
         <p class="zyx-hero-note"><span class="mf-where">Paste it into Terminal on a Mac, PowerShell on Windows.</span> Free, MIT licence. <a class="zyx-link mf-script mf-nowrap" href="https://github.com/ZyxWorks/murmurflow/blob/main/install.sh">Read the script first</a>.</p>
-        <p class="zyx-hero-note mf-meta">Tested on macOS 26 on Apple silicon. Works on Windows. Linux is not supported. <span class="mf-nowrap">Version 0.1.0</span> · <a class="zyx-link mf-nowrap" href="https://github.com/ZyxWorks/murmurflow/releases">Release notes</a></p>
+        <p class="zyx-hero-note mf-meta">Tested on macOS 26 on Apple silicon. Works on Windows. Linux is not supported. Last release 0.1.0; the install line takes the newest <code>main</code>. <a class="zyx-link mf-nowrap" href="https://github.com/ZyxWorks/murmurflow/releases">Release notes</a></p>
       </div>
       <script>
       // The OS switch: seg.js shows the chosen command and hides the other. This only shows the
@@ -261,7 +261,7 @@
               <tr><td data-main><code>murmurflow doctor</code></td><td data-wide>Says what is missing, and the one command that fixes each thing.</td></tr>
               <tr><td data-main><code>murmurflow keytest</code></td><td data-wide>Shows whether this Mac sees your trigger key at all.</td></tr>
               <tr><td data-main><code>murmurflow update</code></td><td data-wide>Gets the newest code. Restarts dictation only if it is on.</td></tr>
-              <tr><td data-main><code>murmurflow uninstall</code></td><td data-wide>Turns dictation off and removes MurmurFlow.app.</td></tr>
+              <tr><td data-main><code>murmurflow uninstall</code></td><td data-wide>Turns dictation off, and on a Mac removes MurmurFlow.app.</td></tr>
             </tbody>
           </table>
         </div>
@@ -286,7 +286,7 @@
         <details><summary>Does it change what I said?</summary><div class="zyx-faq-a">No, with one exception: a closing "Thank you.", "Thanks." or "Danke." after a finished sentence is dropped, because whisper invents them in silence. If you really said it, it goes too. Nothing else is removed, reworded or reordered.</div></details>
         <details><summary>What is different on Windows?</summary><div class="zyx-faq-a">There is no permission to grant, the <code>fn</code> key cannot be a trigger, and the clipboard is restored as text only. Typing into a window that runs as Administrator needs MurmurFlow to run as Administrator too.</div></details>
         <details><summary>Can my own voice agent share the key?</summary><div class="zyx-faq-a">Yes. <code>murmurflow pause --who "my agent"</code> lends the key for a while, and the pause ends by itself. While dictation is on, the warm whisper.cpp server answers on <code>127.0.0.1:8479</code>.</div></details>
-        <details><summary>How do I stop or remove it?</summary><div class="zyx-faq-a"><code>murmurflow off</code> turns dictation off until you turn it on again. <code>murmurflow uninstall</code> turns it off and removes MurmurFlow.app. <code>uv tool uninstall murmurflow</code> then removes the program.</div></details>
+        <details><summary>How do I stop or remove it?</summary><div class="zyx-faq-a"><code>murmurflow off</code> turns dictation off until you turn it on again. <code>murmurflow uninstall</code> turns it off, and on a Mac removes MurmurFlow.app. <code>uv tool uninstall murmurflow</code> then removes the program. Delete <code>~/.murmurflow</code> to remove the speech model (1.6 GB), your settings and the log. On Windows, also delete <code>%LOCALAPPDATA%\MurmurFlow\bin</code>, where the installer put whisper.cpp.</div></details>
         <details><summary>Which version do I get?</summary><div class="zyx-faq-a">The install line and <code>murmurflow update</code> take the newest code on <code>main</code>. The last tagged release is 0.1.0, and <code>main</code> has moved on since. <a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow/releases">Release notes</a> and <a class="zyx-link" href="https://github.com/ZyxWorks/murmurflow/commits/main/">every change since</a> are on GitHub.</div></details>
       </div>
     </div>

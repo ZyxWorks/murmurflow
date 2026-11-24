@@ -75,10 +75,10 @@
     @view-transition { navigation: auto; }
     ::view-transition-group(root) { animation-duration: var(--z-d-dialog); animation-timing-function: var(--z-ease); }
   }
-  /* A heading breaks a word only when it is a long compound (13 letters or more), at a real
-     hyphenation point, with 6 letters before and 7 after the break; short words never split. A word
-     too long for the line still wraps instead of running out of the frame. */
-  :where(h1, h2, h3) { hyphenate-limit-chars: 13 6 7; -webkit-hyphenate-limit-before: 6; -webkit-hyphenate-limit-after: 7; overflow-wrap: break-word; }
+  /* A closing question stays [open] until its height has shrunk (the fold script below) and carries
+     data-closing meanwhile: it shows the closed state at once, so the chevron turns back as it starts. */
+  /* zyx-ui-allow: library gap, filed with the library */
+  .zyx-faq details[data-closing] > summary::after { rotate: none; }
 </style>
 <!-- Hovering a link to another page on zyxworks.github.io prerenders it, so the step there is instant (Chromium; elsewhere a normal load). -->
 <script type="speculationrules">{"prerender":[{"where":{"href_matches":"/*"},"eagerness":"moderate"}]}</script>
@@ -349,14 +349,20 @@
     det.zyxBusy = true;
     var opening = !det.open, from = det.offsetHeight, to;
     if (opening) { det.open = true; to = det.offsetHeight; }
-    else { det.open = false; to = det.offsetHeight; det.open = true; }
+    else {
+      // Closed, a <details> is its summary plus its own padding and border. Measured without toggling
+      // it, so a close fires one toggle event, at the end; meanwhile data-closing styles it as closed.
+      var s = getComputedStyle(det);
+      to = sum.offsetHeight + ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"].reduce(function (n, k) { return n + (parseFloat(s[k]) || 0); }, 0);
+      det.setAttribute("data-closing", "");
+    }
     det.style.overflow = "hidden";
     var a = det.animate({ height: [from + "px", to + "px"] }, { duration: ms, easing: ease });
     if (opening) [].forEach.call(det.children, function (c) {
       if (c !== sum) c.animate({ opacity: [0, 1], transform: ["translateY(4px)", "none"] }, { duration: ms, easing: ease, fill: "backwards" });
     });
     a.onfinish = a.oncancel = function () {
-      if (!opening) det.open = false;
+      if (!opening) { det.removeAttribute("data-closing"); det.open = false; }
       det.style.overflow = "";
       det.zyxBusy = false;
     };

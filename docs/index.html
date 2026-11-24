@@ -67,7 +67,21 @@
   .mf-two td:first-child { width: 12rem; white-space: nowrap; }
   .mf-fixes { display: grid; gap: 12px; max-width: 68ch; margin: 24px 0 0; padding: 0; list-style: none; color: var(--z-text-2); line-height: var(--z-lead-read); }
   .mf-fixes strong { color: var(--z-text); font-weight: var(--z-w-medium); }
+  /* Page to page across zyxworks.github.io (the tools index, MurmurFlow, Agent Office): one short
+     cross-fade, the library's dialog time and ease, as a cross-document View Transition. No slide and
+     no rise of the whole page (brand rule). A browser without it just loads the page; with less motion
+     there is no transition. */
+  @media (prefers-reduced-motion: no-preference) {
+    @view-transition { navigation: auto; }
+    ::view-transition-group(root) { animation-duration: var(--z-d-dialog); animation-timing-function: var(--z-ease); }
+  }
+  /* A heading breaks a word only when it is a long compound (13 letters or more), at a real
+     hyphenation point, with 6 letters before and 7 after the break; short words never split. A word
+     too long for the line still wraps instead of running out of the frame. */
+  :where(h1, h2, h3) { hyphenate-limit-chars: 13 6 7; -webkit-hyphenate-limit-before: 6; -webkit-hyphenate-limit-after: 7; overflow-wrap: break-word; }
 </style>
+<!-- Hovering a link to another page on zyxworks.github.io prerenders it, so the step there is instant (Chromium; elsewhere a normal load). -->
+<script type="speculationrules">{"prerender":[{"where":{"href_matches":"/*"},"eagerness":"moderate"}]}</script>
 </head>
 <body>
 <a class="zyx-skip" href="#main">Skip to the content</a>
@@ -313,5 +327,41 @@
 </footer>
 
 <script>document.getElementById("year").textContent = new Date().getFullYear();</script>
+<script>
+// A <details> (the questions, a fold) opens and closes with a smooth height, and what opens fades in
+// with a 4 px rise: the brand's motion for a thing that appears. Times are the library's tokens
+// (--z-d-dialog, --z-ease), which are 0 with less motion, so then it simply snaps, as without script.
+// Web Animations with no fill: when they end, the row's height is its own CSS again.
+(function () {
+  if (!Element.prototype.animate) return;
+  document.addEventListener("click", function (e) {
+    var sum = e.target.closest && e.target.closest("summary"), det = sum && sum.parentElement;
+    if (!det || det.tagName !== "DETAILS" || det.querySelector(":scope > summary") !== sum) return;
+    var link = e.target.closest("a");
+    if (link && sum.contains(link)) return;
+    var root = getComputedStyle(document.documentElement);
+    // A minifier may write the token in seconds (".2s"), so read the unit.
+    var d = root.getPropertyValue("--z-d-dialog").trim(), ease = root.getPropertyValue("--z-ease").trim() || "ease-out";
+    var ms = (parseFloat(d) || 0) * (/[^m]s$/.test(d) ? 1000 : 1);
+    if (!ms || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    e.preventDefault();
+    if (det.zyxBusy) return;
+    det.zyxBusy = true;
+    var opening = !det.open, from = det.offsetHeight, to;
+    if (opening) { det.open = true; to = det.offsetHeight; }
+    else { det.open = false; to = det.offsetHeight; det.open = true; }
+    det.style.overflow = "hidden";
+    var a = det.animate({ height: [from + "px", to + "px"] }, { duration: ms, easing: ease });
+    if (opening) [].forEach.call(det.children, function (c) {
+      if (c !== sum) c.animate({ opacity: [0, 1], transform: ["translateY(4px)", "none"] }, { duration: ms, easing: ease, fill: "backwards" });
+    });
+    a.onfinish = a.oncancel = function () {
+      if (!opening) det.open = false;
+      det.style.overflow = "";
+      det.zyxBusy = false;
+    };
+  });
+})();
+</script>
 </body>
 </html>
